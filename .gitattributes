@@ -1,0 +1,9 @@
+# Handle line endings automatically for files detected as text.
+* text=auto
+
+# Ensure files that are meant to be text are normalized to LF.
+Dockerfile text eol=lf
+.dockerignore text eol=lf
+*.sh text eol=lf
+*.env text eol=lf
+*.yml text eol=lf
