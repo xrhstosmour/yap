@@ -15,44 +15,31 @@ This boilerplate provides a quick start for building high-performance, efficient
 - Pre-configured **Pytest** setup for testing.
 - Integration with **GitHub Actions** for CI/CD.
 
-## Prerequisites
-
-- Python 3.11+
-- Cookiecutter
-
 ## Installation
 
-First, ensure you have Cookiecutter installed. If not, you can install it using pip:
+First, navigate into your project directory:
 
-```bash
-pip install cookiecutter
+``` bash
+cd <project_name>
 ```
 
-Generate a new FastAPI project:
+Ensure you have `poetry` installed. If not, you can install it using pip:
 
-```bash
-cookiecutter gh:xrhstosmour/yap
+``` bash
+pip install poetry
 ```
 
-Navigate into your project directory:
+Install dependencies:
 
-```bash
-cd your_project_name
+``` bash
+poetry install
 ```
 
 ## Getting Started
 
 To get your FastAPI server running:
 
-1. Install dependencies:
-
-```bash
-poetry install
-```
-
-2. Start the Uvicorn server:
-
-```bash
+``` bash
 uvicorn app.main:app --reload
 ```
 
@@ -60,7 +47,7 @@ uvicorn app.main:app --reload
 
 Run tests using pytest:
 
-```bash
+``` bash
 pytest
 ```
 
@@ -68,7 +55,7 @@ pytest
 
 To build and run your application in a Docker container:
 
-```bash
+``` bash
 docker-compose up -d
 ```
 
