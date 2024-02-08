@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "{{cookiecutter.project_name}}"
+version = "0.0.1"
+description = "{{cookiecutter.project_description}}"
+authors = ["{{cookiecutter.author_name}} <{{cookiecutter.author_email}}>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "^0.109.2"
+pydantic = "^2.6.1"
+
+
+[tool.poetry.group.development.dependencies]
+pytest = "^8.0.0"
+alembic = "^1.13.1"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

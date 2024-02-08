@@ -1,0 +1,10 @@
+{
+    "recommendations": [
+        "ms-python.black-formatter",
+        "ms-python.vscode-pylance",
+        "ms-python.python",
+        "charliermarsh.ruff",
+        "SonarSource.sonarlint-vscode",
+        "mikestead.dotenv"
+    ]
+}
