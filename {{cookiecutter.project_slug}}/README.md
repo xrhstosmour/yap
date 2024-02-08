@@ -23,7 +23,7 @@ First, navigate into your project directory:
 cd <project_name>
 ```
 
-Ensure you have `poetry` installed. If not, you can install it using pip:
+Ensure you have `poetry` installed. If not, you can install it using `pip`:
 
 ``` bash
 pip install poetry

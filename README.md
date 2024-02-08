@@ -10,13 +10,13 @@ This boilerplate provides a quick start for building high-performance, efficient
 
 ## Installation
 
-First, ensure you have `Cookiecutter` installed. If not, you can install it using pip:
+First, ensure you have `Cookiecutter` installed. If not, you can install it using `pip`:
 
 ``` bash
 pip install cookiecutter
 ```
 
-Ensure you have `jinja2-time` installed. If not, you can install it using pip:
+Ensure you have `jinja2-time` installed. If not, you can install it using `pip`:
 
 ``` bash
 pip install jinja2-time
