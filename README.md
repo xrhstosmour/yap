@@ -15,10 +15,8 @@ First, ensure you have `Copier` installed. If not, you can install it using `pip
 pip install copier
 ```
 
-## Project Generation
-
 Generate a new boilerplate project:
 
 ``` bash
-copier copy gh:xrhstosmour/yap@<branch> ./<path>/<to>/<project>
+copier copy --vcs-ref <branch> gh:xrhstosmour/yap ./<path>/<to>/<store>/<project>
 ```
