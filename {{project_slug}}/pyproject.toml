@@ -1,8 +1,8 @@
 [tool.poetry]
-name = "[[ project_name ]]"
-version = "0.0.1"
-description = "[[ project_description ]]"
-authors = ["[[ author_name ]] <[[ author_email ]]>"]
+name = "{{project_name}}"
+version = "{{project_version}}"
+description = "{{project_description}}"
+authors = ["{{author_name}} <{{author_email}}>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
