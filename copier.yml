@@ -1,19 +1,40 @@
 project_name:
-    type: str
-    help: "Enter the name of your project."
+  type: str
+  help: "Enter the name of your project."
 
 project_slug:
-    type: str
-    help: "Enter a slug for your project. (A 'slug' is a URL-friendly version of the name, typically lowercase and using hyphens to separate words.)"
+  type: str
+  help: "Enter a slug for your project. (A 'slug' is a URL-friendly version of the name, typically lowercase and using hyphens to separate words.)"
+  default: "{{project_name|lower|replace('-', '_')|replace(' ', '_')}}"
 
 project_description:
-    type: str
-    help: "Provide a brief description of your project."
+  type: str
+  help: "Provide a brief description of your project."
+
+project_version:
+  type: str
+  help: "Enter the version of your project."
+  default: "0.0.1"
 
 author_name:
-    type: str
-    help: "Enter the name of the project's author."
+  type: str
+  help: "Enter the name of the project's author."
 
 author_email:
-    type: str
-    help: "Enter the email address of the project's author."
+  type: str
+  help: "Enter the email address of the project's author."
+
+_exclude:
+  # Python.
+  - __pycache__
+  - "*.pyc"
+  - .coverage
+  - poetry.lock
+  - .cache
+  - .venv
+  # Editor directories and files.
+  - .idea
+  - .DS_Store
+  - .vscode
+
+_answers_file: .copier/.answers.yml
