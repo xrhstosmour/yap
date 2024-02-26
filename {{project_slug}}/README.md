@@ -8,7 +8,7 @@ This boilerplate provides a quick start for building high-performance, efficient
 - **FastAPI** for creating RESTful APIs with Python 3.11+.
 - **Uvicorn** as the lightning-fast ASGI server.
 - **Pydantic** for data validation.
-- **SQLAlchemy** for ORM support.
+- **SQLModel** for ORM support.
 - **Alembic** for database migrations.
 - **JWT Authentication** for secure routes.
 - Docker support for easy deployment.
@@ -66,5 +66,5 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Acknowledgments
 
 - FastAPI community
-- Cookiecutter project
+- Copier project
 - All contributors of this project

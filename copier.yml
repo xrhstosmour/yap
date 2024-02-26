@@ -1,0 +1,19 @@
+project_name:
+    type: str
+    help: "Enter the name of your project."
+
+project_slug:
+    type: str
+    help: "Enter a slug for your project. (A 'slug' is a URL-friendly version of the name, typically lowercase and using hyphens to separate words.)"
+
+project_description:
+    type: str
+    help: "Provide a brief description of your project."
+
+author_name:
+    type: str
+    help: "Enter the name of the project's author."
+
+author_email:
+    type: str
+    help: "Enter the email address of the project's author."
