@@ -1,3 +1,5 @@
+_templates_suffix: .tmplt
+
 project_name:
   type: str
   help: "Enter the name of your project."
@@ -30,6 +32,7 @@ _exclude:
   - "*.pyc"
   - .coverage
   - poetry.lock
+  - poetry.toml
   - .cache
   - .venv
   # Editor directories and files.
