@@ -7,12 +7,14 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.11"
-fastapi = "^0.109.2"
-pydantic = "^2.6.1"
+fastapi = "^0.110.0"
+pydantic = "^2.6.2"
+psycopg = "^3.1.18"
+sqlmodel = "^0.0.16"
 
 
 [tool.poetry.group.development.dependencies]
-pytest = "^8.0.0"
+pytest = "^8.0.2"
 alembic = "^1.13.1"
 
 [build-system]
