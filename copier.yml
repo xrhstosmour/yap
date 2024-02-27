@@ -4,7 +4,7 @@ project_name:
 
 project_slug:
   type: str
-  help: "Enter a slug for your project. (A 'slug' is a URL-friendly version of the name, typically lowercase and using hyphens to separate words.)"
+  help: "Enter a lowercase, URL-friendly version of the name of your project, using hyphens to separate words."
   default: "{{project_name|lower|replace('-', '_')|replace(' ', '_')}}"
 
 project_description:
