@@ -1,4 +1,4 @@
-_templates_suffix: .tmplt
+_templates_suffix: .template
 
 project_name:
   type: str
