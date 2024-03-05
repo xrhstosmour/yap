@@ -26,6 +26,26 @@ author_email:
   type: str
   help: "Enter the email address of the project's author."
 
+postgresql_server:
+  type: str
+  help: "Enter the PostgreSQL server of your project."
+
+postgresql_port:
+  type: str
+  help: "Enter the PostgreSQL port of your project."
+
+postgresql_database:
+  type: str
+  help: "Enter the PostgreSQL database of your project."
+
+postgresql_user:
+  type: str
+  help: "Enter the PostgreSQL user of your project."
+
+postgresql_password:
+  type: str
+  help: "Enter the PostgreSQL password of your project."
+
 _exclude:
   # Python.
   - __pycache__
