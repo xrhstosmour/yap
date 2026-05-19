@@ -1,0 +1,79 @@
+"""Celery application configuration and tasks.
+
+This module configures Celery for background task processing
+and defines common background tasks.
+"""
+
+from __future__ import annotations
+
+from celery import Celery
+from celery.schedules import crontab
+
+from app.core.logging import get_logger
+from app.core.settings import settings
+
+logger = get_logger("celery")
+
+# Celery application.
+celery_app = Celery(
+    "{{ project_slug }}",
+    broker=settings.CELERY_BROKER_URL_FINAL,
+    backend=settings.CELERY_RESULT_BACKEND,
+    include=[
+        "app.tasks.email",
+        "app.tasks.cache",
+        "app.tasks.cleanup",
+        "app.tasks.outbox",
+    ],
+)
+
+# Celery configuration.
+celery_app.conf.update(
+    task_serializer="json",
+    accept_content=["json"],
+    result_serializer="json",
+    timezone="UTC",
+    enable_utc=True,
+    task_track_started=True,
+    task_time_limit=300,
+    task_soft_time_limit=240,
+    worker_prefetch_multiplier=4,
+    worker_max_tasks_per_child=1000,
+    broker_connection_retry_on_startup=True,
+    broker_connection_retry=True,
+    broker_connection_max_retries=10,
+)
+
+# Beat schedule for periodic tasks.
+celery_app.conf.beat_schedule = {
+    "cleanup-old-audit-logs": {
+        "task": "app.tasks.cleanup.cleanup_old_audit_logs",
+        "schedule": crontab(hour=3, minute=0),  # Run daily at 3 AM
+    },
+    "cache-warm": {
+        "task": "app.tasks.cache.warm_cache",
+        "schedule": crontab(hour=6, minute=0),  # Run daily at 6 AM
+    },
+    "purge-graveyard": {
+        "task": "app.tasks.cleanup.purge_graveyard",
+        "schedule": crontab(hour=4, minute=0),  # Run daily at 4 AM
+    },
+    "process-outbox": {
+        "task": "app.tasks.outbox.process_outbox",
+        "schedule": 10.0,
+    },
+}
+
+# Telemetry.
+celery_app.conf.task_routes = {
+    "app.tasks.email.*": {"queue": "email"},
+    "app.tasks.cache.*": {"queue": "cache"},
+    "app.tasks.cleanup.*": {"queue": "cleanup"},
+    "app.tasks.outbox.*": {"queue": "events"},
+}
+
+
+@celery_app.task(bind=True, name="app.tasks.health_check")
+def health_check(self):
+    """Health check task for monitoring."""
+    return {"status": "healthy", "task_id": self.request.id}

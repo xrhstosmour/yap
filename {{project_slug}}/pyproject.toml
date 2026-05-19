@@ -1,16 +1,18 @@
 [project]
-name = "{{ project_name }}"
+name = "app"
 version = "0.1.0"
-description = "{{ description }}"
+description = "A production-ready FastAPI backend template"
 readme = "README.md"
 requires-python = ">=3.13"
 authors = [
-    {name = "{{ author_name }}", email = "{{ author_email }}"}
+    {name = "Christos Mourtogiannis", email = "c.mourtogiannis@gmail.com"}
 ]
 
 dependencies = [
     "fastapi[standard]>=0.115.0",
     "sqlmodel>=0.0.22",
+    "aiosqlite>=0.20.0",
+    "greenlet>=3.1.1",
     "pydantic-settings>=2.6.0",
     "psycopg[binary]>=3.2.0",
     "python-jose[cryptography]>=3.3.0",
@@ -24,6 +26,10 @@ dependencies = [
     "email-validator>=2.2.0",
     "httpx>=0.28.0",
     "jinja2>=3.1.0",
+    "pybreaker>=0.8.0",
+    "opentelemetry-api>=1.27.0",
+    "opentelemetry-sdk>=1.27.0",
+    "amqp>=5.3.0",
 ]
 
 [project.optional-dependencies]
@@ -35,9 +41,13 @@ dev = [
     "mypy>=1.14.0",
     "ruff>=0.8.0",
     "pre-commit>=4.0.0",
+    "celery[redis]>=5.4.0",
 ]
 
 [dependency-groups]
+dev = [
+    "ruff>=0.15.8",
+]
 test = [
     "pytest",
     "pytest-asyncio",
@@ -53,12 +63,23 @@ build-backend = "hatchling.build"
 packages = ["app"]
 
 [tool.mypy]
-python_version = "3.13"
+python_version = "3.14"
 strict = true
 exclude = ["venv", ".venv", "alembic/versions"]
 
+[[tool.mypy.overrides]]
+module = [
+    "redis.*",
+    "celery.*",
+    "sentry_sdk.*",
+    "passlib.*",
+    "jose.*",
+    "pybreaker.*",
+]
+ignore_missing_imports = true
+
 [tool.ruff]
-target-version = "py313"
+target-version = "py314"
 exclude = ["venv", ".venv", "alembic/versions"]
 
 [tool.ruff.lint]
@@ -76,8 +97,17 @@ select = [
 ignore = [
     "E501",  # line too long
     "B008",  # do not perform function calls in argument defaults
+    "B904",  # raise from - let HTTPExceptions pass through
+    "UP037", # quoted annotation in from __future__ annotations contexts
     "ANN101", # missing type self
     "ANN102", # missing type cls
+    "ANN001", # missing type for self in bound tasks
+    "ANN002", # missing type for *args
+    "ANN003", # missing type for **kwargs
+    "ANN201", # missing return type on async functions
+    "ANN202", # missing return type on private functions
+    "ANN204", # missing return type for __call__
+    "ANN401", # Any types in function signatures
 ]
 
 [tool.ruff.lint.isort]
