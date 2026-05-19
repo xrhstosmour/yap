@@ -1,0 +1,133 @@
+"""Integration tests for `Auth` API endpoints."""
+
+from typing import cast
+
+import pytest
+from httpx import ASGITransport
+from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.security import create_refresh_token
+from app.main import app
+from app.schemas.auth import RegisterRequest
+from app.services.auth_service import AuthService
+
+
+def _auth_service(session: AsyncSession) -> AuthService:
+    return AuthService(cast(AsyncSession, session))
+
+
+@pytest.fixture(name="client")
+def client_fixture():
+    """Create a test client."""
+    transport = ASGITransport(app=app)
+    return AsyncClient(transport=transport, base_url="http://test")
+
+
+class TestAuthLogin:
+    """Tests for POST /api/v1/auth/login."""
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_login_success(self, client: AsyncClient, session):
+        """Login should succeed with valid credentials."""
+        auth_service = _auth_service(session)
+        await auth_service.register(
+            RegisterRequest(email="test@example.com", password="password123")
+        )
+
+        response = await client.post(
+            "/api/v1/auth/login",
+            json={"email": "test@example.com", "password": "password123"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "access_token" in data
+        assert "refresh_token" in data
+        assert data["token_type"] == "bearer"
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_login_wrong_password(self, client: AsyncClient, session):
+        """Login should fail with wrong password."""
+        auth_service = _auth_service(session)
+        await auth_service.register(
+            RegisterRequest(email="test@example.com", password="password123")
+        )
+
+        response = await client.post(
+            "/api/v1/auth/login",
+            json={"email": "test@example.com", "password": "wrongpassword"},
+        )
+
+        assert response.status_code == 401
+        assert "Invalid email or password" in response.json()["detail"]
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_login_user_not_found(self, client: AsyncClient):
+        """Login should fail for non-existent user."""
+        response = await client.post(
+            "/api/v1/auth/login",
+            json={"email": "nonexistent@example.com", "password": "password123"},
+        )
+
+        assert response.status_code == 401
+
+
+class TestAuthRefresh:
+    """Tests for POST /api/v1/auth/refresh."""
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_refresh_token(self, client: AsyncClient, session):
+        """Refresh token should return new access token."""
+        auth_service = _auth_service(session)
+        user = await auth_service.register(
+            RegisterRequest(email="refresh@example.com", password="password123")
+        )
+        refresh_token = create_refresh_token(subject=user.id)
+
+        response = await client.post(
+            "/api/v1/auth/refresh",
+            json={"refresh_token": refresh_token},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "access_token" in data
+
+
+class TestAuthRegister:
+    """Tests for POST /api/v1/auth/register."""
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_register_success(self, client: AsyncClient):
+        """Registration should succeed with valid data."""
+        response = await client.post(
+            "/api/v1/auth/register",
+            json={
+                "email": "newuser@example.com",
+                "password": "password123",
+            },
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert "access_token" in data
+        assert "refresh_token" in data
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_register_duplicate_email(self, client: AsyncClient, session):
+        """Registration should fail with duplicate email."""
+        auth_service = _auth_service(session)
+        await auth_service.register(
+            RegisterRequest(email="existing@example.com", password="password123")
+        )
+
+        response = await client.post(
+            "/api/v1/auth/register",
+            json={
+                "email": "existing@example.com",
+                "password": "password123",
+            },
+        )
+
+        assert response.status_code == 400
