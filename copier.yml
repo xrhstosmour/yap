@@ -3,61 +3,95 @@ _templates_suffix: .template
 project_name:
   type: str
   help: "Enter the name of your project."
+  default: "yap"
 
 project_slug:
   type: str
-  help: "Enter a lowercase, URL-friendly version of the name of your project, using hyphens to separate words."
-  default: "{{project_name|lower|replace('-', '_')|replace(' ', '_')}}"
+  help: "Enter a lowercase, URL-friendly version of the name of your project."
+  default: "{{ project_name|lower|replace('-', '_')|replace(' ', '_') }}"
 
-project_description:
+description:
   type: str
   help: "Provide a brief description of your project."
-
-project_version:
-  type: str
-  help: "Enter the version of your project."
-  default: "0.0.1"
+  default: "A production-ready FastAPI backend with authentication and modern tooling."
 
 author_name:
   type: str
   help: "Enter the name of the project's author."
+  default: "Christos Mourtogiannis"
 
 author_email:
   type: str
   help: "Enter the email address of the project's author."
+  default: "c.mourtogiannis@gmail.com"
 
-postgresql_server:
+jwt_secret_key:
   type: str
-  help: "Enter the PostgreSQL server of your project."
+  help: "Secret key for JWT signing. Leave default for a generated key."
+  default: "{% python import secrets; print(secrets.token_urlsafe(32)) %}"
 
-postgresql_port:
+postgres_password:
   type: str
-  help: "Enter the PostgreSQL port of your project."
+  help: "Password for PostgreSQL. Leave default for a generated password."
+  default: "{% python import secrets; print(secrets.token_urlsafe(24)) %}"
 
-postgresql_database:
+first_superuser_email:
   type: str
-  help: "Enter the PostgreSQL database of your project."
+  help: "Email for the first superuser."
+  default: "admin@example.com"
 
-postgresql_user:
+first_superuser_full_name:
   type: str
-  help: "Enter the PostgreSQL user of your project."
+  help: "Full name for the first superuser."
+  default: "Admin"
 
-postgresql_password:
+first_superuser_password:
   type: str
-  help: "Enter the PostgreSQL password of your project."
+  help: "Password for the first superuser. Leave default for a generated password."
+  default: "{% python import secrets; print(secrets.token_urlsafe(16)) %}"
+
+rabbitmq_password:
+  type: str
+  help: "Password for RabbitMQ. Leave default for a generated password."
+  default: "{% python import secrets; print(secrets.token_urlsafe(16)) %}"
+
+glitchtip_secret_key:
+  type: str
+  help: "Secret key for GlitchTip. Leave default for a generated key."
+  default: "{% python import secrets; print(secrets.token_urlsafe(32)) %}"
+
+crypto_key:
+  type: str
+  help: "Encryption key for field-level PII protection."
+  default: "{% python import secrets; print(secrets.token_urlsafe(32)) %}"
 
 _exclude:
-  # Python.
   - __pycache__
   - "*.pyc"
   - .coverage
-  - poetry.lock
-  - poetry.toml
   - .cache
   - .venv
-  # Editor directories and files.
-  - .idea
-  - .DS_Store
-  - .vscode
+  - .env
+  - uv.lock
+  - poetry.lock
+  - poetry.toml
 
 _answers_file: .copier/.answers.yml
+
+_message_after_copy: |
+  Your {{ project_name }} project is ready.
+
+  Generated secrets (save these):
+
+    SECRET_KEY:                {{ jwt_secret_key }}
+    POSTGRES_PASSWORD:         {{ postgres_password }}
+    FIRST_SUPERUSER_PASSWORD:  {{ first_superuser_password }}
+    RABBITMQ_PASSWORD:         {{ rabbitmq_password }}
+    GLITCHTIP_SECRET_KEY:      {{ glitchtip_secret_key }}
+    CRYPTO_KEY:                {{ crypto_key }}
+
+  They have been written to .env.example.
+  Review .env for any remaining `change_this` or `example` values
+  and replace them with your own before deploying.
+
+  Run ./scripts/setup.sh to set up the development environment.
