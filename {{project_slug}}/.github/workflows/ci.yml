@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --extra dev
+      - run: uv run ruff check app/ tests/
+      - run: uv run ruff format --check app/ tests/
+      - run: uv run mypy app/ --config-file mypy-ci.toml --ignore-missing-imports
+
+  test:
+    needs: lint
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: testdb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      - run: uv sync --extra dev
+      - run: uv run pytest tests/ -v --tb=short --cov=app --cov-report=xml
+        env:
+          POSTGRES_SERVER: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: testdb
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+          SECRET_KEY: ci-test-secret-key-not-for-production
+          ENVIRONMENT: local
+          RABBITMQ_PASSWORD: ci-rabbitmq-password
+          FIRST_SUPERUSER_PASSWORD: ci-superuser-password
+      - uses: codecov/codecov-action@v5
+        if: github.event_name == 'pull_request'
+        with:
+          files: ./coverage.xml
+
+  security:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL,HIGH
+          exit-code: 1
