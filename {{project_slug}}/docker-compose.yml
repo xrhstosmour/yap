@@ -1,0 +1,111 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - POSTGRES_SERVER=postgres
+      - POSTGRES_USER={{ project_slug }}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-change_this}
+      - POSTGRES_DB={{ project_slug }}
+      - REDIS_HOST=redis
+      - RABBITMQ_HOST=rabbitmq
+      - ENVIRONMENT=local
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - ./scripts:/app/scripts
+    command: /app/scripts/prestart.sh && fastapi run app/main.py --host 0.0.0.0 --port 8000
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER={{ project_slug }}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-change_this}
+      - POSTGRES_DB={{ project_slug }}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U {{ project_slug }}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      - RABBITMQ_DEFAULT_USER={{ project_slug }}
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASSWORD:-change_this}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  celery_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A app.celery_app worker --loglevel=info
+    environment:
+      - POSTGRES_SERVER=postgres
+      - POSTGRES_USER={{ project_slug }}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-change_this}
+      - POSTGRES_DB={{ project_slug }}
+      - REDIS_HOST=redis
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_USER={{ project_slug }}
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD:-change_this}
+    depends_on:
+      - postgres
+      - redis
+      - rabbitmq
+    volumes:
+      - .:/app
+
+  celery_beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A app.celery_app beat --loglevel=info
+    environment:
+      - REDIS_HOST=redis
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_USER={{ project_slug }}
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD:-change_this}
+    depends_on:
+      - redis
+      - rabbitmq
+    volumes:
+      - .:/app
+
+volumes:
+  postgres_data:
+  redis_data:
+  rabbitmq_data:
