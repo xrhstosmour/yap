@@ -18,5 +18,5 @@ pip install copier
 Generate a new boilerplate project:
 
 ``` bash
-copier copy --vcs-ref <branch> gh:xrhstosmour/yap ./<path>/<to>/<store>/<project>
+copier copy --vcs-ref main gh:xrhstosmour/yap ./<path>/<to>/<store>/<project>
 ```
