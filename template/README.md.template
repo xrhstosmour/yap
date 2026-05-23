@@ -56,11 +56,19 @@ A production-ready FastAPI backend template with best practices, authentication,
 
 ## Quick Start
 
-You need [uv](https://docs.astral.sh/uv/), [Docker](https://www.docker.com/), and [copier](https://copier.readthedocs.io/).
+You need:
+
+- [uv](https://docs.astral.sh/uv/)
+- [Docker](https://www.docker.com/)
+- [copier](https://copier.readthedocs.io/)
 
 ```bash
-# 1. Create a new project from this template (setup runs automatically).
-copier copy gh:xrhstosmour/yap my-project
+# 1. Create a new project from this template.
+# From GitHub:
+copier copy --trust --vcs-ref main gh:xrhstosmour/yap path/to/store/project
+
+# Or from a local clone:
+copier copy --trust /path/to/yap path/to/store/project
 cd my-project
 
 # 2. Start the server.
