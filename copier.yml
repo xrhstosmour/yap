@@ -1,69 +1,65 @@
 _templates_suffix: .template
+_subdirectory: template
 
 project_name:
   type: str
-  help: "Enter the name of your project."
+  help: "Enter the name of your project:"
   default: "yap"
 
 project_slug:
   type: str
-  help: "Enter a lowercase, URL-friendly version of the name of your project."
+  help: "Enter a lowercase, URL-friendly version of the name of your project:"
   default: "{{ project_name|lower|replace('-', '_')|replace(' ', '_') }}"
 
 description:
   type: str
-  help: "Provide a brief description of your project."
-  default: "A production-ready FastAPI backend with authentication and modern tooling."
+  help: "Provide a brief description of your project:"
+  default: "A production-ready FastAPI backend."
 
 author_name:
   type: str
-  help: "Enter the name of the project's author."
+  help: "Enter the name of the project's author:"
   default: "Christos Mourtogiannis"
 
 author_email:
   type: str
-  help: "Enter the email address of the project's author."
+  help: "Enter the email address of the project's author:"
   default: "c.mourtogiannis@gmail.com"
 
 jwt_secret_key:
   type: str
-  help: "Secret key for JWT signing. Leave default for a generated key."
-  default: "{% python import secrets; print(secrets.token_urlsafe(32)) %}"
+  help: "Secret key for JWT signing (leave empty to auto-generate):"
+  default: ""
 
-postgres_password:
+postgresql_password:
   type: str
-  help: "Password for PostgreSQL. Leave default for a generated password."
-  default: "{% python import secrets; print(secrets.token_urlsafe(24)) %}"
-
-first_superuser_email:
-  type: str
-  help: "Email for the first superuser."
-  default: "admin@example.com"
+  help: "Password for PostgreSQL (leave empty to auto-generate):"
+  default: ""
 
 first_superuser_full_name:
   type: str
-  help: "Full name for the first superuser."
+  help: "Full name for the first superuser:"
   default: "Admin"
 
 first_superuser_password:
   type: str
-  help: "Password for the first superuser. Leave default for a generated password."
-  default: "{% python import secrets; print(secrets.token_urlsafe(16)) %}"
+  help: "Password for the first superuser (leave empty to auto-generate):"
+  default: ""
 
 rabbitmq_password:
   type: str
-  help: "Password for RabbitMQ. Leave default for a generated password."
-  default: "{% python import secrets; print(secrets.token_urlsafe(16)) %}"
+  help: "Password for RabbitMQ (leave empty to auto-generate):"
+  default: ""
 
-glitchtip_secret_key:
+sentry_dsn:
   type: str
-  help: "Secret key for GlitchTip. Leave default for a generated key."
-  default: "{% python import secrets; print(secrets.token_urlsafe(32)) %}"
+  help: "Sentry/GlitchTip DSN (leave empty to skip):"
+  default: ""
 
 crypto_key:
   type: str
-  help: "Encryption key for field-level PII protection."
-  default: "{% python import secrets; print(secrets.token_urlsafe(32)) %}"
+  help: "Encryption key (leave empty to auto-generate):"
+  default: ""
 
 _exclude:
   - __pycache__
@@ -72,26 +68,25 @@ _exclude:
   - .cache
   - .venv
   - .env
+  - .mypy_cache
+  - .pytest_cache
+  - .ruff_cache
+  - .vscode
   - uv.lock
   - poetry.lock
   - poetry.toml
 
+_tasks:
+  - "./scripts/setup.sh"
+
 _answers_file: .copier/.answers.yml
 
 _message_after_copy: |
-  Your {{ project_name }} project is ready.
 
-  Generated secrets (save these):
+  Project {{ project_name }} is ready!
 
-    SECRET_KEY:                {{ jwt_secret_key }}
-    POSTGRES_PASSWORD:         {{ postgres_password }}
-    FIRST_SUPERUSER_PASSWORD:  {{ first_superuser_password }}
-    RABBITMQ_PASSWORD:         {{ rabbitmq_password }}
-    GLITCHTIP_SECRET_KEY:      {{ glitchtip_secret_key }}
-    CRYPTO_KEY:                {{ crypto_key }}
+  Review .env for any values to replace before starting the server.
 
-  They have been written to .env.example.
-  Review .env for any remaining `change_this` or `example` values
-  and replace them with your own before deploying.
+  Start the development server:
+    cd {{ project_slug }} && uv run fastapi dev app/main.py --host 0.0.0.0 --port 8000
 
-  Run ./scripts/setup.sh to set up the development environment.
