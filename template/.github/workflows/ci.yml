@@ -13,38 +13,19 @@ concurrency:
 jobs:
   lint:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: template
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - name: Render templates for CI
-        run: |
-          shopt -s globstar
-          for f in $(find . -name '*.template' ! -name '.env.example.template' ! -name 'docker-compose.yml.template'); do
-            cp "$f" "${f%.template}"
-          done
-          find . -name '*.py' -o -name '*.toml' -o -name '*.md' | xargs -I{} sed -i 's/{{ project_slug }}/yap/g' {}
-          find . -name '*.py' -o -name '*.toml' -o -name '*.md' | xargs -I{} sed -i 's/{{ project_name }}/yap/g' {}
-          find . -name '*.py' -o -name '*.toml' -o -name '*.md' | xargs -I{} sed -i 's/{{ first_superuser_full_name }}/Admin/g' {}
-          find . -name '*.py' -o -name '*.toml' -o -name '*.md' | xargs -I{} sed -i 's/{{ description }}/A production-ready FastAPI backend template/g' {}
-          find . -name '*.py' -o -name '*.toml' | xargs -I{} sed -i 's/{{ author_name }}/Christos Mourtogiannis/g' {}
-          find . -name '*.py' -o -name '*.toml' | xargs -I{} sed -i 's/{{ author_email }}/c.mourtogiannis@gmail.com/g' {}
       - run: uv sync --extra dev
       - run: uv run ruff check app/ tests/
-      - run: uv run ruff format app/ tests/
       - run: uv run ruff format --check app/ tests/
       - run: uv run mypy app/ --config-file mypy-ci.toml
 
   test:
     needs: lint
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: template
     services:
-      postgres:
+      postgresql:
         image: postgres:16-alpine
         env:
           POSTGRES_USER: app
@@ -69,18 +50,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - name: Render templates for CI
+      - name: Generate secrets
         run: |
-          shopt -s globstar
-          for f in $(find . -name '*.template' ! -name '.env.example.template' ! -name 'docker-compose.yml.template'); do
-            cp "$f" "${f%.template}"
-          done
-          find . -name '*.py' -o -name '*.toml' -o -name '*.md' | xargs -I{} sed -i 's/{{ project_slug }}/yap/g' {}
-          find . -name '*.py' -o -name '*.toml' -o -name '*.md' | xargs -I{} sed -i 's/{{ project_name }}/yap/g' {}
-          find . -name '*.py' -o -name '*.toml' -o -name '*.md' | xargs -I{} sed -i 's/{{ first_superuser_full_name }}/Admin/g' {}
-          find . -name '*.py' -o -name '*.toml' -o -name '*.md' | xargs -I{} sed -i 's/{{ description }}/A production-ready FastAPI backend template/g' {}
-          find . -name '*.py' -o -name '*.toml' | xargs -I{} sed -i 's/{{ author_name }}/Christos Mourtogiannis/g' {}
-          find . -name '*.py' -o -name '*.toml' | xargs -I{} sed -i 's/{{ author_email }}/c.mourtogiannis@gmail.com/g' {}
           echo "SECRET_KEY=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')" >> $GITHUB_ENV
           echo "CRYPTO_KEY=$(python3 -c 'import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())')" >> $GITHUB_ENV
           echo "RABBITMQ_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')" >> $GITHUB_ENV
@@ -110,6 +81,6 @@ jobs:
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: fs
-          scan-ref: template
+          scan-ref: .
           severity: CRITICAL,HIGH
           exit-code: 1

@@ -1,0 +1,670 @@
+# YAP
+
+A production-ready FastAPI backend template with best practices, authentication, and modern tooling.
+
+A production-ready FastAPI backend template with best practices, authentication, and modern tooling.
+
+## Features
+
+### Authentication & Authorization
+
+- **User Authentication**: JWT-based authentication with access and refresh tokens
+- **API Keys**: Programmatic access with scoped permissions
+- **Multi-tenancy**: Row-level tenant isolation with automatic filtering
+- **Soft Deletes**: Recoverable data with deleted_at timestamps
+- **Graveyard**: Centralized tombstone tracking for all deletions
+- **Audit Logging**: Complete trail of all user and system actions
+- **Field Encryption**: Fernet encryption for PII and sensitive data
+- **Outbox Pattern**: Reliable at-least-once event publishing
+
+### Core Infrastructure
+
+- **FastAPI 0.115+**: Modern async Python web framework
+- **SQLModel**: Pydantic + SQLAlchemy hybrid ORM
+- **PostgreSQL**: Production-grade relational database
+- **Redis**: Caching and Celery message broker
+- **Celery**: Background task processing
+
+### Developer Experience
+
+- **uv**: Fast Python package manager (10-100x faster than Poetry)
+- **Structured Logging**: JSON logs with correlation IDs
+- **Docker Compose**: Local development with all services
+- **API Documentation**: Auto-generated OpenAPI/Swagger docs
+- **Pre-commit Hooks**: Code quality checks
+
+### Security
+
+- **Rate Limiting**: Redis-based sliding window limiter
+- **Password Hashing**: bcrypt with automatic updates
+- **Timing Attack Prevention**: Constant-time password verification
+- **CORS Configuration**: Easy frontend integration
+
+### Observability
+
+- **Structured JSON Logging**: structlog with correlation IDs
+- **OpenTelemetry Tracing**: Distributed trace support
+- **GlitchTip**: Self-hosted error tracking (Sentry SDK compatible)
+- **Health Metrics**: Pool stats, cache stats, readiness/liveness probes
+
+### DevOps
+
+- **GitHub Actions CI/CD**: Lint, type check, test, security scan
+- **Traefik + Let's Encrypt**: Automatic HTTPS for production
+- **Metabase**: BI dashboards and data exploration
+- **Mailpit**: Email testing in development
+
+## Quick Start
+
+You need [uv](https://docs.astral.sh/uv/), [Docker](https://www.docker.com/), and [copier](https://copier.readthedocs.io/).
+
+```bash
+# 1. Create a new project from this template (setup runs automatically).
+copier copy gh:xrhstosmour/yap my-project
+cd my-project
+
+# 2. Start the server.
+uv run fastapi dev app/main.py --host 0.0.0.0 --port 8000
+```
+
+Open http://localhost:8000/documentation for interactive API docs.
+
+**Quick reference:**
+
+```bash
+# Full automated setup.
+./scripts/setup.sh
+
+# Start dev server.
+uv run fastapi dev app/main.py --host 0.0.0.0 --port 8000
+
+# Start all services.
+docker compose up -d
+
+# Start with Traefik, Metabase, GlitchTip.
+./scripts/up.sh
+
+# Run tests.
+uv run pytest
+
+# Auto-fix lint issues.
+./scripts/lint.sh --fix
+
+# Run migrations.
+uv run alembic upgrade head
+```
+
+## Project Structure
+
+```text
+app/
+├── app/
+│   ├── __init__.py
+│   ├── main.py                     # FastAPI application
+│   ├── dependencies.py             # Dependency injection
+│   ├── database.py                 # Database connection
+│   ├── initial_data.py             # Seed data
+│   ├── api/
+│   │   ├── request_id.py           # Request ID middleware
+│   │   └── v1/
+│   │   ├── router.py               # API router
+│   │   ├── auth.py                 # Authentication endpoints
+│   │   ├── users.py                # User management
+│   │   ├── api_keys.py             # API key management
+│   │   ├── feature_flags.py        # Feature flag admin
+│   │   ├── websocket.py            # WebSocket real-time endpoints
+│   │   └── health.py               # Health, metrics, worker monitoring
+│   ├── models/                     # SQLModel database models
+│   ├── schemas/                    # Pydantic request/response schemas
+│   ├── services/                   # Business logic layer
+│   ├── repositories/               # Data access layer
+│   ├── tasks/                      # Celery background tasks
+│   └── core/
+│       ├── settings.py             # Configuration (Pydantic settings)
+│       ├── security.py             # Auth utilities (JWT, bcrypt)
+│       ├── security_middleware.py  # HTTP security headers, bot blocking
+│       ├── logging.py              # Structured JSON logging
+│       ├── cache.py                # Redis caching service
+│       ├── rate_limit.py           # Sliding window rate limiter
+│       ├── circuit_breaker.py      # External service protection
+│       ├── feature_flags.py        # Runtime feature toggles
+│       ├── tenant.py               # Multi-tenancy support
+│       ├── telemetry.py            # OpenTelemetry tracing
+│       ├── email.py                # SMTP email sending
+│       └── encryption.py           # Field-level PII encryption
+├── tests/
+├── migrations/
+├── docker-compose.yml
+├── docker-compose.containers.yml
+├── Dockerfile
+└── pyproject.toml
+```
+
+## API Documentation
+
+FastAPI auto-generates interactive documentation with "Try it out":
+
+- **Swagger UI** ([http://localhost:8000/documentation](http://localhost:8000/documentation)) — Interactive "Try it out" for every endpoint, with Bearer token auth
+- **ReDoc** ([http://localhost:8000/redoc](http://localhost:8000/redoc)) — Clean reference documentation
+
+Operation IDs use `<tag>-<route_name>` format for clean client code generation.
+All request/response schemas are fully validated and documented.
+
+## Authentication
+
+### User Registration & Login
+
+```bash
+# Register.
+curl -X POST http://localhost:8000/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email": "user@example.com", "password": "password123"}'
+
+# Login.
+curl -X POST http://localhost:8000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "user@example.com", "password": "password123"}'
+```
+
+### Using API Keys
+
+```bash
+# Create API key (requires authentication).
+curl -X POST http://localhost:8000/api/v1/api-keys \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "My API Key", "scopes": ["read", "write"]}'
+
+# Use API key.
+curl http://localhost:8000/api/v1/users/me \
+  -H "X-API-Key: <key_id>:<key_secret>"
+```
+
+## API Endpoints
+
+### Authentication
+
+| Method | Endpoint | Description |
+| -------- | ---------- | ------------- |
+| POST | `/api/v1/auth/register` | Register new user |
+| POST | `/api/v1/auth/login` | Login |
+| POST | `/api/v1/auth/refresh` | Refresh token |
+| POST | `/api/v1/auth/change-password` | Change password |
+| GET | `/api/v1/auth/me` | Get current user |
+
+### Users (Admin)
+
+| Method | Endpoint | Description |
+| -------- | ---------- | ------------- |
+| GET | `/api/v1/users` | List users |
+| GET | `/api/v1/users/{id}` | Get user |
+| POST | `/api/v1/users` | Create user |
+| PATCH | `/api/v1/users/{id}` | Update user |
+| DELETE | `/api/v1/users/{id}` | Delete user |
+
+### API Keys
+
+| Method | Endpoint | Description |
+| -------- | ---------- | ------------- |
+| GET | `/api/v1/api-keys` | List API keys |
+| POST | `/api/v1/api-keys` | Create API key |
+| PATCH | `/api/v1/api-keys/{id}` | Update API key |
+| DELETE | `/api/v1/api-keys/{id}` | Delete API key |
+| POST | `/api/v1/api-keys/{id}/revoke` | Revoke API key |
+
+### Health
+
+| Method | Endpoint | Description |
+| -------- | ---------- | ------------- |
+| GET | `/api/v1/health` | Full health check |
+| GET | `/api/v1/ready` | Readiness probe |
+| GET | `/api/v1/live` | Liveness probe |
+| GET | `/api/v1/metrics` | System metrics (pool, cache) |
+| GET | `/api/v1/workers` | Celery worker status |
+
+### Feature Flags (Admin)
+
+| Method | Endpoint | Description |
+| -------- | ---------- | ------------- |
+| GET | `/api/v1/feature-flags` | List all flags |
+| POST | `/api/v1/feature-flags` | Create a flag |
+| GET | `/api/v1/feature-flags/{name}` | Get flag by name |
+| PATCH | `/api/v1/feature-flags/{name}` | Update flag |
+| POST | `/api/v1/feature-flags/{name}/toggle` | Toggle on/off |
+| DELETE | `/api/v1/feature-flags/{name}` | Delete flag |
+
+## Development
+
+### Running Tests
+
+```bash
+# Run all tests.
+uv run pytest
+
+# Run with coverage.
+uv run pytest --cov=app --cov-report=html
+```
+
+### Linting and Formatting
+
+```bash
+# Auto-fix all issues.
+./scripts/lint.sh --fix
+
+# Check only (CI mode).
+./scripts/lint.sh
+```
+
+### Database Migrations
+
+```bash
+# Create migration.
+uv run alembic revision --autogenerate -m "Add users table"
+
+# Run migrations.
+uv run alembic upgrade head
+
+# Rollback.
+uv run alembic downgrade -1
+```
+
+### Celery Workers
+
+```bash
+# Start worker.
+uv run celery -A app.celery_app worker --loglevel=info
+
+# Start beat (scheduler).
+uv run celery -A app.celery_app beat --loglevel=info
+```
+
+## Deployment
+
+### Prerequisites
+
+- Python 3.13+
+- PostgreSQL 16+
+- Redis 7+
+- RabbitMQ 3.13+ (for Celery)
+- [uv](https://docs.astral.sh/uv/) package manager
+- Docker and Docker Compose (for containerized deployment)
+
+### Docker Deployment
+
+```bash
+# Full stack with Docker Compose (all services).
+docker compose up -d
+
+# View logs.
+docker compose logs -f backend
+
+# Scale workers.
+docker compose up -d --scale celery_worker=3
+
+# Stop all services.
+docker compose down
+
+# Rebuild after changes.
+docker compose up -d --build
+```
+
+### Production Checklist
+
+1. Review `.env` and customize any values needed.
+2. Set `ENVIRONMENT=production`.
+3. Set `SENTRY_DSN` for error monitoring (works with both Sentry and GlitchTip)
+4. Configure proper `BACKEND_CORS_ORIGINS` to your frontend domain
+5. Run migrations: `uv run alembic upgrade head`
+6. Enable HTTPS via Traefik reverse proxy (see below)
+7. Set resource limits in docker-compose for all services
+
+### Error Tracking with GlitchTip (Free Self-Hosted)
+
+GlitchTip is an MIT-licensed, self-hosted alternative to Sentry. It's Sentry SDK compatible,
+meaning the existing `sentry_sdk` integration works without any code changes.
+
+```bash
+# 1. Uncomment glitchtip + glitchtip-worker in docker-compose.yml.
+# 2. Start the services.
+docker compose up -d glitchtip glitchtip-worker
+
+# 3. Open GlitchTip at http://localhost:8080 and create a project.
+# 4. Set SENTRY_DSN in .env to your GlitchTip project DSN.
+SENTRY_DSN=https://public:secret@localhost:8080/1
+```
+
+### HTTPS with Traefik Reverse Proxy
+
+```bash
+# 1. Set TRAEFIK_DOMAIN and LETSENCRYPT_EMAIL in .env.
+TRAEFIK_DOMAIN=api.example.com
+LETSENCRYPT_EMAIL=admin@example.com
+
+# 2. Uncomment traefik service in docker-compose.yml.
+# 3. Uncomment labels on the backend service.
+# 4. Start with traefik.
+docker compose up -d traefik
+
+# Traefik will automatically obtain SSL certificates from Let's Encrypt.
+```
+
+### CI/CD with GitHub Actions
+
+The workflow (`.github/workflows/ci.yml`) runs automatically on every PR. Three jobs must pass:
+
+- **lint** — `ruff check`, `ruff format --check`, `mypy` type checking.
+- **test** — `pytest` with PostgreSQL and Redis services, coverage report.
+- **security** — Trivy scanner for CRITICAL and HIGH vulnerabilities.
+
+The template repo also has a root `.github/workflows/ci.yml` that runs the same checks using `working-directory`.
+
+### Environment Variables
+
+Defaults are printed by the setup script, run `./scripts/setup.sh` or check `.env.example`.
+
+| Variable | Description |
+| ---------- | ------------- |
+| `PROJECT_NAME` | Project name |
+| `ENVIRONMENT` | local/staging/production |
+| `SECRET_KEY` | JWT signing key |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | Access token lifetime |
+| `REFRESH_TOKEN_EXPIRE_DAYS` | Refresh token lifetime |
+| `FRONTEND_HOST` | Frontend URL for CORS |
+| `POSTGRESQL_SERVER` | PostgreSQL host |
+| `POSTGRESQL_PORT` | PostgreSQL port |
+| `POSTGRESQL_USER` | Database user |
+| `POSTGRESQL_PASSWORD` | Database password |
+| `POSTGRESQL_DATABASE` | Database name |
+| `DATABASE_POOL_SIZE` | Connection pool size |
+| `DATABASE_MAX_OVERFLOW` | Max overflow connections |
+| `DATABASE_POOL_RECYCLE` | Pool recycle seconds |
+| `REDIS_HOST` | Redis host |
+| `REDIS_PORT` | Redis port |
+| `REDIS_DATABASE` | Redis database number |
+| `REDIS_MAX_CONNECTIONS` | Redis connection limit |
+| `RABBITMQ_HOST` | RabbitMQ host |
+| `RABBITMQ_PORT` | RabbitMQ port |
+| `CELERY_BROKER_URL` | Celery broker URL |
+| `RATE_LIMIT_PER_MINUTE` | Default rate limit |
+| `RATE_LIMIT_PER_MINUTE_API_KEY` | API key rate limit |
+| `FIRST_SUPERUSER_EMAIL` | Initial admin email |
+| `FIRST_SUPERUSER_PASSWORD` | Initial admin password |
+| `SENTRY_DSN` | Sentry DSN for monitoring (also works with GlitchTip) |
+| `SMTP_HOST` | SMTP server host |
+| `SMTP_PORT` | SMTP server port |
+| `SMTP_USER` | SMTP username |
+| `SMTP_PASSWORD` | SMTP password |
+| `SMTP_FROM_EMAIL` | Sender email address |
+
+## License
+
+MIT License - see [LICENSE](LICENSE) file.
+
+## Usage Examples
+
+### Multi-Tenancy
+
+Set the tenant context for all database operations:
+
+```python
+from app.core import tenant_context
+
+# Set tenant for current request
+with tenant_context(tenant_id):
+    # All queries will be filtered by tenant_id
+    users = user_service.list()
+```
+
+### Feature Flags
+
+Dynamically enable or disable features at runtime without redeployment.
+Uses a three-tier cache: in-memory (60s TTL with jitter) -> Redis -> Database.
+
+```python
+from app.core import feature_enabled, feature_disabled
+
+# Check if a feature is enabled
+if await feature_enabled("new_checkout_flow"):
+    return new_checkout_handler()
+else:
+    return legacy_checkout_handler()
+
+# Shorthand for negation
+if await feature_disabled("beta_feature"):
+    return {"status": "coming_soon"}
+```
+
+**Admin API endpoints (superuser only):**
+
+| Method | Endpoint | Description |
+| -------- | ---------- | ------------- |
+| GET | `/api/v1/feature-flags` | List all flags |
+| POST | `/api/v1/feature-flags` | Create a flag |
+| GET | `/api/v1/feature-flags/{name}` | Get by name |
+| PATCH | `/api/v1/feature-flags/{name}` | Update state/description |
+| POST | `/api/v1/feature-flags/{name}/toggle` | Toggle on/off |
+| DELETE | `/api/v1/feature-flags/{name}` | Delete flag |
+
+**Setting defaults via environment or .env:**
+
+```bash
+# Default states for flags not yet created in the DB.
+# These are set in settings.py FEATURE_FLAGS dict.
+```
+
+```python
+from app.core.settings import settings
+
+settings.FEATURE_FLAGS = {
+    "new_checkout": True,
+    "beta_dashboard": False,
+}
+```
+
+**How it works:**
+
+1. `feature_enabled(name)` checks in-memory cache first (fast)
+2. Falls back to Redis cache (cross-instance sync)
+3. Falls back to database (source of truth)
+4. Falls back to `FEATURE_FLAGS` in settings, then `False`
+5. DB updates instantly sync to Redis so all app instances reflect changes immediately
+
+Or use the middleware (automatically applied):
+
+```python
+# In your API endpoint.
+@app.get("/users")
+def get_users(request: Request):
+    tenant_id = request.state.tenant_id
+    # Tenant context is already set by middleware.
+    ...
+```
+
+### Circuit Breaker
+
+Protect external API calls from cascading failures:
+
+```python
+from app.core import circuit_breaker, CircuitBreakerError
+
+# Use decorator on external API functions.
+@circuit_breaker("payment-api", fail_max=5, reset_timeout=60)
+async def call_payment_service(data: dict):
+    async with httpx.AsyncClient() as client:
+        return await client.post("https://api.payment.com/charge", json=data)
+
+# Handle circuit open state.
+try:
+    result = await call_payment_service({"amount": 100})
+except CircuitBreakerError:
+    return {"error": "Service temporarily unavailable"}
+```
+
+### Redis Caching
+
+Cache expensive operations with TTL:
+
+```python
+from app.core import CacheService, get_cache
+
+# Get cache service.
+cache = await get_cache()
+
+# Set with TTL in seconds.
+await cache.set("user:123", user_data, ttl=300)
+
+# Get cached value.
+cached = await cache.get("user:123")
+
+# Delete cache entry.
+await cache.delete("user:123")
+
+# Use cache decorator.
+@cache(ttl=60, key_prefix="users")
+async def get_users():
+    return await user_service.list()
+```
+
+### Rate Limiting
+
+Automatic rate limiting by user or API key:
+
+```python
+from app.core import check_user_rate_limit, check_api_key_rate_limit
+
+# In your endpoint.
+@app.post("/api/data")
+async def create_data(
+    request: Request,
+    user: User = Depends(get_current_user),
+):
+    # Check rate limit for authenticated user, raises HTTP 429 if exceeded.
+    await check_user_rate_limit(user.id)
+    ...
+```
+
+### WebSocket
+
+Real-time communication for live metrics, notifications, and health monitoring:
+
+```python
+# Connect to metrics stream.
+import asyncio
+import websockets
+
+async def listen_metrics():
+    async with websockets.connect("ws://localhost:8000/api/v1/ws/metrics") as ws:
+        while True:
+            msg = await ws.recv()
+            print(json.loads(msg))
+
+# Broadcast notification to all WebSocket clients.
+from app.api.v1.websocket import broadcast_notification
+await broadcast_notification("Deploy completed", channel="general")
+```
+
+| Method | Endpoint | Description |
+| -------- | ---------- | ------------- |
+| WS | `/api/v1/ws/metrics` | Live pool stats every 2s |
+| WS | `/api/v1/ws/health` | Ping/pong health check |
+
+### Background Tasks
+
+Send emails and perform async operations via Celery workers:
+
+```python
+from app.tasks.email import send_email_task, send_batch_emails_task, send_welcome_email_task
+
+# Send a single email.
+send_email_task.delay(
+    to_email="user@example.com",
+    subject="Your order is confirmed",
+    body="Thank you for your order!",
+    html="<h1>Thank you!</h1><p>Your order is confirmed.</p>",
+)
+
+# Send personalized batch emails.
+send_batch_emails_task.delay(
+    recipients=[
+        {"email": "alice@example.com", "name": "Alice"},
+        {"email": "bob@example.com", "name": "Bob"},
+    ],
+    subject="Hello {name}!",
+    body="Hi {name}, check out our new features.",
+)
+
+# Send welcome email to new user
+send_welcome_email_task.delay(email="user@example.com", name="John")
+
+# Cache operations.
+from app.tasks.cache import clear_cache
+clear_cache.delay(pattern="user:*")
+
+# Cleanup old audit logs.
+from app.tasks.cleanup import cleanup_old_audit_logs
+cleanup_old_audit_logs.delay(days=365)
+```
+
+### Security Best Practices
+
+#### Password Hashing
+
+```python
+from app.core import generate_password_hash, verify_password
+
+# Hash password with bcrypt (automatically handles salt and updates).
+password_hash = generate_password_hash("user_password")
+
+# Verify password with constant-time comparison to prevent timing attacks.
+if verify_password("user_password", password_hash):
+    print("Password correct")
+```
+
+#### API Key Generation
+
+```python
+from app.core import generate_api_key, generate_api_key_id, mask_api_key
+
+# Generate new API key.
+api_key = generate_api_key()  # Returns: sk_abc123...
+
+# Generate key ID for storage and display.
+key_id = generate_api_key_id()
+
+# Mask key for logging/display.
+masked = mask_api_key(api_key)  # Returns: sk_***...abcd
+```
+
+#### JWT Tokens
+
+```python
+from app.core import create_access_token, create_refresh_token, decode_token
+
+# Create tokens.
+access_token = create_access_token(subject="user123")
+refresh_token = create_refresh_token(subject="user123")
+
+# Decode and verify tokens.
+payload = decode_token(access_token)
+print(payload.sub)  # user123
+```
+
+### Structured Logging
+
+```python
+from app.core import get_logger
+
+logger = get_logger(__name__)
+
+# Log with structured data.
+logger.info("user_created", user_id=123, email="user@example.com")
+logger.error("payment_failed", error=str(e), amount=100)
+```
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/my-feature`
+3. Commit changes following conventional commits
+4. Run tests: `uv run pytest`
+5. Submit a pull request
