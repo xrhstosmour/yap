@@ -8,9 +8,9 @@ A production-ready FastAPI backend template with best practices, authentication,
 
 ### Authentication & Authorization
 
-- **User Authentication**: JWT-based authentication with access and refresh tokens
+- **User Authentication**: JWT-based authentication with access and refresh tokens, OAuth2 form login
 - **API Keys**: Programmatic access with scoped permissions
-- **Multi-tenancy**: Row-level tenant isolation with automatic filtering
+- **Multi-tenancy**: Tenant isolation with full CRUD management (admin), system tenant fallback
 - **Soft Deletes**: Recoverable data with deleted_at timestamps
 - **Graveyard**: Centralized tombstone tracking for all deletions
 - **Audit Logging**: Complete trail of all user and system actions
@@ -109,6 +109,7 @@ uv run alembic upgrade head
 ├── app/
 │   ├── __init__.py
 │   ├── main.py                     # FastAPI application
+│   ├── celery_app.py               # Celery configuration
 │   ├── dependencies.py             # Dependency injection
 │   ├── database.py                 # Database connection
 │   ├── initial_data.py             # Seed data
@@ -120,6 +121,7 @@ uv run alembic upgrade head
 │   │   ├── users.py                # User management
 │   │   ├── api_keys.py             # API key management
 │   │   ├── feature_flags.py        # Feature flag admin
+│   │   ├── tenants.py              # Tenant management (admin)
 │   │   ├── websocket.py            # WebSocket real-time endpoints
 │   │   └── health.py               # Health, metrics, worker monitoring
 │   ├── models/                     # SQLModel database models
@@ -170,8 +172,8 @@ curl -X POST http://localhost:8000/api/v1/auth/register \
 
 # Login.
 curl -X POST http://localhost:8000/api/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email": "user@{{ project_slug }}.com", "password": "password123"}'
+  --data-urlencode "username=user@{{ project_slug }}.com" \
+  --data-urlencode "password=password123"
 ```
 
 ### Using API Keys
@@ -240,6 +242,16 @@ curl http://localhost:8000/api/v1/users/me \
 | PATCH | `/api/v1/feature-flags/{name}` | Update flag |
 | POST | `/api/v1/feature-flags/{name}/toggle` | Toggle on/off |
 | DELETE | `/api/v1/feature-flags/{name}` | Delete flag |
+
+### Tenants (Admin)
+
+| Method | Endpoint | Description |
+| -------- | ---------- | ------------- |
+| GET | `/api/v1/tenants` | List tenants |
+| GET | `/api/v1/tenants/{id}` | Get tenant |
+| POST | `/api/v1/tenants` | Create tenant |
+| PATCH | `/api/v1/tenants/{id}` | Update tenant |
+| DELETE | `/api/v1/tenants/{id}` | Delete tenant |
 
 ## Development
 
