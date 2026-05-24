@@ -109,6 +109,7 @@ uv run alembic upgrade head
 ├── app/
 │   ├── __init__.py
 │   ├── main.py                     # FastAPI application
+│   ├── celery_app.py               # Celery configuration
 │   ├── dependencies.py             # Dependency injection
 │   ├── database.py                 # Database connection
 │   ├── initial_data.py             # Seed data
@@ -120,6 +121,7 @@ uv run alembic upgrade head
 │   │   ├── users.py                # User management
 │   │   ├── api_keys.py             # API key management
 │   │   ├── feature_flags.py        # Feature flag admin
+│   │   ├── tenants.py              # Tenant management (admin)
 │   │   ├── websocket.py            # WebSocket real-time endpoints
 │   │   └── health.py               # Health, metrics, worker monitoring
 │   ├── models/                     # SQLModel database models
