@@ -8,9 +8,9 @@ A production-ready FastAPI backend template with best practices, authentication,
 
 ### Authentication & Authorization
 
-- **User Authentication**: JWT-based authentication with access and refresh tokens
+- **User Authentication**: JWT-based authentication with access and refresh tokens, OAuth2 form login
 - **API Keys**: Programmatic access with scoped permissions
-- **Multi-tenancy**: Row-level tenant isolation with automatic filtering
+- **Multi-tenancy**: Tenant isolation with full CRUD management (admin), system tenant fallback
 - **Soft Deletes**: Recoverable data with deleted_at timestamps
 - **Graveyard**: Centralized tombstone tracking for all deletions
 - **Audit Logging**: Complete trail of all user and system actions
