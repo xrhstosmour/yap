@@ -241,6 +241,16 @@ curl http://localhost:8000/api/v1/users/me \
 | POST | `/api/v1/feature-flags/{name}/toggle` | Toggle on/off |
 | DELETE | `/api/v1/feature-flags/{name}` | Delete flag |
 
+### Tenants (Admin)
+
+| Method | Endpoint | Description |
+| -------- | ---------- | ------------- |
+| GET | `/api/v1/tenants` | List tenants |
+| GET | `/api/v1/tenants/{id}` | Get tenant |
+| POST | `/api/v1/tenants` | Create tenant |
+| PATCH | `/api/v1/tenants/{id}` | Update tenant |
+| DELETE | `/api/v1/tenants/{id}` | Delete tenant |
+
 ## Development
 
 ### Running Tests
