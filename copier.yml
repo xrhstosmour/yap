@@ -51,15 +51,96 @@ rabbitmq_password:
   help: "Password for RabbitMQ (leave empty to auto-generate):"
   default: ""
 
-sentry_dsn:
+redis_password:
   type: str
-  help: "Sentry/GlitchTip DSN (leave empty to skip):"
+  help: "Password for Redis (leave empty to auto-generate):"
   default: ""
 
 crypto_key:
   type: str
   help: "Encryption key (leave empty to auto-generate):"
   default: ""
+
+include_traefik:
+  type: bool
+  help: "Include Traefik reverse proxy with Let's Encrypt?"
+  default: false
+
+traefik_host:
+  type: str
+  help: "Domain for Traefik dashboard:"
+  default: "traefik.{{ project_slug }}.local"
+  when: "{{ include_traefik }}"
+
+timezone:
+  type: str
+  help: "Server timezone:"
+  default: "UTC"
+
+include_glitchtip:
+  type: bool
+  help: "Include GlitchTip/Sentry error tracking?"
+  default: false
+
+glitchtip_secret_key:
+  type: str
+  help: "Secret key for GlitchTip (leave empty to auto-generate):"
+  default: ""
+  when: "{{ include_glitchtip }}"
+
+include_metabase:
+  type: bool
+  help: "Include Metabase BI dashboards?"
+  default: false
+
+metabase_read_only_password:
+  type: str
+  help: "Password for Metabase read-only database user (leave empty to auto-generate):"
+  default: ""
+  when: "{{ include_metabase }}"
+
+include_pgadmin4:
+  type: bool
+  help: "Include pgAdmin4 database management?"
+  default: false
+
+pgadmin4_password:
+  type: str
+  help: "Password for pgAdmin4 (leave empty to auto-generate):"
+  default: ""
+  when: "{{ include_pgadmin4 }}"
+
+include_mailpit:
+  type: bool
+  help: "Include Mailpit for email testing?"
+  default: false
+
+include_redis_commander:
+  type: bool
+  help: "Include Redis Commander for Redis management?"
+  default: false
+
+redis_commander_password:
+  type: str
+  help: "Password for Redis Commander (leave empty to auto-generate):"
+  default: ""
+  when: "{{ include_redis_commander }}"
+
+include_flower:
+  type: bool
+  help: "Include Flower Celery monitoring?"
+  default: false
+
+flower_password:
+  type: str
+  help: "Password for Flower dashboard (leave empty to auto-generate):"
+  default: ""
+  when: "{{ include_flower }}"
+
+include_redbeat:
+  type: bool
+  help: "Use RedBeat scheduler for Celery workers beat?"
+  default: false
 
 _exclude:
   - __pycache__
@@ -77,6 +158,7 @@ _exclude:
   - poetry.toml
 
 _tasks:
+  - "python3 scripts/assemble.py"
   - "./scripts/setup.sh"
 
 _answers_file: .copier/.answers.yml
@@ -85,8 +167,42 @@ _message_after_copy: |
 
   Project {{ project_name }} is ready!
 
-  Review .env for any values to replace before starting the server.
+  Navigate to the project directory and review .env before starting the server.
 
   Start the development server:
-    cd {{ project_slug }} && uv run fastapi dev app/main.py --host 0.0.0.0 --port 8000
+    uv run fastapi dev app/main.py --host 0.0.0.0 --port 8000
+
+  Start Celery:
+    uv run celery -A app.celery_app worker --loglevel=info
+  {%- if include_redbeat %}
+    uv run celery -A app.celery_app beat -S redbeat.RedBeatScheduler -l info
+  {%- else %}
+    uv run celery -A app.celery_app beat --loglevel=info
+  {%- endif %}
+
+  URLs:
+    Backend ReDoc:     http://localhost:8000/documentation
+    Backend Swagger:   http://localhost:8000/try
+  {%- if include_flower %}
+    Flower:            http://localhost:5555
+  {%- endif %}
+  {%- if include_glitchtip %}
+    GlitchTip:         http://localhost:8081
+  {%- endif %}
+  {%- if include_mailpit %}
+    Mailpit:           http://localhost:8025
+  {%- endif %}
+  {%- if include_metabase %}
+    Metabase:          http://localhost:3000
+  {%- endif %}
+  {%- if include_pgadmin4 %}
+    pgAdmin4:          http://localhost:5050
+  {%- endif %}
+    RabbitMQ:          http://localhost:15672
+  {%- if include_redis_commander %}
+    Redis Commander:   http://localhost:8082
+  {%- endif %}
+  {%- if include_traefik %}
+    Traefik:           http://{{ traefik_host or 'localhost' }}:8080
+  {%- endif %}
 
