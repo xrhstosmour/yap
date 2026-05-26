@@ -58,9 +58,9 @@ A production-ready FastAPI backend template with best practices, authentication,
 
 You need:
 
-- [uv](https://docs.astral.sh/uv/)
-- [Docker](https://www.docker.com/)
-- [copier](https://copier.readthedocs.io/)
+- [uv](https://docs.astasral.sh/uv/getting-started/installation/)
+- [Docker](https://docs.docker.com/engine/install/)
+- [copier](https://copier.readthedocs.io/en/stable/#installation)
 
 ```bash
 # 1. Create a new project from this template.
