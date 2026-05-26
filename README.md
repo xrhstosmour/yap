@@ -9,11 +9,11 @@ This boilerplate provides a quick start for building high-performance, efficient
 
 ## Installation
 
-First, ensure you have `Copier` installed. If not, you can install it using `pip`:
+You need:
 
-``` bash
-pip install copier
-```
+- [uv](https://docs.astral.sh/uv/)
+- [Docker](https://www.docker.com/)
+- [copier](https://copier.readthedocs.io/)
 
 Generate a new boilerplate project:
 
