@@ -11,9 +11,9 @@ This boilerplate provides a quick start for building high-performance, efficient
 
 You need:
 
-- [uv](https://docs.astral.sh/uv/)
-- [Docker](https://www.docker.com/)
-- [copier](https://copier.readthedocs.io/)
+- [uv](https://docs.astral.sh/uv/getting-started/installation/)
+- [Docker](https://docs.docker.com/engine/install/)
+- [copier](https://copier.readthedocs.io/en/stable/#installation)
 
 Generate a new boilerplate project:
 
