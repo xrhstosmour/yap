@@ -119,6 +119,9 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "-v --tb=short"
+markers = [
+    "slow: requires running services; deselect with '-m \"not slow\"'",
+]
 
 [tool.coverage.run]
 source = ["app"]
