@@ -90,8 +90,8 @@ def create_app() -> FastAPI:
         version="1.0.0",
         openapi_url=f"{settings.API_V1_STR}/openapi.json",
         generate_unique_id_function=custom_generate_unique_id,
-        docs_url="/documentation",
-        redoc_url="/redoc",
+        docs_url="/try",
+        redoc_url="/documentation",
         lifespan=lifespan,
     )
 
