@@ -17,7 +17,9 @@ REPO_URL = "https://github.com/xrhstosmour/containers.git"
 def run_openssl(*args) -> None:
     subprocess.run(
         ["openssl"] + list(args),
-        check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
 
 
@@ -36,10 +38,37 @@ def generate_certs(cert_dir, project_slug) -> None:
         srv_crt = os.path.join(cert_dir, "server_certificate.pem")
         subj = f"/C=GR/L=Athens/O={project_slug}.self_signed/CN={project_slug}.self_signed.com"
         run_openssl("genrsa", "-out", ca_key, "2048")
-        run_openssl("req", "-new", "-x509", "-days", "36500", "-key", ca_key, "-out", ca_crt, "-subj", subj)
+        run_openssl(
+            "req",
+            "-new",
+            "-x509",
+            "-days",
+            "36500",
+            "-key",
+            ca_key,
+            "-out",
+            ca_crt,
+            "-subj",
+            subj,
+        )
         run_openssl("genrsa", "-out", srv_key, "2048")
         run_openssl("req", "-new", "-key", srv_key, "-out", srv_req, "-subj", subj)
-        run_openssl("x509", "-req", "-days", "36500", "-in", srv_req, "-CA", ca_crt, "-CAkey", ca_key, "-set_serial", "01", "-out", srv_crt)
+        run_openssl(
+            "x509",
+            "-req",
+            "-days",
+            "36500",
+            "-in",
+            srv_req,
+            "-CA",
+            ca_crt,
+            "-CAkey",
+            ca_key,
+            "-set_serial",
+            "01",
+            "-out",
+            srv_crt,
+        )
     else:
         # Traefik / generic: single self-signed certificate.
         key_file = os.path.join(cert_dir, "certificate.key")
@@ -48,10 +77,24 @@ def generate_certs(cert_dir, project_slug) -> None:
         subj = f"/C=GR/ST=Athens/L=Athens/O=Local/CN={project_slug}.local"
         run_openssl("ecparam", "-genkey", "-name", "secp384r1", "-out", key_file)
         run_openssl("req", "-new", "-key", key_file, "-out", csr_file, "-subj", subj)
-        run_openssl("req", "-x509", "-sha256", "-nodes", "-days", "730",
-                    "-key", key_file, "-in", csr_file, "-out", crt_file,
-                    "-extensions", "v3_req",
-                    "-addext", f"subjectAltName=DNS:{project_slug}.local,DNS:www.{project_slug}.local")
+        run_openssl(
+            "req",
+            "-x509",
+            "-sha256",
+            "-nodes",
+            "-days",
+            "730",
+            "-key",
+            key_file,
+            "-in",
+            csr_file,
+            "-out",
+            crt_file,
+            "-extensions",
+            "v3_req",
+            "-addext",
+            f"subjectAltName=DNS:{project_slug}.local,DNS:www.{project_slug}.local",
+        )
 
     for f in template_files:
         os.remove(os.path.join(cert_dir, f))
@@ -60,16 +103,16 @@ def generate_certs(cert_dir, project_slug) -> None:
 
 MAP = {
     # name -> path inside containers repo
-    "postgresql":  "databases/postgresql",
-    "redis":       "databases/redis",
-    "rabbitmq":    "distribute/brokers/rabbitmq",
-    "traefik":     "networking/proxies/traefik",
-    "glitchtip":   "monitoring/glitchtip",
-    "metabase":    "databases/manage/metabase",
-    "pgadmin4":    "databases/manage/pgadmin4",
-    "mailpit":     "email/mailpit",
+    "postgresql": "databases/postgresql",
+    "redis": "databases/redis",
+    "rabbitmq": "distribute/brokers/rabbitmq",
+    "traefik": "networking/proxies/traefik",
+    "glitchtip": "monitoring/glitchtip",
+    "metabase": "databases/manage/metabase",
+    "pgadmin4": "databases/manage/pgadmin4",
+    "mailpit": "email/mailpit",
     "redis_commander": "databases/manage/redis_commander",
-    "flower":      "monitoring/workers/flower",
+    "flower": "monitoring/workers/flower",
 }
 
 
@@ -82,8 +125,12 @@ def read_services(containers_directory) -> list[str]:
     with open(compose_file) as f:
         for line in f:
             line = line.strip()
-            if line.startswith("- containers/") and line.endswith("/docker-compose.yml"):
-                path = line.replace("- containers/", "").replace("/docker-compose.yml", "")
+            if line.startswith("- containers/") and line.endswith(
+                "/docker-compose.yml"
+            ):
+                path = line.replace("- containers/", "").replace(
+                    "/docker-compose.yml", ""
+                )
                 for name, repo_path in MAP.items():
                     if repo_path == path:
                         services.append(name)
@@ -129,7 +176,7 @@ def main() -> None:
         for f in files:
             if f.startswith("template."):
                 src_path = os.path.join(root, f)
-                name = f[len("template."):]
+                name = f[len("template.") :]
                 if "secrets" in root and not name.startswith("."):
                     name = "." + name
                 dst_path = os.path.join(root, name)
@@ -156,14 +203,17 @@ def main() -> None:
                         password = project_slug + "-" + os.urandom(4).hex()
                         result = subprocess.run(
                             ["openssl", "passwd", "-6", password],
-                            capture_output=True, text=True,
+                            capture_output=True,
+                            text=True,
                         )
                         if result.returncode == 0:
                             with open(htpasswd_path, "w") as hf:
                                 hf.write(f"admin:{result.stdout.strip()}\n")
                             print("  Generated htpasswd")
                         else:
-                            print("  Warning: openssl not available, htpasswd left as placeholder")
+                            print(
+                                "  Warning: openssl not available, htpasswd left as placeholder"
+                            )
 
     # Generate self-signed certificates for all services.
     for root, dirs, _ in os.walk(containers_directory):
@@ -173,12 +223,27 @@ def main() -> None:
     # Propagate the RabbitMQ CA cert to Flower so it can trust the broker over TLS.
     # Must run after generate_certs() so ca_certificate.pem actually exists.
     if "flower" in services:
-        rabbit_cert = os.path.join(containers_directory, MAP["rabbitmq"], "certificates", "ca_certificate.pem")
-        flower_cert_dir = os.path.join(containers_directory, MAP["flower"], "certificates")
+        rabbit_cert = os.path.join(
+            containers_directory, MAP["rabbitmq"], "certificates", "ca_certificate.pem"
+        )
+        flower_cert_dir = os.path.join(
+            containers_directory, MAP["flower"], "certificates"
+        )
         if os.path.isfile(rabbit_cert):
             os.makedirs(flower_cert_dir, exist_ok=True)
-            shutil.copy2(rabbit_cert, os.path.join(flower_cert_dir, "ca_certificate.pem"))
+            shutil.copy2(
+                rabbit_cert, os.path.join(flower_cert_dir, "ca_certificate.pem")
+            )
             print("  Copied RabbitMQ CA cert to Flower")
+
+    # Write SSL_CERTIFICATE_PATH so Python's ssl module trusts the self-signed CA.
+    certs_env = os.path.join(containers_directory, ".certificates")
+    ca_cert = os.path.abspath(os.path.join(
+        containers_directory, MAP["rabbitmq"], "certificates", "ca_certificate.pem"
+    ))
+    with open(certs_env, "w") as f:
+        f.write(f"SSL_CERTIFICATE_PATH={ca_cert}\n")
+    print(f"  Wrote {certs_env}")
 
     # Clean up temp clone.
     if cloned:

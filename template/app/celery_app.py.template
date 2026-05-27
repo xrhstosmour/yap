@@ -6,6 +6,8 @@ and defines common background tasks.
 
 from __future__ import annotations
 
+import os
+
 from celery import Celery
 from celery.schedules import crontab
 
@@ -13,6 +15,12 @@ from app.core.logging import get_logger
 from app.core.settings import settings
 
 logger = get_logger("celery")
+
+# Propagate SSL_CERTIFICATE_PATH from .env to the OS environment so Python's
+# ssl module can find the self-signed CA cert during amqps:// handshakes.
+# Python reads the standard env var SSL_CERT_FILE.
+if settings.SSL_CERTIFICATE_PATH:
+    os.environ["SSL_CERT_FILE"] = settings.SSL_CERTIFICATE_PATH
 
 # Celery application.
 celery_app = Celery(
@@ -42,6 +50,7 @@ celery_app.conf.update(
     broker_connection_retry_on_startup=True,
     broker_connection_retry=True,
     broker_connection_max_retries=10,
+    redbeat_redis_url=settings.REDIS_URL,
 )
 
 # Beat schedule for periodic tasks.
