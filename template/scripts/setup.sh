@@ -99,6 +99,14 @@ else
     "${SED_INPLACE[@]}" "s/REDIS_COMMANDER_PASSWORD=.*/REDIS_COMMANDER_PASSWORD=your-redis-commander-password/" .env.example
     "${SED_INPLACE[@]}" "s/METABASE_READ_ONLY_PASSWORD=.*/METABASE_READ_ONLY_PASSWORD=your-metabase-read-only-password/" .env.example
     "${SED_INPLACE[@]}" "s/SENTRY_DSN=.*/SENTRY_DSN=https:\/\/public:secret@sentry.com\/1/" .env.example
+
+    # Merge certificate paths written by assemble.py into .env.
+    # Replaces the placeholder SSL_CERTIFICATE_PATH with the absolute path from assemble.py.
+    if [ -f containers/.certificates ]; then
+        cert_path=$(cut -d= -f2- < containers/.certificates)
+        "${SED_INPLACE[@]}" "s|SSL_CERTIFICATE_PATH=.*|SSL_CERTIFICATE_PATH=${cert_path}|" .env
+        rm containers/.certificates
+    fi
 fi
 
 # Dependencies installation.
