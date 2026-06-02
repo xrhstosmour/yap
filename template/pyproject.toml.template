@@ -23,6 +23,7 @@ dependencies = [
     "structlog>=25.0.0",
     "redis>=5.2.0",
     "celery>=5.4.0",
+    "celery-redbeat>=2.3.0",
     "email-validator>=2.2.0",
     "httpx>=0.28.0",
     "jinja2>=3.1.0",
@@ -118,6 +119,9 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "-v --tb=short"
+markers = [
+    "slow: requires running services; deselect with '-m \"not slow\"'",
+]
 
 [tool.coverage.run]
 source = ["app"]
