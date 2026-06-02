@@ -147,7 +147,7 @@ if command -v docker >/dev/null 2>&1; then
         done
     fi
 
-    info "Starting all services..."
+    info "Starting core services..."
     docker network create internal 2>/dev/null || true
     if docker compose ps -q 2>/dev/null | grep -q .; then
         warn "Stopping any existing containers, volumes preserved..."
@@ -165,11 +165,11 @@ if command -v docker >/dev/null 2>&1; then
     done
 
     for i in $(seq 1 3); do
-        if docker compose up -d --force-recreate; then
+        if docker compose up -d postgresql --force-recreate; then
             break
         fi
         if [ "$i" -lt 3 ]; then
-            warn "Compose start failed ($i/3), retrying in 5 s..."
+            warn "Core services start failed ($i/3), retrying in 5 s..."
             sleep 5
         fi
     done
@@ -190,15 +190,20 @@ if command -v docker >/dev/null 2>&1; then
             uv run alembic upgrade head || error "Database migrations failed!"
 
             info "Seeding initial PostgreSQL data..."
-            uv run python app/initial_data.py || warn "Initial PostgreSQL data seeding failed!"
-
-            info "Setting up Metabase database..."
-            source .env 2>/dev/null || true
-            docker compose exec -T postgresql psql -U "${POSTGRESQL_USER}" -c "CREATE DATABASE metabase;" 2>/dev/null || true
-            docker compose exec -T postgresql psql -U "${POSTGRESQL_USER}" -v "pw=${METABASE_READ_ONLY_PASSWORD}" -c "CREATE USER metabase_readonly WITH PASSWORD :'pw';" 2>/dev/null || true
-            docker compose exec -T postgresql psql -U "${POSTGRESQL_USER}" -v "db=${POSTGRESQL_DATABASE}" -c "GRANT CONNECT ON DATABASE :\"db\" TO metabase_readonly;" 2>/dev/null || true
-            docker compose exec -T postgresql psql -U "${POSTGRESQL_USER}" -d "${POSTGRESQL_DATABASE}" -c "GRANT SELECT ON ALL TABLES IN SCHEMA public TO metabase_readonly;" 2>/dev/null || true
+            uv run --env-file .env python app/initial_data.py || warn "Initial PostgreSQL data seeding failed!"
         fi
+
+        # Start remaining services now that the database is ready.
+        info "Starting remaining services..."
+        for i in $(seq 1 3); do
+            if docker compose up -d --force-recreate; then
+                break
+            fi
+            if [ "$i" -lt 3 ]; then
+                warn "Remaining services start failed ($i/3), retrying in 5 s..."
+                sleep 5
+            fi
+        done
     else
         warn "Skipping migrations and seeding..."
     fi
