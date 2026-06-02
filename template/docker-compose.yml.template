@@ -6,7 +6,7 @@ include:
   - containers/networking/proxies/traefik/docker-compose.yml
 {%- endif %}
 {%- if include_glitchtip %}
-  - containers/monitoring/glitchtip/docker-compose.yml
+  - containers/monitoring/codebase/glitchtip/docker-compose.yml
 {%- endif %}
 {%- if include_metabase %}
   - containers/databases/manage/metabase/docker-compose.yml
