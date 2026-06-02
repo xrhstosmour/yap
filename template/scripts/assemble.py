@@ -107,7 +107,7 @@ MAP = {
     "redis": "databases/redis",
     "rabbitmq": "distribute/brokers/rabbitmq",
     "traefik": "networking/proxies/traefik",
-    "glitchtip": "monitoring/glitchtip",
+    "glitchtip": "monitoring/codebase/glitchtip",
     "metabase": "databases/manage/metabase",
     "pgadmin4": "databases/manage/pgadmin4",
     "mailpit": "email/mailpit",
