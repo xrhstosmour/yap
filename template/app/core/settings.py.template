@@ -170,12 +170,15 @@ class Settings(BaseSettings):
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
     REDIS_DATABASE: int = 0
+    REDIS_PASSWORD: str = ""
 
     @computed_field  # type: ignore[prop-decorator]  # pyright: ignore[reportDecoratorUsage]
     @property
     def REDIS_URL(self) -> str:
-        """Build Redis connection URL from components."""
-        return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DATABASE}"
+        pwd = f":{self.REDIS_PASSWORD}" if self.REDIS_PASSWORD else ""
+        return (
+            f"redis://{pwd}@{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DATABASE}"
+        )
 
     # Celery.
     RABBITMQ_HOST: str = "localhost"
@@ -186,18 +189,24 @@ class Settings(BaseSettings):
     @computed_field  # type: ignore[prop-decorator]  # pyright: ignore[reportDecoratorUsage]
     @property
     def CELERY_BROKER_URL(self) -> str:
-        """Build Celery broker URL from RabbitMQ settings."""
-        return f"amqp://{self.RABBITMQ_USER}:{self.RABBITMQ_PASSWORD}@{self.RABBITMQ_HOST}:{self.RABBITMQ_PORT}/%2F"
+        return f"amqps://{self.RABBITMQ_USER}:{self.RABBITMQ_PASSWORD}@{self.RABBITMQ_HOST}:{self.RABBITMQ_PORT}//"
 
     @computed_field  # type: ignore[prop-decorator]  # pyright: ignore[reportDecoratorUsage]
     @property
     def CELERY_RESULT_BACKEND(self) -> str:
-        """Build Celery result backend URL from Redis settings."""
-        return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DATABASE + 1}"
+        return self.REDIS_URL.replace(
+            f"/{self.REDIS_DATABASE}", f"/{self.REDIS_DATABASE + 1}"
+        )
 
     # Rate Limiting.
     RATE_LIMIT_PER_MINUTE: int = 60
     RATE_LIMIT_PER_MINUTE_API_KEY: int = 300
+
+    # SSL certificate for Celery broker TLS verification.
+    SSL_CERTIFICATE_PATH: str = ""
+
+    # Idempotency.
+    IDEMPOTENCY_TTL_HOURS: int = 24
 
     # Performance Tuning.
     DATABASE_POOL_SIZE: int = 10

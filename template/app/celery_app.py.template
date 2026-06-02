@@ -6,13 +6,23 @@ and defines common background tasks.
 
 from __future__ import annotations
 
+import os
+
 from celery import Celery
 from celery.schedules import crontab
+from celery.signals import task_failure
+from celery.signals import worker_shutdown
 
 from app.core.logging import get_logger
 from app.core.settings import settings
 
 logger = get_logger("celery")
+
+# Propagate SSL_CERTIFICATE_PATH from .env to the OS environment so Python's
+# ssl module can find the self-signed CA cert during amqps:// handshakes.
+# Python reads the standard env var SSL_CERT_FILE.
+if settings.SSL_CERTIFICATE_PATH:
+    os.environ["SSL_CERT_FILE"] = settings.SSL_CERTIFICATE_PATH
 
 # Celery application.
 celery_app = Celery(
@@ -42,21 +52,22 @@ celery_app.conf.update(
     broker_connection_retry_on_startup=True,
     broker_connection_retry=True,
     broker_connection_max_retries=10,
+    redbeat_redis_url=settings.REDIS_URL,
 )
 
 # Beat schedule for periodic tasks.
 celery_app.conf.beat_schedule = {
     "cleanup-old-audit-logs": {
         "task": "app.tasks.cleanup.cleanup_old_audit_logs",
-        "schedule": crontab(hour=3, minute=0),  # Run daily at 3 AM
+        "schedule": crontab(hour=3, minute=0),
     },
     "cache-warm": {
         "task": "app.tasks.cache.warm_cache",
-        "schedule": crontab(hour=6, minute=0),  # Run daily at 6 AM
+        "schedule": crontab(hour=6, minute=0),
     },
     "purge-graveyard": {
         "task": "app.tasks.cleanup.purge_graveyard",
-        "schedule": crontab(hour=4, minute=0),  # Run daily at 4 AM
+        "schedule": crontab(hour=4, minute=0),
     },
     "process-outbox": {
         "task": "app.tasks.outbox.process_outbox",
@@ -71,6 +82,32 @@ celery_app.conf.task_routes = {
     "app.tasks.cleanup.*": {"queue": "cleanup"},
     "app.tasks.outbox.*": {"queue": "events"},
 }
+
+
+# Log task failures with full context for monitoring.
+@task_failure.connect
+def _on_task_failure(
+    sender=None,
+    task_id=None,
+    exception=None,
+    args=None,
+    kwargs=None,
+    traceback=None,
+    einfo=None,
+    **signal_kwargs,
+):
+    logger.error(
+        "task_failed_permanently",
+        task_id=task_id,
+        task_name=sender.name if sender else None,
+        error=str(exception),
+    )
+
+
+# Graceful shutdown.
+@worker_shutdown.connect
+def _on_worker_shutdown(**signal_kwargs):
+    logger.info("celery_worker_shutting_down")
 
 
 @celery_app.task(bind=True, name="app.tasks.health_check")

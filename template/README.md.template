@@ -6,10 +6,10 @@
 
 ### Authentication & Authorization
 
-- **User Authentication**: JWT-based authentication with access and refresh tokens, OAuth2 form login
-- **API Keys**: Programmatic access with scoped permissions
-- **Multi-tenancy**: Tenant isolation with full CRUD management (admin), system tenant fallback
-- **Soft Deletes**: Recoverable data with deleted_at timestamps
+- **User Authentication**: JWT-based with access + refresh tokens, OAuth2 form login
+- **API Keys**: Scoped programmatic access
+- **Multi-tenancy**: Tenant isolation with full CRUD (admin), system tenant fallback
+- **Soft Deletes**: Recoverable data via deleted_at timestamps
 - **Graveyard**: Centralized tombstone tracking for all deletions
 - **Audit Logging**: Complete trail of all user and system actions
 - **Field Encryption**: Fernet encryption for PII and sensitive data
@@ -20,16 +20,24 @@
 - **FastAPI 0.115+**: Modern async Python web framework
 - **SQLModel**: Pydantic + SQLAlchemy hybrid ORM
 - **PostgreSQL**: Production-grade relational database
-- **Redis**: Caching and Celery message broker
-- **Celery**: Background task processing
+- **Redis**: Caching, rate limiting, Celery result backend
+- **Celery**: Background task processing with RabbitMQ (AMQPS/TLS) broker
+- **RedBeat**: Redis-backed Celery beat scheduler
+
+### Reliability
+
+- **Idempotency**: `X-Idempotency-Key` header support on mutating endpoints, safe retries without duplicate side effects
+- **Circuit Breaker**: Protect external service calls from cascading failures
+- **Resilient Container Startup**: Automated retries on transient Docker Hub/network failures
 
 ### Developer Experience
 
 - **uv**: Fast Python package manager (10-100x faster than Poetry)
 - **Structured Logging**: JSON logs with correlation IDs
-- **Docker Compose**: Local development with all services
+- **Docker Compose**: Local development with all services, auto-generated self-signed TLS certs
 - **API Documentation**: Auto-generated OpenAPI/Swagger docs
 - **Pre-commit Hooks**: Code quality checks
+- **Startup Smoke Tests**: Celery config validation & health-check task execution
 
 ### Security
 
@@ -37,20 +45,24 @@
 - **Password Hashing**: bcrypt with automatic updates
 - **Timing Attack Prevention**: Constant-time password verification
 - **CORS Configuration**: Easy frontend integration
+- **TLS Everywhere**: RabbitMQ/PostgreSQL connections secured via auto-generated self-signed certificates
 
 ### Observability
 
 - **Structured JSON Logging**: structlog with correlation IDs
 - **OpenTelemetry Tracing**: Distributed trace support
 - **GlitchTip**: Self-hosted error tracking (Sentry SDK compatible)
+- **Flower**: Celery worker monitoring dashboard
 - **Health Metrics**: Pool stats, cache stats, readiness/liveness probes
 
 ### DevOps
 
-- **GitHub Actions CI/CD**: Lint, type check, test, security scan
+- **GitHub Actions CI/CD**: Lint, type check, test, security scan (Trivy)
 - **Traefik + Let's Encrypt**: Automatic HTTPS for production
 - **Metabase**: BI dashboards and data exploration
 - **Mailpit**: Email testing in development
+- **PGAdmin4**: PostgreSQL management UI
+- **Redis Commander**: Redis management UI
 
 ## Quick Start
 
@@ -98,8 +110,8 @@ uv run celery -A app.celery_app beat --loglevel=info
 
 FastAPI auto-generates interactive documentation with "Try it out":
 
-- **Swagger UI** ([http://localhost:8000/documentation](http://localhost:8000/documentation)): Interactive "Try it out" for every endpoint.
-- **ReDoc** ([http://localhost:8000/redoc](http://localhost:8000/redoc)): Clean reference documentation
+- **Swagger UI** ([http://localhost:8000/try](http://localhost:8000/try)): Interactive "Try it out" for every endpoint.
+- **ReDoc** ([http://localhost:8000/documentation](http://localhost:8000/documentation)): Clean reference documentation
 
 Operation IDs use `<tag>-<route_name>` format for clean client code generation.
 All request/response schemas are fully validated and documented.

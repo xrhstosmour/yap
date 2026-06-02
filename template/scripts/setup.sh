@@ -16,9 +16,35 @@ echo "────────────────────────�
 info "Setting up project in ${PROJECT_DIR}"
 
 # Prerequisites check.
-command -v python3 >/dev/null 2>&1 || error "python3 is required!"
-command -v uv >/dev/null 2>&1 || warn "uv not found. Install: curl -LsSf https://astral.sh/uv/install.sh | sh"
-command -v docker >/dev/null 2>&1 || warn "docker not found (optional, for containerized services)"
+command -v python3 >/dev/null 2>&1 || error "python3 is required! Install from https://www.python.org/downloads/"
+
+# Install uv if missing.
+if ! command -v uv >/dev/null 2>&1; then
+    info "Installing uv..."
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="$HOME/.local/bin:$PATH"
+fi
+
+# Install Docker if missing.
+if ! command -v docker >/dev/null 2>&1; then
+    info "Docker not found. Attempting install..."
+    case "$OSTYPE" in
+        darwin*)
+            if command -v brew >/dev/null 2>&1; then
+                brew install --cask docker
+            fi
+            ;;
+        linux*)
+            curl -fsSL https://get.docker.com | sh 2>/dev/null || true
+            ;;
+        msys*)
+            if command -v winget >/dev/null 2>&1; then
+                winget install Docker.DockerDesktop
+            fi
+            ;;
+    esac
+    command -v docker >/dev/null 2>&1 || error "Docker is required!"
+fi
 
 # Environment file setup.
 if [ -f .env ]; then
@@ -31,35 +57,55 @@ else
     POSTGRESQL_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(24))")
     FIRST_SUPERUSER_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")
     RABBITMQ_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")
+    REDIS_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")
+    FLOWER_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(12))")
+    PGADMIN4_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(12))")
+    GLITCHTIP_SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+    REDIS_COMMANDER_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(12))")
+    METABASE_READ_ONLY_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")
 
     cp .env.example .env
 
     if [[ "$OSTYPE" == "darwin"* ]]; then
-        sed -i '' "s/SECRET_KEY=.*/SECRET_KEY=${SECRET_KEY}/" .env
-        sed -i '' "s/CRYPTO_KEY=.*/CRYPTO_KEY=${CRYPTO_KEY}/" .env
-        sed -i '' "s/POSTGRESQL_PASSWORD=.*/POSTGRESQL_PASSWORD=${POSTGRESQL_PASSWORD}/" .env
-        sed -i '' "s/FIRST_SUPERUSER_PASSWORD=.*/FIRST_SUPERUSER_PASSWORD=${FIRST_SUPERUSER_PASSWORD}/" .env
-        sed -i '' "s/RABBITMQ_PASSWORD=.*/RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD}/" .env
-
-        sed -i '' "s/SECRET_KEY=.*/SECRET_KEY=your-secret-key/" .env.example
-        sed -i '' "s/CRYPTO_KEY=.*/CRYPTO_KEY=your-32-bit-fernet-key==/" .env.example
-        sed -i '' "s/POSTGRESQL_PASSWORD=.*/POSTGRESQL_PASSWORD=your-postgresql-password/" .env.example
-        sed -i '' "s/FIRST_SUPERUSER_PASSWORD=.*/FIRST_SUPERUSER_PASSWORD=your-superuser-password/" .env.example
-        sed -i '' "s/RABBITMQ_PASSWORD=.*/RABBITMQ_PASSWORD=your-rabbitmq-password/" .env.example
-        sed -i '' "s/SENTRY_DSN=.*/SENTRY_DSN=https:\/\/public:secret@sentry.com\/1/" .env.example
+        SED_INPLACE=("sed" "-i" "")
     else
-        sed -i "s/SECRET_KEY=.*/SECRET_KEY=${SECRET_KEY}/" .env
-        sed -i "s/CRYPTO_KEY=.*/CRYPTO_KEY=${CRYPTO_KEY}/" .env
-        sed -i "s/POSTGRESQL_PASSWORD=.*/POSTGRESQL_PASSWORD=${POSTGRESQL_PASSWORD}/" .env
-        sed -i "s/FIRST_SUPERUSER_PASSWORD=.*/FIRST_SUPERUSER_PASSWORD=${FIRST_SUPERUSER_PASSWORD}/" .env
-        sed -i "s/RABBITMQ_PASSWORD=.*/RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD}/" .env
+        SED_INPLACE=("sed" "-i")
+    fi
 
-        sed -i "s/SECRET_KEY=.*/SECRET_KEY=your-secret-key/" .env.example
-        sed -i "s/CRYPTO_KEY=.*/CRYPTO_KEY=your-32-bit-fernet-key==/" .env.example
-        sed -i "s/POSTGRESQL_PASSWORD=.*/POSTGRESQL_PASSWORD=your-postgresql-password/" .env.example
-        sed -i "s/FIRST_SUPERUSER_PASSWORD=.*/FIRST_SUPERUSER_PASSWORD=your-superuser-password/" .env.example
-        sed -i "s/RABBITMQ_PASSWORD=.*/RABBITMQ_PASSWORD=your-rabbitmq-password/" .env.example
-        sed -i "s/SENTRY_DSN=.*/SENTRY_DSN=https:\/\/public:secret@sentry.com\/1/" .env.example
+    "${SED_INPLACE[@]}" "s/SECRET_KEY=.*/SECRET_KEY=${SECRET_KEY}/" .env
+    "${SED_INPLACE[@]}" "s/CRYPTO_KEY=.*/CRYPTO_KEY=${CRYPTO_KEY}/" .env
+    "${SED_INPLACE[@]}" "s/POSTGRESQL_PASSWORD=.*/POSTGRESQL_PASSWORD=${POSTGRESQL_PASSWORD}/" .env
+    "${SED_INPLACE[@]}" "s|\(DATABASE_URL=postgres://[^:]*:\)[^@]*@|\1${POSTGRESQL_PASSWORD}@|" .env
+    "${SED_INPLACE[@]}" "s/METABASE_DATABASE_PASSWORD=.*/METABASE_DATABASE_PASSWORD=${POSTGRESQL_PASSWORD}/" .env
+    "${SED_INPLACE[@]}" "s/FIRST_SUPERUSER_PASSWORD=.*/FIRST_SUPERUSER_PASSWORD=${FIRST_SUPERUSER_PASSWORD}/" .env
+    "${SED_INPLACE[@]}" "s/RABBITMQ_PASSWORD=.*/RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD}/" .env
+    "${SED_INPLACE[@]}" "s/REDIS_PASSWORD=.*/REDIS_PASSWORD=${REDIS_PASSWORD}/" .env
+    "${SED_INPLACE[@]}" "s|REDIS_URL=redis://:.*@redis|REDIS_URL=redis://:${REDIS_PASSWORD}@redis|" .env
+    "${SED_INPLACE[@]}" "s/FLOWER_PASSWORD=.*/FLOWER_PASSWORD=${FLOWER_PASSWORD}/" .env
+    "${SED_INPLACE[@]}" "s/PGADMIN4_PASSWORD=.*/PGADMIN4_PASSWORD=${PGADMIN4_PASSWORD}/" .env
+    "${SED_INPLACE[@]}" "s/GLITCHTIP_SECRET_KEY=.*/GLITCHTIP_SECRET_KEY=${GLITCHTIP_SECRET_KEY}/" .env
+    "${SED_INPLACE[@]}" "s/REDIS_COMMANDER_PASSWORD=.*/REDIS_COMMANDER_PASSWORD=${REDIS_COMMANDER_PASSWORD}/" .env
+    "${SED_INPLACE[@]}" "s/METABASE_READ_ONLY_PASSWORD=.*/METABASE_READ_ONLY_PASSWORD=${METABASE_READ_ONLY_PASSWORD}/" .env
+
+    "${SED_INPLACE[@]}" "s/SECRET_KEY=.*/SECRET_KEY=your-secret-key/" .env.example
+    "${SED_INPLACE[@]}" "s/CRYPTO_KEY=.*/CRYPTO_KEY=your-32-bit-fernet-key==/" .env.example
+    "${SED_INPLACE[@]}" "s/POSTGRESQL_PASSWORD=.*/POSTGRESQL_PASSWORD=your-postgresql-password/" .env.example
+    "${SED_INPLACE[@]}" "s/FIRST_SUPERUSER_PASSWORD=.*/FIRST_SUPERUSER_PASSWORD=your-superuser-password/" .env.example
+    "${SED_INPLACE[@]}" "s/RABBITMQ_PASSWORD=.*/RABBITMQ_PASSWORD=your-rabbitmq-password/" .env.example
+    "${SED_INPLACE[@]}" "s/REDIS_PASSWORD=.*/REDIS_PASSWORD=your-redis-password/" .env.example
+    "${SED_INPLACE[@]}" "s/FLOWER_PASSWORD=.*/FLOWER_PASSWORD=your-flower-password/" .env.example
+    "${SED_INPLACE[@]}" "s/PGADMIN4_PASSWORD=.*/PGADMIN4_PASSWORD=your-pgadmin-password/" .env.example
+    "${SED_INPLACE[@]}" "s/GLITCHTIP_SECRET_KEY=.*/GLITCHTIP_SECRET_KEY=your-glitchtip-secret-key/" .env.example
+    "${SED_INPLACE[@]}" "s/REDIS_COMMANDER_PASSWORD=.*/REDIS_COMMANDER_PASSWORD=your-redis-commander-password/" .env.example
+    "${SED_INPLACE[@]}" "s/METABASE_READ_ONLY_PASSWORD=.*/METABASE_READ_ONLY_PASSWORD=your-metabase-read-only-password/" .env.example
+    "${SED_INPLACE[@]}" "s/SENTRY_DSN=.*/SENTRY_DSN=https:\/\/public:secret@sentry.com\/1/" .env.example
+
+    # Merge certificate paths written by assemble.py into .env.
+    # Replaces the placeholder SSL_CERTIFICATE_PATH with the absolute path from assemble.py.
+    if [ -f containers/.certificates ]; then
+        cert_path=$(cut -d= -f2- < containers/.certificates)
+        "${SED_INPLACE[@]}" "s|SSL_CERTIFICATE_PATH=.*|SSL_CERTIFICATE_PATH=${cert_path}|" .env
+        rm containers/.certificates
     fi
 fi
 
@@ -101,12 +147,35 @@ if command -v docker >/dev/null 2>&1; then
         done
     fi
 
-    info "Starting infrastructure services..."
-    docker compose down -v 2>/dev/null || true
-    docker compose up -d --force-recreate postgresql redis rabbitmq 2>/dev/null || \
-        warn "docker compose failed. Start services manually: docker compose up -d"
+    info "Starting core services..."
+    docker network create internal 2>/dev/null || true
+    if docker compose ps -q 2>/dev/null | grep -q .; then
+        warn "Stopping any existing containers, volumes preserved..."
+    fi
+    docker compose down 2>/dev/null || true
+
+    # Pull images first, with retries, to avoid transient Docker Hub failures.
+    info "Pulling container images..."
+    for i in $(seq 1 3); do
+        if docker compose pull --ignore-pull-failures 2>/dev/null; then
+            break
+        fi
+        warn "Image pull failed ($i/3), retrying in 5 s..."
+        sleep 5
+    done
+
+    for i in $(seq 1 3); do
+        if docker compose up -d postgresql --force-recreate; then
+            break
+        fi
+        if [ "$i" -lt 3 ]; then
+            warn "Core services start failed ($i/3), retrying in 5 s..."
+            sleep 5
+        fi
+    done
 
     info "Waiting for database readiness..."
+    sleep 5
     for i in $(seq 1 30); do
         if docker compose exec -T postgresql pg_isready 2>/dev/null; then
             break
@@ -120,9 +189,21 @@ if command -v docker >/dev/null 2>&1; then
             info "Running database migrations..."
             uv run alembic upgrade head || error "Database migrations failed!"
 
-            info "Seeding initial data..."
-            uv run python app/initial_data.py || warn "Initial data seeding failed"
+            info "Seeding initial PostgreSQL data..."
+            uv run --env-file .env python app/initial_data.py || warn "Initial PostgreSQL data seeding failed!"
         fi
+
+        # Start remaining services now that the database is ready.
+        info "Starting remaining services..."
+        for i in $(seq 1 3); do
+            if docker compose up -d --force-recreate; then
+                break
+            fi
+            if [ "$i" -lt 3 ]; then
+                warn "Remaining services start failed ($i/3), retrying in 5 s..."
+                sleep 5
+            fi
+        done
     else
         warn "Skipping migrations and seeding..."
     fi

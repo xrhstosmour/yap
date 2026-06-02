@@ -2,7 +2,10 @@
 
 import asyncio
 import logging
+import os
 
+from sqlalchemy import create_engine
+from sqlalchemy import text
 from sqlmodel import select
 
 from app.core import SYSTEM_TENANT_ID
@@ -45,15 +48,77 @@ async def init() -> None:
             )
             session.add(user)
             await session.commit()
-            logger.info("Created superuser")
+            logger.info("Created super user")
         else:
             logger.info("Superuser already exists!")
 
 
+def setup_metabase() -> None:
+    """Create Metabase database and read-only user if enabled."""
+    password = os.environ.get("METABASE_READ_ONLY_PASSWORD")
+    if not password:
+        return
+
+    try:
+        _setup_metabase(password)
+    except Exception as e:
+        logger.warning("Metabase database setup failed: %s", e)
+
+
+def _setup_metabase(password: str) -> None:
+    base_url = str(settings.DATABASE_URI)
+    admin_url = base_url.rsplit("/", 1)[0] + "/postgres"
+    engine = create_engine(admin_url, isolation_level="AUTOCOMMIT")
+
+    with engine.connect() as conn:
+        try:
+            conn.execute(text("CREATE DATABASE metabase"))
+        except Exception:
+            pass
+
+        try:
+            conn.execute(
+                text(f"CREATE USER metabase_readonly WITH PASSWORD '{password}'"),
+            )
+        except Exception:
+            logger.warning(
+                "metabase_readonly user already exists!"
+            )
+
+        try:
+            conn.execute(
+                text(
+                    f'GRANT CONNECT ON DATABASE "{settings.POSTGRESQL_DATABASE}" TO metabase_readonly'
+                ),
+            )
+        except Exception:
+            pass
+
+    engine.dispose()
+
+    app_engine = create_engine(str(settings.DATABASE_URI), isolation_level="AUTOCOMMIT")
+    with app_engine.connect() as app_conn:
+        try:
+            app_conn.execute(
+                text(
+                    "GRANT SELECT ON ALL TABLES IN SCHEMA public TO metabase_readonly"
+                ),
+            )
+            app_conn.execute(
+                text(
+                    "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO metabase_readonly"
+                ),
+            )
+        except Exception:
+            pass
+    app_engine.dispose()
+    logger.info("Metabase database setup complete")
+
+
 def main() -> None:
-    """Create initial data in database."""
     logger.info("Creating initial data...")
     asyncio.run(init())
+    setup_metabase()
     logger.info("Initial data creation complete")
 
 

@@ -1,111 +1,25 @@
-services:
-  backend:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    ports:
-      - "8000:8000"
-    environment:
-      - POSTGRESQL_SERVER=postgresql
-      - POSTGRESQL_USER={{ project_slug }}
-      - POSTGRESQL_PASSWORD=${POSTGRESQL_PASSWORD}
-      - POSTGRESQL_DATABASE={{ project_slug }}
-      - REDIS_HOST=redis
-      - RABBITMQ_HOST=rabbitmq
-      - ENVIRONMENT=local
-    depends_on:
-      postgresql:
-        condition: service_healthy
-      redis:
-        condition: service_started
-      rabbitmq:
-        condition: service_healthy
-    volumes:
-      - ./scripts:/app/scripts
-    command: /app/scripts/prestart.sh && fastapi run app/main.py --host 0.0.0.0 --port 8000
-
-  postgresql:
-    image: postgres:16-alpine
-    environment:
-      - POSTGRES_USER={{ project_slug }}
-      - POSTGRES_PASSWORD=${POSTGRESQL_PASSWORD}
-      - POSTGRES_DB={{ project_slug }}
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgresql_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U {{ project_slug }}"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-
-  rabbitmq:
-    image: rabbitmq:3.13-management-alpine
-    ports:
-      - "5672:5672"
-      - "15672:15672"
-    environment:
-      - RABBITMQ_DEFAULT_USER={{ project_slug }}
-      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASSWORD}
-    volumes:
-      - rabbitmq_data:/var/lib/rabbitmq
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  celery_worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    command: celery -A app.celery_app worker --loglevel=info
-    environment:
-      - POSTGRESQL_SERVER=postgresql
-      - POSTGRESQL_USER={{ project_slug }}
-      - POSTGRESQL_PASSWORD=${POSTGRESQL_PASSWORD}
-      - POSTGRESQL_DATABASE={{ project_slug }}
-      - REDIS_HOST=redis
-      - RABBITMQ_HOST=rabbitmq
-      - RABBITMQ_USER={{ project_slug }}
-      - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD}
-    depends_on:
-      - postgresql
-      - redis
-      - rabbitmq
-    volumes:
-      - .:/app
-
-  celery_beat:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    command: celery -A app.celery_app beat --loglevel=info
-    environment:
-      - REDIS_HOST=redis
-      - RABBITMQ_HOST=rabbitmq
-      - RABBITMQ_USER={{ project_slug }}
-      - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD}
-    depends_on:
-      - redis
-      - rabbitmq
-    volumes:
-      - .:/app
-
-volumes:
-  postgresql_data:
-  redis_data:
-  rabbitmq_data:
+include:
+  - containers/databases/postgresql/docker-compose.yml
+  - containers/databases/redis/docker-compose.yml
+  - containers/distribute/brokers/rabbitmq/docker-compose.yml
+{%- if include_traefik %}
+  - containers/networking/proxies/traefik/docker-compose.yml
+{%- endif %}
+{%- if include_glitchtip %}
+  - containers/monitoring/codebase/glitchtip/docker-compose.yml
+{%- endif %}
+{%- if include_metabase %}
+  - containers/databases/manage/metabase/docker-compose.yml
+{%- endif %}
+{%- if include_pgadmin4 %}
+  - containers/databases/manage/pgadmin4/docker-compose.yml
+{%- endif %}
+{%- if include_mailpit %}
+  - containers/email/mailpit/docker-compose.yml
+{%- endif %}
+{%- if include_redis_commander %}
+  - containers/databases/manage/redis_commander/docker-compose.yml
+{%- endif %}
+{%- if include_flower %}
+  - containers/monitoring/workers/flower/docker-compose.yml
+{%- endif %}
