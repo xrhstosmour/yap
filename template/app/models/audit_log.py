@@ -12,6 +12,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import JSON
+from sqlalchemy import Index
 from sqlmodel import Field
 
 from app.models.base import BaseModel
@@ -103,6 +104,16 @@ class AuditLog(BaseModel, table=True):
     """
 
     __tablename__ = "audit_logs"  # pyright: ignore[reportAssignmentType]
+    # Compound indexes replace the single-column actor_id and tenant_id indexes.
+    # PostgreSQL can use the leading column of a compound index for point lookups,
+    # so the single-column indexes become redundant once the compounds exist.
+    __table_args__ = (
+        Index("ix_audit_logs_actor_id_created_at", "actor_id", "created_at"),
+        Index("ix_audit_logs_tenant_id_created_at", "tenant_id", "created_at"),
+        # Compound index for get_recent_failures() — WHERE status='failure'
+        # ORDER BY created_at DESC. Eliminates the post-scan sort pass.
+        Index("ix_audit_logs_status_created_at", "status", "created_at"),
+    )
 
     action: str = Field(
         nullable=False,
@@ -116,9 +127,10 @@ class AuditLog(BaseModel, table=True):
         max_length=20,
     )
 
+    # Compound index (actor_id, created_at) covers single-column actor_id lookups.
     actor_id: str = Field(
         nullable=False,
-        index=True,
+        index=False,
         max_length=100,
     )
 
@@ -166,9 +178,10 @@ class AuditLog(BaseModel, table=True):
     )
 
     # Multi-tenancy.
+    # Compound index (tenant_id, created_at) covers single-column tenant_id lookups.
     tenant_id: UUID = Field(
         nullable=False,
-        index=True,
+        index=False,
         foreign_key="tenants.id",
     )
 
