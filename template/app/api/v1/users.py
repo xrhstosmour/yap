@@ -14,9 +14,12 @@ from fastapi import APIRouter
 from fastapi import Depends
 from fastapi import HTTPException
 from fastapi import status
+from fastapi.requests import Request
 from fastapi.responses import Response
 
 from app.core.logging import get_logger
+from app.core.pagination import PAGINATION_HEADERS_SPEC
+from app.core.pagination import PaginatedResponse
 from app.dependencies import CurrentUser
 from app.dependencies import SessionDep
 from app.dependencies import SuperuserUser
@@ -35,6 +38,7 @@ logger = get_logger("api.users")
 @router.get(
     "",
     response_model=UserListResponse,
+    responses=PAGINATION_HEADERS_SPEC,  # type: ignore[arg-type]
     summary="List users",
     description="List all users with pagination and filtering. Admin only.",
 )
@@ -42,7 +46,8 @@ async def list_users(
     params: Annotated[UserListParams, Depends()],
     current_user: SuperuserUser,
     session: SessionDep,
-) -> UserListResponse:
+    request: Request,
+) -> PaginatedResponse:
     """List all users (admin only).
 
     Returns paginated list of users with optional filtering
@@ -61,12 +66,18 @@ async def list_users(
     page = (params.skip // params.limit) + 1 if params.limit > 0 else 1
     pages = (total + params.limit - 1) // params.limit if params.limit > 0 else 1
 
-    return UserListResponse(
-        data=[UserResponse.model_validate(u) for u in users],
+    return PaginatedResponse(
+        content=UserListResponse(
+            data=[UserResponse.model_validate(u) for u in users],
+            total=total,
+            page=page,
+            page_size=params.limit,
+            pages=pages,
+        ).model_dump(),
         total=total,
-        page=page,
-        page_size=params.limit,
-        pages=pages,
+        skip=params.skip,
+        limit=params.limit,
+        request=request,
     )
 
 
