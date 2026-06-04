@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+    <h1>Verify your email, {{ name }}!</h1>
+    <p>Thank you for registering with {{ project }}. Please confirm your email address by clicking the button below.</p>
+    <p style="margin: 32px 0;">
+        <a href="{{ verification_url }}"
+           style="background-color: #2563eb; color: #ffffff; padding: 12px 24px;
+                  text-decoration: none; border-radius: 6px; font-weight: bold;">
+            Verify Email Address
+        </a>
+    </p>
+    <p>Or copy and paste this link into your browser:</p>
+    <p style="word-break: break-all; color: #2563eb;">{{ verification_url }}</p>
+    <p>This link expires in <strong>24 hours</strong>. If you did not create an account, you can safely ignore this email.</p>
+    <hr>
+    <p style="color: #666; font-size: 12px;">
+        This is an automated message from {{ project }}. Please do not reply to this email.
+    </p>
+</body>
+</html>
