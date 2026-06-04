@@ -116,3 +116,36 @@ class PasswordResetConfirmRequest(BaseSchema):
 
     token: str = Field(description="Reset token from email")
     new_password: str = Field(min_length=8, max_length=128, description="New password")
+
+
+class GoogleAuthUrlResponse(BaseSchema):
+    """Google OAuth 2.0 authorization URL response.
+
+    Returned by ``GET /auth/google`` so the client can redirect the
+    user to Google's consent screen.
+
+    Attributes:
+        url: Full Google OAuth 2.0 authorization URL including CSRF state.
+    """
+
+    url: str = Field(description="Google OAuth 2.0 authorization URL")
+
+
+class GoogleCallbackRequest(BaseSchema):
+    """Google OAuth callback request.
+
+    Request body for ``POST /auth/google/callback`` after Google
+    redirects the user back to the application.
+
+    Attributes:
+        code: Authorization code received from Google redirect.
+        state: CSRF state token returned by Google.
+        redirect_uri: Must exactly match the URI used in the
+            authorization request.
+    """
+
+    code: str = Field(description="Authorization code from Google redirect")
+    state: str = Field(description="CSRF state token returned by Google")
+    redirect_uri: str = Field(
+        description="Redirect URI used in the authorization request"
+    )
