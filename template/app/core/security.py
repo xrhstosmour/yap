@@ -2,7 +2,7 @@
 
 This module provides secure password hashing, JWT token management,
 API key utilities, and single-use Redis-backed tokens for email
-verification.
+verification and password reset.
 """
 
 from __future__ import annotations
@@ -295,6 +295,60 @@ async def verify_email_verification_token(token: str) -> UUID | None:
 
     redis = await get_redis()
     key = f"{_EMAIL_VERIFICATION_PREFIX}:{token}"
+
+    # Atomic get-and-delete ensures single-use semantics with no race window.
+    user_id_str: str | None = await redis.getdel(key)
+
+    if not user_id_str:
+        return None
+
+    return UUID(user_id_str)
+
+
+# Password reset.
+_PASSWORD_RESET_PREFIX = "password_reset"
+
+PASSWORD_RESET_TOKEN_TTL_SECONDS: int = 60 * 60  # 1 hour.
+
+
+async def create_password_reset_token(user_id: UUID) -> str:
+    """Create a single-use password reset token stored in Redis.
+
+    Generates a cryptographically secure random token and stores a
+    mapping of token → user_id with a 1-hour TTL. The token is
+    consumed (deleted) when the password is successfully reset.
+
+    Args:
+        user_id: UUID of the user requesting a password reset.
+
+    Returns:
+        Opaque URL-safe token string (32 bytes, base64url encoded).
+    """
+    from app.core.cache import get_redis
+
+    token = secrets.token_urlsafe(32)
+    redis = await get_redis()
+    key = f"{_PASSWORD_RESET_PREFIX}:{token}"
+    await redis.setex(key, PASSWORD_RESET_TOKEN_TTL_SECONDS, str(user_id))
+    return token
+
+
+async def verify_password_reset_token(token: str) -> UUID | None:
+    """Consume and validate a password reset token.
+
+    Deletes the token from Redis immediately after retrieval to enforce
+    single-use semantics. A reset link cannot be used twice.
+
+    Args:
+        token: Opaque token string received from the reset email.
+
+    Returns:
+        User UUID if the token is valid and unexpired, None otherwise.
+    """
+    from app.core.cache import get_redis
+
+    redis = await get_redis()
+    key = f"{_PASSWORD_RESET_PREFIX}:{token}"
 
     # Atomic get-and-delete ensures single-use semantics with no race window.
     user_id_str: str | None = await redis.getdel(key)
