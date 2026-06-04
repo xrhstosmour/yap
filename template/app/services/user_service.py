@@ -6,14 +6,19 @@ user-related operations.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import secrets
+from datetime import UTC
+from datetime import datetime
+from typing import Any
 from uuid import UUID
 
+from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import SYSTEM_TENANT_ID
 from app.core.logging import get_logger
 from app.core.security import generate_password_hash
+from app.models.api_key import APIKey
 from app.models.audit_log import AuditAction
 from app.models.user import User
 from app.repositories.audit_repository import AuditLogRepository
@@ -21,9 +26,6 @@ from app.repositories.user_repository import UserRepository
 from app.schemas.user import UserCreate
 from app.schemas.user import UserUpdate
 from app.schemas.user import UserUpdateMe
-
-if TYPE_CHECKING:
-    pass
 
 logger = get_logger("service.user")
 
@@ -259,3 +261,136 @@ class UserService:
         logger.info("user_deleted", user_id=str(user_id))
 
         return True
+
+    async def delete_me(self, user: User) -> None:
+        """Self-service account deletion (GDPR Article 17).
+
+        Revokes all API keys, anonymizes personal fields (email,
+        full_name, hashed_password), soft-deletes the account, and
+        increments ``token_version`` to immediately invalidate all
+        outstanding JWTs. Logs the deletion in the audit trail.
+
+        Args:
+            user: The authenticated user requesting deletion.
+        """
+        tenant_id = user.tenant_id or SYSTEM_TENANT_ID
+        now = datetime.now(UTC)
+
+        # Revoke all active API keys so key-based auth stops working immediately.
+        await self.session.execute(
+            sa_update(APIKey)
+            .where(
+                APIKey.user_id == user.id,  # type: ignore[arg-type]
+                APIKey.deleted_at.is_(None),  # type: ignore[union-attr]
+            )
+            .values(deleted_at=now)
+        )
+
+        # Anonymize personal fields to satisfy GDPR Article 17 right to erasure.
+        anonymized_email = f"deleted_{user.id}@deleted.invalid"
+        placeholder_hash = generate_password_hash(secrets.token_urlsafe(32))
+        await self.user_repository.update(
+            user.id,
+            {
+                "email": anonymized_email,
+                "full_name": None,
+                "hashed_password": placeholder_hash,
+            },
+        )
+
+        # Invalidate all outstanding JWTs and soft-delete the record.
+        await self.user_repository.increment_token_version(user.id)
+        await self.user_repository.delete(user.id)
+
+        await self.audit_repository.log_user_action(
+            action=AuditAction.ACCOUNT_DELETION,
+            user_id=user.id,
+            tenant_id=tenant_id,
+            email=user.email,
+            resource_type="user",
+            resource_id=str(user.id),
+        )
+
+        logger.info("account_self_deleted", user_id=str(user.id))
+
+    async def export_my_data(self, user: User) -> dict[str, Any]:
+        """Export all personal data for the user (GDPR Article 20).
+
+        Compiles profile information, API key metadata (no secrets),
+        and audit activity into a single portable JSON-serializable
+        dict. Logs the export action for compliance.
+
+        Args:
+            user: The authenticated user requesting their data.
+
+        Returns:
+            JSON-serializable dict containing the user's personal data.
+        """
+        from app.repositories.api_key_repository import APIKeyRepository
+
+        tenant_id = user.tenant_id or SYSTEM_TENANT_ID
+
+        # Fetch audit activity for this user (up to 500 most recent entries).
+        activity_logs, _ = await self.audit_repository.get_by_actor(
+            actor_id=str(user.id), skip=0, limit=500
+        )
+
+        profile: dict[str, Any] = {
+            "id": str(user.id),
+            "email": user.email,
+            "full_name": user.full_name,
+            "is_active": user.is_active,
+            "is_verified": user.is_verified,
+            "created_at": user.created_at.isoformat(),
+            "updated_at": user.updated_at.isoformat(),
+        }
+
+        # Explicitly load API keys since the relationship may not be
+        # loaded through the current_user dependency.
+        api_key_repo = APIKeyRepository(self.session)
+        keys, _ = await api_key_repo.list(
+            filters={"user_id": user.id},
+            include_deleted=True,
+        )
+        api_keys = [
+            {
+                "name": k.name,
+                "description": k.description,
+                "scopes": k.scopes,
+                "is_active": k.is_active,
+                "created_at": k.created_at.isoformat(),
+                "last_used_at": k.last_used_at.isoformat() if k.last_used_at else None,
+                "expires_at": k.expires_at.isoformat() if k.expires_at else None,
+            }
+            for k in keys
+            if k.deleted_at is None
+        ]
+
+        activity = [
+            {
+                "action": log.action,
+                "resource_type": log.resource_type,
+                "resource_id": log.resource_id,
+                "status": log.status,
+                "created_at": log.created_at.isoformat(),
+            }
+            for log in activity_logs
+        ]
+
+        await self.audit_repository.log_user_action(
+            action=AuditAction.DATA_EXPORT,
+            user_id=user.id,
+            tenant_id=tenant_id,
+            email=user.email,
+            resource_type="user",
+            resource_id=str(user.id),
+        )
+
+        logger.info("data_exported", user_id=str(user.id))
+
+        return {
+            "exported_at": datetime.now(UTC).isoformat(),
+            "profile": profile,
+            "api_keys": api_keys,
+            "activity": activity,
+        }
