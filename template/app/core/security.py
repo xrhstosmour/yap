@@ -1,8 +1,8 @@
 """Security utilities for authentication and authorization.
 
 This module provides secure password hashing, JWT token management,
-and API key utilities. Uses Argon2 with bcrypt fallback for password
-hashing, following industry best practices.
+API key utilities, and single-use Redis-backed tokens for email
+verification.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import cast
+from uuid import UUID
 
 import bcrypt
 from jose import jwt
@@ -22,7 +23,7 @@ from jose import jwt
 from app.core.settings import settings
 
 if TYPE_CHECKING:
-    from uuid import UUID
+    pass
 
 # Password hashing configuration.
 # Using bcrypt directly as it's well-audited and production-proven.
@@ -250,3 +251,59 @@ def mask_api_key(key: str) -> str:
 # Dummy hash for timing attack prevention.
 # Used when user/key is not found to maintain consistent response time.
 DUMMY_PASSWORD_HASH = "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4.VTMBQdxfZvPLOa"
+
+
+# Single-use Redis-backed token configuration.
+
+# Email verification.
+_EMAIL_VERIFICATION_PREFIX = "email_verification"
+
+EMAIL_VERIFICATION_TOKEN_TTL_SECONDS: int = 60 * 60 * 24  # 24 hours.
+
+
+async def create_email_verification_token(user_id: UUID) -> str:
+    """Create a single-use email verification token stored in Redis.
+
+    Generates a cryptographically secure random token and stores a
+    mapping of token → user_id with a 24-hour TTL. The token is
+    consumed (deleted) on first successful verification.
+
+    Args:
+        user_id: UUID of the user whose email is being verified.
+
+    Returns:
+        Opaque URL-safe token string (32 bytes, base64url encoded).
+    """
+    from app.core.cache import get_redis
+
+    token = secrets.token_urlsafe(32)
+    redis = await get_redis()
+    key = f"{_EMAIL_VERIFICATION_PREFIX}:{token}"
+    await redis.setex(key, EMAIL_VERIFICATION_TOKEN_TTL_SECONDS, str(user_id))
+    return token
+
+
+async def verify_email_verification_token(token: str) -> UUID | None:
+    """Consume and validate an email verification token.
+
+    Deletes the token from Redis immediately after retrieval to enforce
+    single-use semantics. A token cannot be used twice.
+
+    Args:
+        token: Opaque token string received from the verification email.
+
+    Returns:
+        User UUID if the token is valid and unexpired, None otherwise.
+    """
+    from app.core.cache import get_redis
+
+    redis = await get_redis()
+    key = f"{_EMAIL_VERIFICATION_PREFIX}:{token}"
+
+    # Atomic get-and-delete ensures single-use semantics with no race window.
+    user_id_str: str | None = await redis.getdel(key)
+
+    if not user_id_str:
+        return None
+
+    return UUID(user_id_str)
