@@ -231,6 +231,9 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""
 
+    # Google OAuth CSRF state token TTL in seconds (default: 10 minutes).
+    GOOGLE_OAUTH_STATE_TTL_SECONDS: int = 600
+
     # Email (SMTP) - for sending transactional emails.
     SMTP_HOST: str = "localhost"
     SMTP_PORT: int = 587
