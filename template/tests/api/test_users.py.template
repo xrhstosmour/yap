@@ -151,3 +151,74 @@ class TestUsersDelete:
         )
 
         assert response.status_code == 204
+
+
+class TestGdprDeleteMe:
+    """Tests for DELETE /api/v1/users/me."""
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_delete_me_success(
+        self, client: AsyncClient, session: AsyncSession
+    ) -> None:
+        """Deleting own account should return 204."""
+        auth_service = _auth_service(session)
+        user = await auth_service.register(
+            RegisterRequest(
+                email="todelete@{{ project_slug }}.com", password="password123"
+            )
+        )
+        token = create_access_token(subject=user.id)
+
+        response = await client.delete(
+            "/api/v1/users/me",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 204
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_delete_me_unauthenticated(self, client: AsyncClient) -> None:
+        """Deleting own account without auth should return 401."""
+        response = await client.delete("/api/v1/users/me")
+
+        assert response.status_code == 401
+
+
+class TestGdprExportMe:
+    """Tests for GET /api/v1/users/me/export."""
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_export_my_data_success(
+        self, client: AsyncClient, session: AsyncSession
+    ) -> None:
+        """Exporting personal data should return 200 with JSON attachment."""
+        auth_service = _auth_service(session)
+        user = await auth_service.register(
+            RegisterRequest(
+                email="toexport@{{ project_slug }}.com", password="password123"
+            )
+        )
+        token = create_access_token(subject=user.id)
+
+        response = await client.get(
+            "/api/v1/users/me/export",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "application/json"
+        assert "attachment" in response.headers.get("content-disposition", "")
+
+        data = response.json()
+        assert "profile" in data
+        assert "api_keys" in data
+        assert "activity" in data
+        assert "exported_at" in data
+        assert data["profile"]["email"] == "toexport@{{ project_slug }}.com"
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_export_my_data_unauthenticated(self, client: AsyncClient) -> None:
+        """Exporting data without auth should return 401."""
+        response = await client.get("/api/v1/users/me/export")
+
+        assert response.status_code == 401
