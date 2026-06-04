@@ -1,8 +1,8 @@
 """Security utilities for authentication and authorization.
 
 This module provides secure password hashing, JWT token management,
-API key utilities, and single-use Redis-backed tokens for email
-verification and password reset.
+API key utilities, and single-use Redis-backed tokens for email verification,
+password reset, and Google OAuth state management.
 """
 
 from __future__ import annotations
@@ -355,3 +355,54 @@ async def verify_password_reset_token(token: str) -> UUID | None:
         return None
 
     return UUID(user_id_str)
+
+
+# Google OAuth CSRF state.
+_GOOGLE_OAUTH_STATE_PREFIX = "google_oauth_state"
+
+
+async def create_google_oauth_state(redirect_uri: str) -> str:
+    """Create a single-use CSRF state token for Google OAuth.
+
+    Generates a cryptographically secure random token and stores the
+    caller's ``redirect_uri`` as the Redis value with a 10-minute TTL.
+    Binding the URI to the state token prevents open-redirect attacks
+    where an attacker substitutes a different callback URI on the return trip.
+
+    Args:
+        redirect_uri: The redirect URI that will be sent to Google.
+            Stored in Redis so it can be validated on callback.
+
+    Returns:
+        Opaque URL-safe state string (32 bytes, base64url encoded).
+    """
+    from app.core.cache import get_redis
+
+    state = secrets.token_urlsafe(32)
+    redis = await get_redis()
+    key = f"{_GOOGLE_OAUTH_STATE_PREFIX}:{state}"
+    await redis.setex(key, settings.GOOGLE_OAUTH_STATE_TTL_SECONDS, redirect_uri)
+    return state
+
+
+async def verify_google_oauth_state(state: str) -> str | None:
+    """Consume and validate a Google OAuth CSRF state token.
+
+    Atomically retrieves and deletes the token from Redis to enforce
+    single-use semantics and close the TOCTOU race window.
+
+    Args:
+        state: CSRF state string received in the OAuth callback.
+
+    Returns:
+        The bound ``redirect_uri`` if the token is valid and unexpired,
+        ``None`` if the token is missing or already consumed.
+    """
+    from app.core.cache import get_redis
+
+    redis = await get_redis()
+    key = f"{_GOOGLE_OAUTH_STATE_PREFIX}:{state}"
+
+    # Atomic get-and-delete: no race window between read and delete.
+    stored_uri: str | None = await redis.getdel(key)
+    return stored_uri
