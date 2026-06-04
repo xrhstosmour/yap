@@ -1,7 +1,8 @@
 """Authentication API routes.
 
 This module provides authentication endpoints including
-login, registration, token refresh, and email verification.
+login, registration, token refresh, email verification,
+and password reset.
 """
 
 from __future__ import annotations
@@ -20,10 +21,13 @@ from app.core.security import verify_email_verification_token
 from app.dependencies import CurrentUser
 from app.dependencies import SessionDep
 from app.schemas.auth import PasswordChangeRequest
+from app.schemas.auth import PasswordResetConfirmRequest
+from app.schemas.auth import PasswordResetRequest
 from app.schemas.auth import RefreshTokenRequest
 from app.schemas.auth import RegisterRequest
 from app.schemas.auth import TokenResponse
 from app.schemas.user import UserResponse
+from app.services.auth_service import AuthenticationError
 from app.services.auth_service import AuthService
 from app.services.auth_service import EmailAlreadyExistsError
 from app.services.auth_service import InvalidCredentialsError
@@ -226,3 +230,48 @@ async def verify_email(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=INVALID_VERIFICATION_TOKEN,
         )
+
+
+@router.post(
+    "/forgot-password",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Request password reset",
+    description="Send a password reset link to the given email address.",
+)
+async def forgot_password(
+    data: PasswordResetRequest,
+    session: SessionDep,
+) -> None:
+    """Send a password reset email.
+
+    Always returns 204 regardless of whether the address is registered,
+    to prevent user enumeration. The reset link expires in 1 hour.
+    """
+    service = AuthService(session)
+    await service.send_password_reset_email(data.email)
+
+
+@router.post(
+    "/reset-password",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Confirm password reset",
+    description="Reset password using the token from the reset email.",
+)
+async def reset_password(
+    data: PasswordResetConfirmRequest,
+    session: SessionDep,
+) -> None:
+    """Reset a user's password using a valid reset token.
+
+    Consumes the single-use token and updates the password. All
+    outstanding JWTs are invalidated by bumping `token_version`.
+    Returns 400 if the token is missing, expired, or already used.
+    """
+    service = AuthService(session)
+    try:
+        await service.reset_password(data.token, data.new_password)
+    except AuthenticationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
