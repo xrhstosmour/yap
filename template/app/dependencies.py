@@ -99,6 +99,14 @@ async def get_current_user(
             detail="User account is inactive",
         )
 
+    # Reject access tokens issued before the last password change or reset.
+    token_version = payload.get("token_version")
+    if token_version is not None and int(token_version) != user.token_version:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Could not validate credentials",
+        )
+
     if user.tenant_id:
         set_current_tenant_id(user.tenant_id)
         request.state.tenant_id = user.tenant_id
@@ -225,6 +233,11 @@ async def get_optional_current_user(
     user = await user_repository.get(UUID(user_id))
 
     if not user or not user.is_active:
+        return None
+
+    # Reject access tokens issued before the last password change or reset.
+    token_version = payload.get("token_version")
+    if token_version is not None and int(token_version) != user.token_version:
         return None
 
     if user.tenant_id:

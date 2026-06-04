@@ -308,8 +308,6 @@ async def verify_email_verification_token(token: str) -> UUID | None:
 # Password reset.
 _PASSWORD_RESET_PREFIX = "password_reset"
 
-PASSWORD_RESET_TOKEN_TTL_SECONDS: int = 60 * 60  # 1 hour.
-
 
 async def create_password_reset_token(user_id: UUID) -> str:
     """Create a single-use password reset token stored in Redis.
@@ -329,7 +327,7 @@ async def create_password_reset_token(user_id: UUID) -> str:
     token = secrets.token_urlsafe(32)
     redis = await get_redis()
     key = f"{_PASSWORD_RESET_PREFIX}:{token}"
-    await redis.setex(key, PASSWORD_RESET_TOKEN_TTL_SECONDS, str(user_id))
+    await redis.setex(key, settings.PASSWORD_RESET_TOKEN_TTL_SECONDS, str(user_id))
     return token
 
 
