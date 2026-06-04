@@ -9,8 +9,11 @@ from fastapi import APIRouter
 from fastapi import Depends
 from fastapi import HTTPException
 from fastapi import status
+from fastapi.requests import Request
 
 from app.core.logging import get_logger
+from app.core.pagination import PAGINATION_HEADERS_SPEC
+from app.core.pagination import PaginatedResponse
 from app.dependencies import SessionDep
 from app.dependencies import SuperuserUser
 from app.repositories.audit_repository import AuditLogRepository
@@ -35,6 +38,7 @@ TenantServiceDep = Annotated[TenantService, Depends(get_tenant_service)]
 @router.get(
     "",
     response_model=TenantListResponse,
+    responses=PAGINATION_HEADERS_SPEC,  # type: ignore[arg-type]
     summary="List tenants",
     description="List all tenants with pagination and filtering. Admin only.",
 )
@@ -42,7 +46,8 @@ async def list_tenants(
     params: Annotated[TenantListParams, Depends()],
     current_user: SuperuserUser,
     service: TenantServiceDep,
-) -> TenantListResponse:
+    request: Request,
+) -> PaginatedResponse:
     tenants, total = await service.list_tenants(
         skip=params.skip,
         limit=params.limit,
@@ -55,12 +60,18 @@ async def list_tenants(
     page = (params.skip // params.limit) + 1 if params.limit > 0 else 1
     pages = (total + params.limit - 1) // params.limit if params.limit > 0 else 1
 
-    return TenantListResponse(
-        data=[TenantResponse.model_validate(t) for t in tenants],
+    return PaginatedResponse(
+        content=TenantListResponse(
+            data=[TenantResponse.model_validate(t) for t in tenants],
+            total=total,
+            page=page,
+            page_size=params.limit,
+            pages=pages,
+        ).model_dump(),
         total=total,
-        page=page,
-        page_size=params.limit,
-        pages=pages,
+        skip=params.skip,
+        limit=params.limit,
+        request=request,
     )
 
 

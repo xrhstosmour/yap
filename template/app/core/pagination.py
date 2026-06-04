@@ -7,9 +7,12 @@ the JSON pagination body already returned by list endpoints.
 
 from __future__ import annotations
 
+from typing import Any
 from urllib.parse import urlencode
 
+from fastapi.encoders import jsonable_encoder
 from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 
 def build_pagination_headers(
@@ -72,3 +75,52 @@ def build_pagination_headers(
 
     headers["Link"] = ", ".join(links)
     return headers
+
+
+class PaginatedResponse(JSONResponse):
+    """JSON response with pagination headers.
+
+    Wraps a paginated response and automatically adds ``X-Total-Count``
+    and RFC 5988 ``Link`` headers. Use as the return value from list
+    endpoints instead of manually injecting ``response.headers``.
+
+    Example::
+
+        return PaginatedResponse(
+            content=UserListResponse(...).model_dump(),
+            total=total,
+            skip=params.skip,
+            limit=params.limit,
+            request=request,
+        )
+    """
+
+    def __init__(
+        self,
+        content: Any,
+        total: int,
+        skip: int,
+        limit: int,
+        request: Request,
+        **kwargs: Any,
+    ) -> None:
+        pagination_headers = build_pagination_headers(request, total, skip, limit)
+        headers = kwargs.pop("headers", {})
+        headers.update(pagination_headers)
+        super().__init__(content=jsonable_encoder(content), headers=headers, **kwargs)
+
+
+PAGINATION_HEADERS_SPEC = {
+    200: {
+        "headers": {
+            "X-Total-Count": {
+                "schema": {"type": "integer"},
+                "description": "Total number of items matching the query",
+            },
+            "Link": {
+                "schema": {"type": "string"},
+                "description": "RFC 5988 pagination links (first, last, prev, next)",
+            },
+        }
+    }
+}
