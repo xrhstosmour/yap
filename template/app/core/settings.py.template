@@ -239,6 +239,9 @@ class Settings(BaseSettings):
     # Email verification token TTL in seconds (default: 24 hours).
     EMAIL_VERIFICATION_TOKEN_TTL_SECONDS: int = 86400
 
+    # Password reset token TTL in seconds (default: 1 hour).
+    PASSWORD_RESET_TOKEN_TTL_SECONDS: int = 3600
+
     __placeholder_patterns = frozenset(
         {"your-", "change_me", "change_this", "example", "placeholder"}
     )

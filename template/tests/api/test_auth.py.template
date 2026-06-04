@@ -290,13 +290,13 @@ class TestPasswordReset:
             )
         )
 
-        # Prevent actual Celery task dispatch and Redis token creation.
-        async def _fake_send(*_args, **_kwargs):
-            pass
+        # Mock Redis-backed token creation to avoid Redis dependency.
+        async def _fake_create_token(_user_id):
+            return "test-reset-token"
 
         monkeypatch.setattr(
-            "app.services.auth_service.AuthService.send_password_reset_email",
-            _fake_send,
+            "app.core.security.create_password_reset_token",
+            _fake_create_token,
         )
 
         response = await client.post(
