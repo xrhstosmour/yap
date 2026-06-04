@@ -17,6 +17,7 @@ from uuid import UUID
 from uuid import uuid7
 
 from sqlalchemy import JSON
+from sqlalchemy import Index
 from sqlmodel import Field
 
 from app.models.base import BaseModel
@@ -30,6 +31,11 @@ class OutboxEvent(BaseModel, table=True):
     """
 
     __tablename__ = "outbox_events"  # pyright: ignore[reportAssignmentType]
+    # Compound index on (status, created_at) eliminates the sort pass in
+    # get_pending(), which queries WHERE status = 'pending' ORDER BY created_at ASC.
+    __table_args__ = (
+        Index("ix_outbox_events_status_created_at", "status", "created_at"),
+    )
 
     event_type: str = Field(
         nullable=False,
@@ -43,9 +49,10 @@ class OutboxEvent(BaseModel, table=True):
         nullable=False,
     )
 
+    # Compound index (status, created_at) covers single-column status lookups.
     status: str = Field(
         default="pending",
-        index=True,
+        index=False,
         max_length=20,
     )
 
