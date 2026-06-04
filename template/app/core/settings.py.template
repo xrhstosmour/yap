@@ -227,6 +227,10 @@ class Settings(BaseSettings):
     # Sentry Monitoring.
     SENTRY_DSN: HttpUrl | None = None
 
+    # Google OAuth (leave empty to disable Google login).
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+
     # Email (SMTP) - for sending transactional emails.
     SMTP_HOST: str = "localhost"
     SMTP_PORT: int = 587
