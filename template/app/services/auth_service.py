@@ -310,3 +310,68 @@ class AuthService:
         )
 
         logger.info("verification_email_queued", user_id=str(user.id))
+
+    async def send_password_reset_email(self, email: str) -> None:
+        """Queue a password reset email if the account exists.
+
+        Silently does nothing when the email is not registered to
+        prevent user enumeration — callers should always return 204.
+        Generates a single-use Redis-backed token with a 1-hour TTL.
+
+        Args:
+            email: Email address of the account to reset.
+        """
+        from app.core.security import create_password_reset_token
+        from app.tasks.email import send_template_email_task
+
+        user = await self.user_repository.get_by_email(email)
+        if not user:
+            # Do not reveal whether the account exists.
+            return
+
+        token = await create_password_reset_token(user.id)
+        reset_url = f"{settings.FRONTEND_HOST}/auth/reset-password?token={token}"
+
+        send_template_email_task.delay(
+            to_email=user.email,
+            subject=f"Reset your password — {settings.PROJECT_NAME}",
+            template_name="password_reset.html",
+            context={
+                "name": user.full_name or user.email,
+                "reset_url": reset_url,
+                "project": settings.PROJECT_NAME,
+            },
+        )
+
+        logger.info("password_reset_email_queued", user_id=str(user.id))
+
+    async def reset_password(self, token: str, new_password: str) -> None:
+        """Reset a user's password using a valid reset token.
+
+        Validates and consumes the single-use token, then updates
+        the hashed password and increments `token_version` to
+        invalidate all outstanding JWT tokens.
+
+        Args:
+            token: Opaque reset token from the password reset email.
+            new_password: New plain-text password (min 8 characters).
+
+        Raises:
+            AuthenticationError: If the token is invalid or expired.
+            UserNotFoundError: If the token's user no longer exists.
+        """
+        from app.core.security import verify_password_reset_token
+
+        user_id = await verify_password_reset_token(token)
+        if not user_id:
+            raise AuthenticationError("Invalid or expired password reset token.")
+
+        user = await self.user_repository.get(user_id)
+        if not user:
+            raise UserNotFoundError("User not found.")
+
+        new_hash = generate_password_hash(new_password)
+        await self.user_repository.update_password(user.id, new_hash)
+        await self.user_repository.increment_token_version(user.id)
+
+        logger.info("password_reset", user_id=str(user.id))
