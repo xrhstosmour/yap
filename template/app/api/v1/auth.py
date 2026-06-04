@@ -2,7 +2,7 @@
 
 This module provides authentication endpoints including
 login, registration, token refresh, email verification,
-and password reset.
+password reset, and Google OAuth.
 """
 
 from __future__ import annotations
@@ -20,6 +20,8 @@ from app.core.logging import get_logger
 from app.core.security import verify_email_verification_token
 from app.dependencies import CurrentUser
 from app.dependencies import SessionDep
+from app.schemas.auth import GoogleAuthUrlResponse
+from app.schemas.auth import GoogleCallbackRequest
 from app.schemas.auth import PasswordChangeRequest
 from app.schemas.auth import PasswordResetConfirmRequest
 from app.schemas.auth import PasswordResetRequest
@@ -270,6 +272,69 @@ async def reset_password(
     service = AuthService(session)
     try:
         await service.reset_password(data.token, data.new_password)
+    except AuthenticationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+
+@router.get(
+    "/google",
+    response_model=GoogleAuthUrlResponse,
+    summary="Initiate Google OAuth",
+    description="Get the Google OAuth 2.0 authorization URL to start the login flow.",
+)
+async def google_auth(
+    session: SessionDep,
+    redirect_uri: Annotated[
+        str, Query(description="URI Google should redirect to after consent")
+    ],
+) -> GoogleAuthUrlResponse:
+    """Get the Google OAuth 2.0 authorization URL.
+
+    Generates a single-use CSRF state token backed by Redis and
+    constructs the Google consent-screen URL. The caller must
+    redirect the end-user to the returned URL.
+    Returns 503 if Google OAuth credentials are not configured.
+    """
+    service = AuthService(session)
+    try:
+        url = await service.get_google_auth_url(redirect_uri)
+        return GoogleAuthUrlResponse(url=url)
+    except AuthenticationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
+
+@router.post(
+    "/google/callback",
+    response_model=TokenResponse,
+    summary="Google OAuth callback",
+    description="Exchange a Google authorization code for YAP access tokens.",
+)
+async def google_callback(
+    data: GoogleCallbackRequest,
+    session: SessionDep,
+) -> TokenResponse:
+    """Complete the Google OAuth login flow.
+
+    Validates the CSRF state, exchanges the authorization code for a
+    Google access token, fetches the user profile, then finds or
+    creates a local account. Returns YAP JWT tokens on success.
+    Returns 400 if the state is invalid or the code exchange fails.
+    Returns 403 if the account is inactive.
+    """
+    service = AuthService(session)
+    try:
+        return await service.google_login(data.code, data.state, data.redirect_uri)
+    except UserInactiveError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
     except AuthenticationError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

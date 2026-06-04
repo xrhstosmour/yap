@@ -376,3 +376,49 @@ class TestPasswordReset:
 
         assert response.status_code == 400
         assert "Invalid or expired" in response.json()["detail"]
+
+
+class TestGoogleOAuth:
+    """Tests for Google OAuth endpoints."""
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_google_auth_url_unconfigured(
+        self,
+        client: AsyncClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """GET /auth/google should return 503 when credentials are not set."""
+        response = await client.get(
+            "/api/v1/auth/google",
+            params={"redirect_uri": "http://localhost:3000/auth/google/callback"},
+        )
+
+        assert response.status_code == 503
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_google_callback_invalid_state(
+        self,
+        client: AsyncClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """POST /auth/google/callback with an invalid state should return 400."""
+
+        async def _fake_verify_state(_state: str):
+            return None
+
+        monkeypatch.setattr(
+            "app.core.security.verify_google_oauth_state",
+            _fake_verify_state,
+        )
+
+        response = await client.post(
+            "/api/v1/auth/google/callback",
+            json={
+                "code": "fake-code",
+                "state": "invalid-state",
+                "redirect_uri": "http://localhost:3000/auth/google/callback",
+            },
+        )
+
+        assert response.status_code == 400
+        assert "Invalid or expired" in response.json()["detail"]

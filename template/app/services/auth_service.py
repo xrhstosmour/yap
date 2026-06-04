@@ -531,7 +531,7 @@ class AuthService:
                 )
                 logger.info("google_user_created", user_id=str(user.id))
 
-        if not user.is_active:
+        if not user or not user.is_active:
             raise UserInactiveError("User account is inactive.")
 
         logger.info("google_login_success", user_id=str(user.id))
