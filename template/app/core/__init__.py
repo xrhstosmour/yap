@@ -9,6 +9,8 @@ from uuid import UUID
 from app.core.cache import CacheService
 from app.core.cache import get_cache
 from app.core.cache import get_redis
+from app.core.greeklish import greeklish_to_greek
+from app.core.greeklish import greek_to_greeklish
 from app.core.circuit_breaker import CircuitBreakerError
 from app.core.circuit_breaker import CircuitBreakerService
 from app.core.circuit_breaker import CircuitState
@@ -82,5 +84,7 @@ __all__ = [
     "decrypt",
     "encrypt",
     "generate_key",
+    "greeklish_to_greek",
+    "greek_to_greeklish",
     "SYSTEM_TENANT_ID",
 ]
