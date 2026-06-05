@@ -9,8 +9,6 @@ from uuid import UUID
 from app.core.cache import CacheService
 from app.core.cache import get_cache
 from app.core.cache import get_redis
-from app.core.greeklish import greeklish_to_greek
-from app.core.greeklish import greek_to_greeklish
 from app.core.circuit_breaker import CircuitBreakerError
 from app.core.circuit_breaker import CircuitBreakerService
 from app.core.circuit_breaker import CircuitState
@@ -26,6 +24,8 @@ from app.core.feature_flags import feature_disabled
 from app.core.feature_flags import feature_enabled
 from app.core.feature_flags import refresh_cache
 from app.core.feature_flags import sync_to_redis
+from app.core.greeklish import greek_to_greeklish
+from app.core.greeklish import greeklish_to_greek
 from app.core.logging import get_logger
 from app.core.logging import setup_logging
 from app.core.rate_limit import RateLimiter

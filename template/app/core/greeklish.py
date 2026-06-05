@@ -2,6 +2,9 @@
 
 Provides bidirectional conversion between Greek characters and common
 Latin-based Greeklish (Greek written with the Latin alphabet).
+
+Can be used independently for search normalisation, data transformation,
+or any other Greek/Greeklish processing need.
 """
 
 from __future__ import annotations
@@ -9,9 +12,7 @@ from __future__ import annotations
 import re
 from typing import Final
 
-# Greeklish-to-Greek mapping (Latin → Greek).
-# Used when a user types in Greeklish and we need to match stored Greek text.
-_GREEK_MAP: Final[dict[str, str]] = {
+GREEKLISH_TO_GREEK: Final[dict[str, str]] = {
     "a": "\u03b1", "b": "\u03b2", "g": "\u03b3", "d": "\u03b4", "e": "\u03b5",
     "z": "\u03b6", "h": "\u03b7", "8": "\u03b8", "i": "\u03b9", "k": "\u03ba",
     "l": "\u03bb", "m": "\u03bc", "n": "\u03bd", "x": "\u03be", "o": "\u03bf",
@@ -22,46 +23,16 @@ _GREEK_MAP: Final[dict[str, str]] = {
     "eu": "\u03b5\u03c5",
 }
 
-_GREEKLISH_PATTERNS: Final[list[str]] = sorted(
-    _GREEK_MAP.keys(), key=len, reverse=True
+GREEKLISH_PATTERNS: Final[list[str]] = sorted(
+    GREEKLISH_TO_GREEK.keys(), key=len, reverse=True
 )
-_GREEKLISH_RE: Final[re.Pattern] = re.compile(
-    "|".join(re.escape(p) for p in _GREEKLISH_PATTERNS),
+
+GREEKLISH_RE: Final[re.Pattern] = re.compile(
+    "|".join(re.escape(p) for p in GREEKLISH_PATTERNS),
     re.IGNORECASE,
 )
 
-
-def _greeklish_replacer(match: re.Match) -> str:
-    """Replace a Greeklish pattern with its Greek equivalent."""
-    return _GREEK_MAP[match.group(0).lower()]
-
-
-def greeklish_to_greek(text: str) -> str:
-    """Transliterate Greeklish text to Greek characters.
-
-    Handles common Greeklish substitutions::
-
-        greeklish_to_greek("kalimera") -> "\u03ba\u03b1\u03bb\u03b9\u03bc\u03b5\u03c1\u03b1"
-        greeklish_to_greek("yiannis")  -> "\u03b3\u03b9\u03b1\u03bd\u03bd\u03b7\u03c2"
-
-    Multi-character patterns like `th` are matched before single
-    characters to avoid partial replacement.
-
-    Args:
-        text: Greeklish text (Latin characters).
-
-    Returns:
-        Approximate Greek transliteration. Non-matching characters are
-        left unchanged so that mixed text and punctuation are preserved.
-    """
-    return _GREEKLISH_RE.sub(_greeklish_replacer, text.lower())
-
-
-# Greek-to-Greeklish mapping (Greek → Latin).
-# Used when generating a Latin representation of Greek text.
-# Multiple Latin expansions exist for many Greek letters/combinations;
-# the first entry is the most common form.
-_GREEK_MAP_REVERSE: Final[dict[str, list[str]]] = {
+GREEK_TO_GREEKLISH: Final[dict[str, list[str]]] = {
     "\u03b1": ["a"],
     "\u03b2": ["v", "b"],
     "\u03b3": ["g"],
@@ -87,7 +58,6 @@ _GREEK_MAP_REVERSE: Final[dict[str, list[str]]] = {
     "\u03c7": ["ch", "x", "h"],
     "\u03c8": ["ps"],
     "\u03c9": ["o", "w"],
-    # Digraphs (matched before single letters).
     "\u03b1\u03b9": ["ai", "e"],
     "\u03b5\u03b9": ["ei", "i"],
     "\u03bf\u03b9": ["oi", "i"],
@@ -100,60 +70,82 @@ _GREEK_MAP_REVERSE: Final[dict[str, list[str]]] = {
     "\u03bd\u03c4": ["nt", "d"],
 }
 
-# Build sorted patterns for greedy digraph matching.
-_DIGRAPH_PATTERNS: Final[list[str]] = sorted(
-    [k for k in _GREEK_MAP_REVERSE if len(k) > 1],
+GREEK_DIGRAPHS: Final[list[str]] = sorted(
+    [k for k in GREEK_TO_GREEKLISH if len(k) > 1],
     key=len, reverse=True,
 )
-_SINGLE_PATTERNS: Final[list[str]] = [
-    k for k in _GREEK_MAP_REVERSE if len(k) == 1
-]
+
+TONOS_MAP: Final = str.maketrans(
+    "\u0386\u0388\u0389\u038a\u038c\u038e\u038f"
+    "\u03ac\u03ad\u03ae\u03af\u03cc\u03ce\u03cd\u03cb\u03ca\u03b0",
+    "\u0391\u0395\u0397\u0399\u039f\u03a5\u03a9"
+    "\u03b1\u03b5\u03b7\u03b9\u03bf\u03c5\u03c5\u03b9\u03b9\u03c5",
+)
 
 
-def greek_to_greeklish(text: str) -> list[str]:
-    """Transliterate Greek text to one or more Greeklish forms.
+def remove_tonos(text: str) -> str:
+    """Remove Greek tonos (accent) characters from text."""
+    return text.translate(TONOS_MAP)
 
-    Produces all plausible Latin expansions for each Greek letter or
-    digraph. The result is a list of candidate Greeklish strings, from
-    most to least common.
+
+def greeklish_to_greek(text: str) -> str:
+    """Transliterate Greeklish text to Greek characters.
+
+    Examples::
+
+        greeklish_to_greek("kalimera") -> "kalimera"
+        greeklish_to_greek("yiannis")  -> "yiannis"
+
+    Multi-character patterns like ``th`` are matched before single
+    characters to avoid partial replacement.
 
     Args:
-        text: Greek text (e.g. `"\u03b1\u03bd\u03b8\u03c1\u03c9\u03c0\u03bf\u03c2"`).
+        text: Greeklish text (Latin characters).
 
     Returns:
-        Up to `max_expansions` Greeklish candidates. Fewer may be
-        returned if there are fewer valid expansions.
+        Approximate Greek transliteration. Non-matching characters are
+        left unchanged so that mixed text and punctuation are preserved.
     """
-    text = _remove_tonos(text)
+    def _replace(match: re.Match) -> str:
+        return GREEKLISH_TO_GREEK[match.group(0).lower()]
+
+    return GREEKLISH_RE.sub(_replace, text.lower())  # type: ignore[no-any-return]
+
+
+def greek_to_greeklish(text: str, max_expansions: int = 10) -> list[str]:
+    """Transliterate Greek text to one or more Greeklish forms.
+
+    Produces plausible Latin expansions for each Greek letter or
+    digraph. The result is a list of candidate Greeklish strings,
+    limited to ``max_expansions`` entries.
+
+    Args:
+        text: Greek text (e.g. ``"\\u03b1\\u03bd\\u03b8\\u03c1\\u03c9\\u03c0\\u03bf\\u03c2"``).
+        max_expansions: Maximum number of Greeklish candidates to return.
+
+    Returns:
+        List of Greeklish candidates (most common first).
+    """
+    text = remove_tonos(text)
     candidates: list[str] = [""]
     i = 0
     while i < len(text):
         matched = False
-        # Try digraphs first (longer patterns).
-        for pattern in _DIGRAPH_PATTERNS:
+        for pattern in GREEK_DIGRAPHS:
             if text[i:].startswith(pattern):
-                expansions = _GREEK_MAP_REVERSE[pattern]
-                candidates = [c + e for c in candidates for e in expansions]
+                expansions = GREEK_TO_GREEKLISH[pattern]
+                candidates = [
+                    c + e for c in candidates for e in expansions
+                ][:max_expansions]
                 i += len(pattern)
                 matched = True
                 break
         if matched:
             continue
         ch = text[i]
-        expansions = _GREEK_MAP_REVERSE.get(ch, [ch])
-        candidates = [c + e for c in candidates for e in expansions]
+        expansions = GREEK_TO_GREEKLISH.get(ch, [ch])
+        candidates = [
+            c + e for c in candidates for e in expansions
+        ][:max_expansions]
         i += 1
     return candidates
-
-
-def _remove_tonos(text: str) -> str:
-    """Remove Greek tonos (accent) characters."""
-    return text.translate(_TONOS_MAP)
-
-
-_TONOS_MAP: Final[dict[int, int | None]] = str.maketrans(
-    "\u0386\u0388\u0389\u038a\u038c\u038e\u038f"
-    "\u03ac\u03ad\u03ae\u03af\u03cc\u03ce\u03cd\u03cb\u03ca\u03b0",
-    "\u0391\u0395\u0397\u0399\u039f\u03a5\u03a9"
-    "\u03b1\u03b5\u03b7\u03b9\u03bf\u03c5\u03c5\u03b9\u03b9\u03c5",
-)
