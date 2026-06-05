@@ -22,12 +22,18 @@ from app.dependencies import CurrentUser
 from app.dependencies import SessionDep
 from app.schemas.auth import GoogleAuthUrlResponse
 from app.schemas.auth import GoogleCallbackRequest
+from app.schemas.auth import LoginResponse
 from app.schemas.auth import PasswordChangeRequest
 from app.schemas.auth import PasswordResetConfirmRequest
 from app.schemas.auth import PasswordResetRequest
+from app.schemas.auth import RecoveryCodesResponse
 from app.schemas.auth import RefreshTokenRequest
 from app.schemas.auth import RegisterRequest
 from app.schemas.auth import TokenResponse
+from app.schemas.auth import TwoFactorConfirmRequest
+from app.schemas.auth import TwoFactorDisableRequest
+from app.schemas.auth import TwoFactorEnrollResponse
+from app.schemas.auth import TwoFactorVerifyRequest
 from app.schemas.user import UserResponse
 from app.services.auth_service import AuthenticationError
 from app.services.auth_service import AuthService
@@ -72,20 +78,24 @@ async def register(
 
 @router.post(
     "/login",
-    response_model=TokenResponse,
+    response_model=LoginResponse,
     summary="Login",
-    description="Authenticate with email and password to get access tokens.",
+    description=(
+        "Authenticate with email and password. "
+        "Returns tokens directly, or a 2FA challenge if the account has 2FA enabled."
+    ),
 )
 async def login(
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
     session: SessionDep,
-) -> TokenResponse:
-    """Authenticate user and return tokens (username=email, password=password)."""
+) -> LoginResponse:
+    """Authenticate user and return tokens or a 2FA challenge."""
+    from app.services.two_factor_service import TwoFactorAuthService
+
     service = AuthService(session)
 
     try:
         user = await service.authenticate(form_data.username, form_data.password)
-        return service.create_tokens(user)
     except InvalidCredentialsError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -97,6 +107,220 @@ async def login(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=str(e),
         )
+
+    # If 2FA is active, issue a challenge token instead of full tokens.
+    if user.is_2fa_enabled:
+        totp_service = TwoFactorAuthService(session)
+        challenge_token = await totp_service.issue_challenge(user)
+        return LoginResponse(requires_2fa=True, challenge_token=challenge_token)
+
+    tokens = service.create_tokens(user)
+    return LoginResponse(
+        access_token=tokens.access_token,
+        refresh_token=tokens.refresh_token,
+        token_type=tokens.token_type,
+        expires_in=tokens.expires_in,
+    )
+
+
+@router.post(
+    "/2fa/enroll",
+    response_model=TwoFactorEnrollResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Begin 2FA enrollment",
+    description=(
+        "Generate a TOTP secret and QR code. "
+        "Call POST /auth/2fa/confirm with a valid code to activate 2FA."
+    ),
+)
+async def enroll_2fa(
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> TwoFactorEnrollResponse:
+    """Begin TOTP 2FA enrollment for the current user.
+
+    Returns a QR code data URL and plaintext recovery codes.
+    Recovery codes are shown only once — store them securely.
+    """
+    from app.services.two_factor_service import TwoFactorAlreadyEnabledError
+    from app.services.two_factor_service import TwoFactorAuthService
+
+    service = TwoFactorAuthService(session)
+    try:
+        _secret, qr_data_url, recovery_codes = await service.begin_enrollment(current_user)
+    except TwoFactorAlreadyEnabledError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(e),
+        )
+    return TwoFactorEnrollResponse(
+        qr_data_url=qr_data_url,
+        recovery_codes=recovery_codes,
+    )
+
+
+@router.post(
+    "/2fa/confirm",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Confirm 2FA enrollment",
+    description="Verify the first TOTP code to activate 2FA on the account.",
+)
+async def confirm_2fa(
+    data: TwoFactorConfirmRequest,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> None:
+    """Confirm TOTP enrollment by verifying the first valid code."""
+    from app.services.two_factor_service import InvalidTOTPError
+    from app.services.two_factor_service import TwoFactorAlreadyEnabledError
+    from app.services.two_factor_service import TwoFactorAuthService
+    from app.services.two_factor_service import TwoFactorError
+    from app.services.two_factor_service import TwoFactorRateLimitError
+
+    service = TwoFactorAuthService(session)
+    try:
+        await service.confirm_enrollment(current_user, data.totp_code)
+    except TwoFactorRateLimitError as e:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=str(e),
+            headers={"Retry-After": "300"},
+        )
+    except (InvalidTOTPError, TwoFactorError, TwoFactorAlreadyEnabledError) as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+
+@router.post(
+    "/2fa/verify",
+    response_model=TokenResponse,
+    summary="Complete 2FA login",
+    description=(
+        "Exchange a 2FA challenge token + TOTP code (or recovery code) "
+        "for full JWT tokens."
+    ),
+)
+async def verify_2fa(
+    data: TwoFactorVerifyRequest,
+    session: SessionDep,
+) -> TokenResponse:
+    """Complete 2FA login by verifying the challenge + TOTP or recovery code."""
+    from app.services.two_factor_service import InvalidTOTPError
+    from app.services.two_factor_service import TwoFactorAuthService
+    from app.services.two_factor_service import TwoFactorError
+    from app.services.two_factor_service import TwoFactorRateLimitError
+
+    if not data.totp_code and not data.recovery_code:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Either totp_code or recovery_code is required.",
+        )
+
+    service = TwoFactorAuthService(session)
+    auth_service = AuthService(session)
+
+    try:
+        if data.totp_code:
+            user = await service.verify_challenge(data.challenge_token, data.totp_code)
+        else:
+            user = await service.verify_challenge_with_recovery(
+                data.challenge_token,
+                data.recovery_code,  # type: ignore[arg-type]
+            )
+    except TwoFactorRateLimitError as e:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=str(e),
+            headers={"Retry-After": "300"},
+        )
+    except (InvalidTOTPError, TwoFactorError) as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e),
+        )
+
+    return auth_service.create_tokens(user)
+
+
+@router.delete(
+    "/2fa/disable",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Disable 2FA",
+    description="Disable TOTP 2FA. Requires a valid TOTP code to confirm.",
+)
+async def disable_2fa(
+    data: TwoFactorDisableRequest,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> None:
+    """Disable TOTP 2FA for the current user."""
+    from app.services.two_factor_service import InvalidTOTPError
+    from app.services.two_factor_service import TwoFactorAuthService
+    from app.services.two_factor_service import TwoFactorError
+    from app.services.two_factor_service import TwoFactorNotEnabledError
+    from app.services.two_factor_service import TwoFactorRateLimitError
+
+    service = TwoFactorAuthService(session)
+    try:
+        await service.disable(current_user, data.totp_code)
+    except TwoFactorNotEnabledError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except TwoFactorRateLimitError as e:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=str(e),
+            headers={"Retry-After": "300"},
+        )
+    except (InvalidTOTPError, TwoFactorError) as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+
+@router.post(
+    "/2fa/recovery-codes",
+    response_model=RecoveryCodesResponse,
+    summary="Regenerate recovery codes",
+    description="Regenerate all recovery codes. Requires a valid TOTP code.",
+)
+async def regenerate_recovery_codes(
+    data: TwoFactorConfirmRequest,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> RecoveryCodesResponse:
+    """Regenerate all 2FA recovery codes for the current user."""
+    from app.services.two_factor_service import InvalidTOTPError
+    from app.services.two_factor_service import TwoFactorAuthService
+    from app.services.two_factor_service import TwoFactorError
+    from app.services.two_factor_service import TwoFactorNotEnabledError
+    from app.services.two_factor_service import TwoFactorRateLimitError
+
+    service = TwoFactorAuthService(session)
+    try:
+        new_codes = await service.regenerate_recovery_codes(current_user, data.totp_code)
+    except TwoFactorNotEnabledError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except TwoFactorRateLimitError as e:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=str(e),
+            headers={"Retry-After": "300"},
+        )
+    except (InvalidTOTPError, TwoFactorError) as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    return RecoveryCodesResponse(recovery_codes=new_codes)
 
 
 @router.post(
