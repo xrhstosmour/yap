@@ -16,6 +16,9 @@ module = [
     "sentry_sdk.*",
     "passlib.*",
     "jose.*",
+    "pyotp.*",
+    "qrcode.*",
+    "PIL.*",
     "pybreaker.*",
 ]
 ignore_missing_imports = true

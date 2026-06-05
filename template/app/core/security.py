@@ -7,6 +7,8 @@ password reset, and Google OAuth state management.
 
 from __future__ import annotations
 
+import base64
+import io
 import secrets
 import string
 from datetime import UTC
@@ -17,6 +19,9 @@ from typing import cast
 from uuid import UUID
 
 import bcrypt
+import pyotp
+import qrcode
+import qrcode.constants
 from jose import jwt
 
 from app.core.settings import settings
@@ -406,3 +411,88 @@ async def verify_google_oauth_state(state: str) -> str | None:
     # Atomic get-and-delete: no race window between read and delete.
     stored_uri: str | None = await redis.getdel(key)
     return stored_uri
+
+
+# TOTP / 2FA Utilities.
+# Uses pyotp for TOTP generation and verification per RFC 6238.
+
+
+def generate_totp_secret() -> str:
+    """Generate a cryptographically secure base32 TOTP secret.
+
+    Returns:
+        Base32-encoded secret string suitable for pyotp.TOTP.
+    """
+    return pyotp.random_base32()
+
+
+def build_totp_provisioning_uri(email: str, secret: str) -> str:
+    """Build the otpauth:// provisioning URI for QR code generation.
+
+    Args:
+        email: User's email address (used as the account name).
+        secret: Base32 TOTP secret.
+
+    Returns:
+        otpauth:// URI string for use in authenticator apps.
+    """
+    totp = pyotp.TOTP(secret)
+    return totp.provisioning_uri(name=email, issuer_name=settings.PROJECT_NAME)
+
+
+def generate_totp_qr_data_url(provisioning_uri: str) -> str:
+    """Generate a base64-encoded PNG QR code from a provisioning URI.
+
+    Args:
+        provisioning_uri: otpauth:// URI from build_totp_provisioning_uri().
+
+    Returns:
+        Data URL string (data:image/png;base64,...) for embedding in HTML/JSON.
+    """
+    qr: qrcode.QRCode = qrcode.QRCode(  # type: ignore[type-arg]
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=10,
+        border=4,
+    )
+    qr.add_data(provisioning_uri)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG")
+    buffer.seek(0)
+    encoded = base64.b64encode(buffer.read()).decode()
+    return f"data:image/png;base64,{encoded}"
+
+
+def verify_totp(secret: str, code: str, valid_window: int = 1) -> bool:
+    """Verify a TOTP code against a secret.
+
+    Args:
+        secret: Base32 TOTP secret.
+        code: 6-digit TOTP code from authenticator app.
+        valid_window: Number of 30-second intervals to accept on each side
+            of the current time (default 1 allows ±30s clock drift).
+
+    Returns:
+        True if code is valid, False otherwise.
+    """
+    totp = pyotp.TOTP(secret)
+    return bool(totp.verify(code, valid_window=valid_window))
+
+
+def generate_recovery_codes(count: int = 10) -> list[str]:
+    """Generate plaintext one-time recovery codes for 2FA backup.
+
+    Args:
+        count: Number of codes to generate (default 10).
+
+    Returns:
+        List of formatted recovery codes (XXXX-XXXX uppercase alphanumeric).
+        These are shown once and must be stored as bcrypt hashes.
+    """
+    alphabet = string.ascii_uppercase + string.digits
+    codes = []
+    for _ in range(count):
+        raw = "".join(secrets.choice(alphabet) for _ in range(8))
+        codes.append(f"{raw[:4]}-{raw[4:]}")
+    return codes
