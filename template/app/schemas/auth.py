@@ -149,3 +149,103 @@ class GoogleCallbackRequest(BaseSchema):
     redirect_uri: str = Field(
         description="Redirect URI used in the authorization request"
     )
+
+
+class LoginResponse(BaseSchema):
+    """Login response — either JWT tokens or a 2FA challenge.
+
+    When 2FA is disabled, access_token and refresh_token are populated.
+    When 2FA is required, requires_2fa is True and challenge_token is set.
+
+    Attributes:
+        access_token: JWT access token (present when 2FA not required).
+        refresh_token: JWT refresh token (present when 2FA not required).
+        token_type: Token type (always "bearer").
+        expires_in: Access token lifetime in seconds (present when 2FA not required).
+        requires_2fa: True if the user must complete a 2FA challenge.
+        challenge_token: Opaque challenge token to pass to POST /auth/2fa/verify.
+    """
+
+    access_token: str | None = Field(default=None, description="JWT access token")
+    refresh_token: str | None = Field(default=None, description="JWT refresh token")
+    token_type: str = Field(default="bearer", description="Token type")
+    expires_in: int | None = Field(
+        default=None, description="Access token lifetime in seconds"
+    )
+    requires_2fa: bool = Field(
+        default=False, description="Whether a 2FA challenge is required"
+    )
+    challenge_token: str | None = Field(
+        default=None, description="Opaque challenge token for 2FA verification"
+    )
+
+
+class TwoFactorEnrollResponse(BaseSchema):
+    """Response from POST /auth/2fa/enroll.
+
+    Attributes:
+        qr_data_url: Base64-encoded PNG QR code for authenticator app setup.
+        recovery_codes: One-time backup codes (shown once, store securely).
+    """
+
+    qr_data_url: str = Field(description="Data URL of the QR code PNG image")
+    recovery_codes: list[str] = Field(
+        description="One-time recovery codes; store these in a safe place"
+    )
+
+
+class TwoFactorConfirmRequest(BaseSchema):
+    """Request for POST /auth/2fa/confirm.
+
+    Attributes:
+        totp_code: 6-digit code from the authenticator app.
+    """
+
+    totp_code: str = Field(
+        min_length=6, max_length=6, description="6-digit TOTP code"
+    )
+
+
+class TwoFactorVerifyRequest(BaseSchema):
+    """Request for POST /auth/2fa/verify.
+
+    Attributes:
+        challenge_token: Token received from the login response.
+        totp_code: 6-digit TOTP code (mutually exclusive with recovery_code).
+        recovery_code: Backup recovery code (mutually exclusive with totp_code).
+    """
+
+    challenge_token: str = Field(description="Challenge token from login response")
+    totp_code: str | None = Field(
+        default=None, min_length=6, max_length=6, description="6-digit TOTP code"
+    )
+    recovery_code: str | None = Field(
+        default=None,
+        min_length=9,
+        max_length=9,
+        description="Recovery code (XXXX-XXXX)",
+    )
+
+
+class TwoFactorDisableRequest(BaseSchema):
+    """Request for DELETE /auth/2fa/disable.
+
+    Attributes:
+        totp_code: 6-digit TOTP code to confirm disabling 2FA.
+    """
+
+    totp_code: str = Field(
+        min_length=6, max_length=6, description="6-digit TOTP code to confirm"
+    )
+
+
+class RecoveryCodesResponse(BaseSchema):
+    """Response containing regenerated recovery codes.
+
+    Attributes:
+        recovery_codes: New one-time recovery codes (shown once).
+    """
+
+    recovery_codes: list[str] = Field(
+        description="New one-time recovery codes; store these in a safe place"
+    )
