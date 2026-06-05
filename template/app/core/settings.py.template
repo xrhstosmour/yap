@@ -234,6 +234,13 @@ class Settings(BaseSettings):
     # Google OAuth CSRF state token TTL in seconds (default: 10 minutes).
     GOOGLE_OAUTH_STATE_TTL_SECONDS: int = 600
 
+    # Two-factor authentication (TOTP).
+    TOTP_CHALLENGE_TTL_SECONDS: int = 300
+    TOTP_RATE_LIMIT_WINDOW: int = 300
+    TOTP_MAX_ATTEMPTS: int = 5
+    TOTP_REPLAY_TTL: int = 90
+    TOTP_RECOVERY_CODE_COUNT: int = 10
+
     # Email (SMTP) - for sending transactional emails.
     SMTP_HOST: str = "localhost"
     SMTP_PORT: int = 587
