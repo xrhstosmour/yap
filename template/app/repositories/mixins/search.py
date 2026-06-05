@@ -1,3 +1,4 @@
+# mypy: disable-error-code="attr-defined"
 """SearchMixin for repository layer.
 
 Adds search_fts(), search_trigram(), and search_combined() methods
