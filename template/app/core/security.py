@@ -12,7 +12,6 @@ import string
 from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
-from typing import TYPE_CHECKING
 from typing import Any
 from typing import cast
 from uuid import UUID
@@ -21,9 +20,6 @@ import bcrypt
 from jose import jwt
 
 from app.core.settings import settings
-
-if TYPE_CHECKING:
-    pass
 
 # Password hashing configuration.
 # Using bcrypt directly as it's well-audited and production-proven.
@@ -62,6 +58,13 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         True if password matches, False otherwise
     """
     return bcrypt.checkpw(plain_password.encode(), hashed_password.encode())
+
+
+# Dummy hash for timing attack prevention.
+# Generated at module load to avoid hardcoded values.
+# Used when user/key is not found to maintain consistent response time.
+# Any valid bcrypt hash works here — the actual value is not a secret.
+DUMMY_PASSWORD_HASH: str = generate_password_hash("dummy")
 
 
 # JWT Token Management.
@@ -248,17 +251,10 @@ def mask_api_key(key: str) -> str:
     return f"{key[:8]}****"
 
 
-# Dummy hash for timing attack prevention.
-# Used when user/key is not found to maintain consistent response time.
-DUMMY_PASSWORD_HASH = "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4.VTMBQdxfZvPLOa"
-
-
 # Single-use Redis-backed token configuration.
 
 # Email verification.
 _EMAIL_VERIFICATION_PREFIX = "email_verification"
-
-EMAIL_VERIFICATION_TOKEN_TTL_SECONDS: int = 60 * 60 * 24  # 24 hours.
 
 
 async def create_email_verification_token(user_id: UUID) -> str:
@@ -279,7 +275,7 @@ async def create_email_verification_token(user_id: UUID) -> str:
     token = secrets.token_urlsafe(32)
     redis = await get_redis()
     key = f"{_EMAIL_VERIFICATION_PREFIX}:{token}"
-    await redis.setex(key, EMAIL_VERIFICATION_TOKEN_TTL_SECONDS, str(user_id))
+    await redis.setex(key, settings.EMAIL_VERIFICATION_TOKEN_TTL_SECONDS, str(user_id))
     return token
 
 
