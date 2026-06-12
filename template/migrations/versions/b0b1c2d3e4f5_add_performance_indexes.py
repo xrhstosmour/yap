@@ -24,7 +24,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # --- api_keys: compound indexes for common query patterns ---
+    # api_keys: compound indexes for common query patterns
 
     # list_by_user() and count_active_by_user() filter on (user_id, is_active).
     op.create_index(
@@ -41,7 +41,7 @@ def upgrade() -> None:
         unique=False,
     )
 
-    # --- audit_logs: compound index for get_recent_failures() ---
+    # audit_logs: compound index for get_recent_failures()
     # WHERE status = 'failure' ORDER BY created_at DESC.
     op.create_index(
         op.f("ix_audit_logs_status_created_at"),
@@ -50,7 +50,7 @@ def upgrade() -> None:
         unique=False,
     )
 
-    # --- tenants: single-column index for ORDER BY and ILIKE ---
+    # tenants: single-column index for ORDER BY and ILIKE
     op.create_index(
         op.f("ix_tenants_name"),
         "tenants",

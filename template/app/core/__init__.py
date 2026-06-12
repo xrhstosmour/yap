@@ -17,6 +17,8 @@ from app.core.email import send_batch_emails
 from app.core.email import send_email
 from app.core.encryption import CryptoService
 from app.core.encryption import crypto
+from app.core.encryption import decrypt
+from app.core.encryption import encrypt
 from app.core.encryption import generate_key
 from app.core.feature_flags import feature_disabled
 from app.core.feature_flags import feature_enabled
@@ -77,6 +79,8 @@ __all__ = [
     "send_batch_emails",
     "CryptoService",
     "crypto",
+    "decrypt",
+    "encrypt",
     "generate_key",
     "SYSTEM_TENANT_ID",
 ]

@@ -13,6 +13,7 @@ from app.models.feature_flag import FeatureFlag
 from app.models.oauth_account import OAuthAccount
 from app.models.oauth_account import OAuthProvider
 from app.models.tenant import Tenant
+from app.models.totp_recovery_code import TotpRecoveryCode
 from app.models.user import User
 
 __all__ = [
@@ -25,5 +26,6 @@ __all__ = [
     "OAuthProvider",
     "Tenant",
     "TenantBase",
+    "TotpRecoveryCode",
     "User",
 ]

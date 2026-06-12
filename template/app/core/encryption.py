@@ -15,8 +15,15 @@ Basic encrypt/decrypt::
 
     from app.core.encryption import crypto
 
-    encrypted = crypto.encrypt("user@{{ project_slug }}.com")
+    encrypted = crypto.encrypt("user@yap.com")
     decrypted = crypto.decrypt(encrypted)
+
+Module-level convenience wrappers::
+
+    from app.core.encryption import encrypt, decrypt
+
+    encrypted = encrypt("my-totp-secret")
+    original = decrypt(encrypted)
 
 Model field pattern::
 
@@ -35,7 +42,7 @@ Model field pattern::
 
 Searchable encrypted field (deterministic)::
 
-    search_token = crypto.hash_for_search("user@{{ project_slug }}.com")
+    search_token = crypto.hash_for_search("user@yap.com")
     # Store search_token alongside encrypted value for lookups
 """
 
@@ -94,13 +101,13 @@ class CryptoService:
         """Encrypt a string value.
 
         Args:
-            value: Plain text to encrypt
+            value: Plain text to encrypt.
 
         Returns:
-            Base64-encoded encrypted value prefixed with "enc:"
+            Base64-encoded encrypted value prefixed with "enc:".
 
         Raises:
-            RuntimeError: If encryption is not configured
+            RuntimeError: If encryption is not configured.
         """
         if self._fernet is None:
             raise RuntimeError("Encryption not configured. Set CRYPTO_KEY in .env")
@@ -111,13 +118,13 @@ class CryptoService:
         """Decrypt an encrypted string value.
 
         Args:
-            value: Encrypted value (with or without "enc:" prefix)
+            value: Encrypted value (with or without "enc:" prefix).
 
         Returns:
-            Decrypted plain text
+            Decrypted plain text.
 
         Raises:
-            RuntimeError: If encryption is not configured
+            RuntimeError: If encryption is not configured.
         """
         if self._fernet is None:
             raise RuntimeError("Encryption not configured. Set CRYPTO_KEY in .env")
@@ -152,11 +159,12 @@ def generate_key() -> str:
     """Generate a new Fernet encryption key.
 
     Returns:
-        Base64-encoded Fernet key suitable for CRYPTO_KEY
+        Base64-encoded Fernet key suitable for CRYPTO_KEY.
     """
     return Fernet.generate_key().decode()
 
 
+# Global encryption service instance, initialized from settings.CRYPTO_KEY.
 crypto = CryptoService()
 
 
