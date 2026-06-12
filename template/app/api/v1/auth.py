@@ -1,7 +1,7 @@
 """Authentication API routes.
 
 This module provides authentication endpoints including
-login, registration, and token refresh.
+login, registration, token refresh, and email verification.
 """
 
 from __future__ import annotations
@@ -11,10 +11,12 @@ from typing import Annotated
 from fastapi import APIRouter
 from fastapi import Depends
 from fastapi import HTTPException
+from fastapi import Query
 from fastapi import status
 from fastapi.security import OAuth2PasswordRequestForm
 
 from app.core.logging import get_logger
+from app.core.security import verify_email_verification_token
 from app.dependencies import CurrentUser
 from app.dependencies import SessionDep
 from app.schemas.auth import PasswordChangeRequest
@@ -26,6 +28,7 @@ from app.services.auth_service import AuthService
 from app.services.auth_service import EmailAlreadyExistsError
 from app.services.auth_service import InvalidCredentialsError
 from app.services.auth_service import UserInactiveError
+from app.services.auth_service import UserNotFoundError
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 logger = get_logger("api.auth")
@@ -157,3 +160,67 @@ async def get_me(current_user: CurrentUser) -> UserResponse:
     such as hashed_password.
     """
     return UserResponse.model_validate(current_user)
+
+
+@router.post(
+    "/send-verification-email",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Send verification email",
+    description="Send an email verification link to the current user's address.",
+)
+async def send_verification_email(
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> None:
+    """Send an email verification link to the authenticated user.
+
+    Generates a single-use token and dispatches a Celery task to
+    deliver the verification email. Returns 400 if already verified.
+    """
+    if current_user.is_verified:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email address is already verified.",
+        )
+
+    service = AuthService(session)
+    await service.send_verification_email(current_user)
+
+
+@router.get(
+    "/verify-email",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Verify email address",
+    description="Verify email address using the token from the verification email.",
+)
+async def verify_email(
+    session: SessionDep,
+    token: Annotated[str | None, Query(description="Verification token from email")] = None,
+) -> None:
+    """Verify a user's email address.
+
+    Validates the single-use token and marks the user as verified.
+    Returns 400 if the token is missing, expired, or already used.
+    """
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification token.",
+        )
+
+    user_id = await verify_email_verification_token(token)
+
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification token.",
+        )
+
+    service = AuthService(session)
+    try:
+        await service.verify_user(user_id)
+    except UserNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification token.",
+        )
