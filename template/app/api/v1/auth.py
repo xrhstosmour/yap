@@ -33,6 +33,8 @@ from app.services.auth_service import UserNotFoundError
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 logger = get_logger("api.auth")
 
+INVALID_VERIFICATION_TOKEN = "Invalid or expired verification token."
+
 
 @router.post(
     "/register",
@@ -205,7 +207,7 @@ async def verify_email(
     if not token:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired verification token.",
+            detail=INVALID_VERIFICATION_TOKEN,
         )
 
     user_id = await verify_email_verification_token(token)
@@ -213,7 +215,7 @@ async def verify_email(
     if not user_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired verification token.",
+            detail=INVALID_VERIFICATION_TOKEN,
         )
 
     service = AuthService(session)
@@ -222,5 +224,5 @@ async def verify_email(
     except UserNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired verification token.",
+            detail=INVALID_VERIFICATION_TOKEN,
         )
