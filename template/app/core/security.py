@@ -365,7 +365,7 @@ async def create_google_oauth_state(redirect_uri: str) -> str:
     """Create a single-use CSRF state token for Google OAuth.
 
     Generates a cryptographically secure random token and stores the
-    caller's ``redirect_uri`` as the Redis value with a 10-minute TTL.
+    caller's `redirect_uri` as the Redis value with a 10-minute TTL.
     Binding the URI to the state token prevents open-redirect attacks
     where an attacker substitutes a different callback URI on the return trip.
 
@@ -395,8 +395,8 @@ async def verify_google_oauth_state(state: str) -> str | None:
         state: CSRF state string received in the OAuth callback.
 
     Returns:
-        The bound ``redirect_uri`` if the token is valid and unexpired,
-        ``None`` if the token is missing or already consumed.
+        The bound `redirect_uri` if the token is valid and unexpired,
+        `None` if the token is missing or already consumed.
     """
     from app.core.cache import get_redis
 

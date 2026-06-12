@@ -1,6 +1,6 @@
-"""Idempotency middleware powered by ``X-Idempotency-Key``.
+"""Idempotency middleware powered by `X-Idempotency-Key`.
 
-Clients that include an ``X-Idempotency-Key`` header on mutating
+Clients that include an `X-Idempotency-Key` header on mutating
 requests (POST, PATCH, PUT, DELETE) are guaranteed that retrying the
 same key will not execute the side effect a second time — the cached
 response is replayed instead.
@@ -36,7 +36,7 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
     """Middleware that enforces idempotent request processing.
 
     Place this middleware **after** authentication / tenant middleware
-    so any user context is already available in ``request.state``.
+    so any user context is already available in `request.state`.
     """
 
     async def dispatch(
