@@ -67,6 +67,10 @@ class AuditAction(StrEnum):
     BACKUP = "backup"
     RESTORE = "restore"
 
+    # GDPR.
+    ACCOUNT_DELETION = "account_deletion"
+    DATA_EXPORT = "data_export"
+
 
 class AuditLog(BaseModel, table=True):
     """Audit log entry for tracking changes and access.
