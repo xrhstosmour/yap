@@ -6,6 +6,7 @@ authentication and role-based access control.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -37,6 +38,9 @@ class User(BaseModel, table=True):
         is_active: Whether the user can log in
         is_superuser: Full admin access (bypasses tenant restrictions)
         is_verified: Whether email has been verified
+        is_2fa_enabled: Whether TOTP 2FA is enabled
+        totp_secret_encrypted: Encrypted TOTP secret for 2FA enrollment/login
+        totp_confirmed_at: Timestamp when TOTP enrollment was confirmed
         tenant_id: Organization this user belongs to
         created_at: Account creation timestamp
         updated_at: Last modification timestamp
@@ -78,6 +82,19 @@ class User(BaseModel, table=True):
     is_verified: bool = Field(default=False, nullable=False)
 
     token_version: int = Field(default=1, nullable=False)
+
+    is_2fa_enabled: bool = Field(default=False, nullable=False)
+
+    totp_secret_encrypted: str | None = Field(
+        default=None,
+        nullable=True,
+        max_length=500,
+    )
+
+    totp_confirmed_at: datetime | None = Field(
+        default=None,
+        nullable=True,
+    )
 
     # Multi-tenancy.
     tenant_id: UUID | None = Field(

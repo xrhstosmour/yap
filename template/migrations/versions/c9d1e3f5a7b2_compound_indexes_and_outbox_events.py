@@ -28,7 +28,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # --- audit_logs: replace single-column indexes with compound indexes ---
+    # audit_logs: replace single-column indexes with compound indexes
 
     # Drop the single-column indexes; the compound indexes cover leading-column
     # lookups so no existing query loses index support.
@@ -50,7 +50,7 @@ def upgrade() -> None:
         unique=False,
     )
 
-    # --- outbox_events: create missing table with compound index ---
+    # outbox_events: create missing table with compound index
 
     op.create_table(
         "outbox_events",
@@ -111,7 +111,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # --- outbox_events ---
+    # outbox_events
     op.drop_index(
         op.f("ix_outbox_events_status_created_at"), table_name="outbox_events"
     )
@@ -130,7 +130,7 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_outbox_events_id"), table_name="outbox_events")
     op.drop_table("outbox_events")
 
-    # --- audit_logs: restore single-column indexes ---
+    # audit_logs: restore single-column indexes
     op.drop_index(
         op.f("ix_audit_logs_tenant_id_created_at"), table_name="audit_logs"
     )

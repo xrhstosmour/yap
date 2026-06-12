@@ -24,6 +24,7 @@ async def engine_fixture():
     from app.models import graveyard  # noqa: F401
     from app.models import outbox  # noqa: F401
     from app.models import tenant  # noqa: F401
+    from app.models import totp_recovery_code  # noqa: F401
     from app.models import user  # noqa: F401
 
     async with engine.begin() as conn:
@@ -90,3 +91,20 @@ def override_settings_fixture():
         FIRST_SUPERUSER_PASSWORD="test-password",
         RABBITMQ_PASSWORD="test-password",
     )
+
+
+@pytest.fixture(name="patch_test_fernet", autouse=True)
+def patch_test_fernet_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Inject a test Fernet cipher into the global crypto service.
+
+    Ensures all encryption/decryption calls in tests use a consistent
+    in-memory key without requiring CRYPTO_KEY in the environment.
+    """
+    from cryptography.fernet import Fernet
+
+    import app.core.encryption as enc_mod
+
+    test_key = Fernet.generate_key()
+    test_fernet = Fernet(test_key)
+    monkeypatch.setattr(enc_mod.crypto, "_fernet", test_fernet)
+    monkeypatch.setattr(enc_mod.crypto, "_keys", [test_key.decode()])
