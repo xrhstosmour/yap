@@ -1,6 +1,8 @@
 """Integration tests for `Auth` API endpoints."""
 
+import sys
 from typing import cast
+from unittest.mock import MagicMock
 
 import pytest
 from httpx import ASGITransport
@@ -23,6 +25,14 @@ def client_fixture():
     """Create a test client."""
     transport = ASGITransport(app=app)
     return AsyncClient(transport=transport, base_url="http://test")
+
+
+@pytest.fixture(autouse=True)
+def _mock_email_tasks():
+    """Mock email tasks module to avoid Celery dependency."""
+    mock_email = MagicMock()
+    mock_email.send_template_email_task = MagicMock()
+    sys.modules["app.tasks.email"] = mock_email
 
 
 class TestAuthLogin:
@@ -163,13 +173,13 @@ class TestEmailVerification:
         )
         access_token = create_access_token(subject=user.id)
 
-        # Prevent actual Celery task dispatch and Redis token creation.
-        async def _fake_send(*_args, **_kwargs):
-            pass
+        # Mock Redis-backed token creation to avoid Redis dependency.
+        async def _fake_create_token(_user_id):
+            return "test-verification-token"
 
         monkeypatch.setattr(
-            "app.services.auth_service.AuthService.send_verification_email",
-            _fake_send,
+            "app.core.security.create_email_verification_token",
+            _fake_create_token,
         )
 
         response = await client.post(
