@@ -2,8 +2,8 @@
 
 Mock strategy
 -------------
-``IdempotencyService`` calls ``get_redis()`` internally.  We patch
-**only** the service methods with ``unittest.mock.AsyncMock`` so the
+`IdempotencyService` calls `get_redis()` internally.  We patch
+**only** the service methods with `unittest.mock.AsyncMock` so the
 middleware can be exercised without a real Redis connection.
 Tests that verify the service itself use a live Redis client (when
 available) or skip.
@@ -49,10 +49,10 @@ idempotency_service = IdempotencyService()
 
 @pytest.fixture
 def mock_service(monkeypatch: pytest.MonkeyPatch) -> IdempotencyService:
-    """Replace the global ``idempotency_service`` with a mocked version.
+    """Replace the global `idempotency_service` with a mocked version.
 
-    All three public methods (``get``, ``try_lock``, ``set``) become
-    ``AsyncMock`` instances that the test can assert against.
+    All three public methods (`get`, `try_lock`, `set`) become
+    `AsyncMock` instances that the test can assert against.
     """
     svc = IdempotencyService()
     svc.get = AsyncMock(return_value=None)
@@ -96,7 +96,7 @@ class TestIdempotencyMiddleware:
         self,
         app_with_middleware: TestClient,
     ) -> None:
-        """POST without ``X-Idempotency-Key`` is not cached."""
+        """POST without `X-Idempotency-Key` is not cached."""
         resp = app_with_middleware.post("/echo", json={"x": 1})
         assert resp.status_code == 201
 

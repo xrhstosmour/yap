@@ -12,8 +12,11 @@ from fastapi import APIRouter
 from fastapi import Depends
 from fastapi import HTTPException
 from fastapi import status
+from fastapi.requests import Request
 
 from app.core.logging import get_logger
+from app.core.pagination import PAGINATION_HEADERS_SPEC
+from app.core.pagination import PaginatedResponse
 from app.dependencies import SessionDep
 from app.dependencies import SuperuserUser
 from app.schemas.base import PaginationParams
@@ -31,6 +34,8 @@ _FLAG_NOT_FOUND = "Feature flag not found"
 
 @router.get(
     "",
+    response_model=FeatureFlagListResponse,
+    responses=PAGINATION_HEADERS_SPEC,  # type: ignore[arg-type]
     summary="List feature flags",
     description="List all feature flags with pagination. Admin only.",
 )
@@ -38,7 +43,8 @@ async def list_feature_flags(
     params: Annotated[PaginationParams, Depends()],
     current_user: SuperuserUser,
     session: SessionDep,
-) -> FeatureFlagListResponse:
+    request: Request,
+) -> PaginatedResponse:
     """List all feature flags (admin only).
 
     Returns paginated list of feature flags.
@@ -52,12 +58,18 @@ async def list_feature_flags(
     page = (params.skip // params.limit) + 1 if params.limit > 0 else 1
     pages = (total + params.limit - 1) // params.limit if params.limit > 0 else 1
 
-    return FeatureFlagListResponse(
-        data=[FeatureFlagResponse.model_validate(f) for f in flags],
+    return PaginatedResponse(
+        content=FeatureFlagListResponse(
+            data=[FeatureFlagResponse.model_validate(f) for f in flags],
+            total=total,
+            page=page,
+            page_size=params.limit,
+            pages=pages,
+        ).model_dump(),
         total=total,
-        page=page,
-        page_size=params.limit,
-        pages=pages,
+        skip=params.skip,
+        limit=params.limit,
+        request=request,
     )
 
 

@@ -1,6 +1,6 @@
 """Idempotency service for duplicate request detection.
 
-Stores completed response data keyed by ``X-Idempotency-Key`` so that
+Stores completed response data keyed by `X-Idempotency-Key` so that
 retrying a mutating request returns the original result instead of
 executing the side effect again.
 """
@@ -33,8 +33,8 @@ class CachedResponse:
 class IdempotencyService:
     """Redis-backed idempotency storage.
 
-    Keys are namespaced under ``idempotency:`` and expire after
-    ``settings.IDEMPOTENCY_TTL_HOURS``.
+    Keys are namespaced under `idempotency:` and expire after
+    `settings.IDEMPOTENCY_TTL_HOURS`.
     """
 
     def __init__(self) -> None:
@@ -70,7 +70,7 @@ class IdempotencyService:
             return None
 
     async def get(self, raw_key: str) -> CachedResponse | None:
-        """Return cached response for *raw_key*, or ``None``."""
+        """Return cached response for *raw_key*, or `None`."""
         try:
             r = await get_redis()
             data = await r.get(self._key(raw_key))
@@ -95,8 +95,8 @@ class IdempotencyService:
     async def try_lock(self, raw_key: str) -> bool:
         """Atomically claim the processing lock for *raw_key*.
 
-        Returns ``True`` if this caller acquired the lock (first
-        request for this key).  Returns ``False`` if another request
+        Returns `True` if this caller acquired the lock (first
+        request for this key).  Returns `False` if another request
         is already processing the same key.
         """
         try:

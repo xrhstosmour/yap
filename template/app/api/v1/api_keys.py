@@ -13,8 +13,11 @@ from fastapi import APIRouter
 from fastapi import Depends
 from fastapi import HTTPException
 from fastapi import status
+from fastapi.requests import Request
 
 from app.core.logging import get_logger
+from app.core.pagination import PAGINATION_HEADERS_SPEC
+from app.core.pagination import PaginatedResponse
 from app.dependencies import CurrentUser
 from app.dependencies import SessionDep
 from app.schemas.api_key import APIKeyCreate
@@ -73,6 +76,7 @@ async def create_api_key(
 @router.get(
     "",
     response_model=APIKeyListResponse,
+    responses=PAGINATION_HEADERS_SPEC,  # type: ignore[arg-type]
     summary="List API keys",
     description="List all API keys for the current user.",
 )
@@ -80,7 +84,8 @@ async def list_api_keys(
     params: Annotated[APIKeyListParams, Depends()],
     current_user: CurrentUser,
     session: SessionDep,
-) -> APIKeyListResponse:
+    request: Request,
+) -> PaginatedResponse:
     """List current user's API keys."""
     service = APIKeyService(session)
 
@@ -93,12 +98,18 @@ async def list_api_keys(
     page = (params.skip // params.limit) + 1 if params.limit > 0 else 1
     pages = (total + params.limit - 1) // params.limit if params.limit > 0 else 1
 
-    return APIKeyListResponse(
-        data=[APIKeyResponse.model_validate(k) for k in keys],
+    return PaginatedResponse(
+        content=APIKeyListResponse(
+            data=[APIKeyResponse.model_validate(k) for k in keys],
+            total=total,
+            page=page,
+            page_size=params.limit,
+            pages=pages,
+        ).model_dump(),
         total=total,
-        page=page,
-        page_size=params.limit,
-        pages=pages,
+        skip=params.skip,
+        limit=params.limit,
+        request=request,
     )
 
 

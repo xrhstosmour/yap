@@ -267,7 +267,7 @@ class UserService:
 
         Revokes all API keys, anonymizes personal fields (email,
         full_name, hashed_password), soft-deletes the account, and
-        increments ``token_version`` to immediately invalidate all
+        increments `token_version` to immediately invalidate all
         outstanding JWTs. Logs the deletion in the audit trail.
 
         Args:

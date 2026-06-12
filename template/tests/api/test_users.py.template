@@ -64,6 +64,26 @@ class TestUsersList:
 
         assert response.status_code == 200
 
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_list_users_pagination_headers(
+        self, client: AsyncClient, session: AsyncSession
+    ) -> None:
+        """List users should include X-Total-Count and Link headers."""
+        auth_service = _auth_service(session)
+        superuser = await _create_superuser(auth_service)
+        token = create_access_token(subject=superuser.id)
+
+        response = await client.get(
+            "/api/v1/users",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        assert "x-total-count" in response.headers
+        assert response.headers["x-total-count"].isdigit()
+        assert "link" in response.headers
+        assert response.headers["link"].startswith("<")
+
 
 class TestUsersRead:
     """Tests for GET /api/v1/users/{user_id}."""
