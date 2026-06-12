@@ -18,6 +18,7 @@ from app.models.base import BaseModel
 
 if TYPE_CHECKING:
     from app.models.api_key import APIKey
+    from app.models.oauth_account import OAuthAccount
     from app.models.tenant import Tenant
 
 
@@ -25,7 +26,8 @@ class User(BaseModel, table=True):
     """User model for authentication.
 
     Represents a user in the system with password-based authentication.
-    Users belong to a tenant (organization) and can have API keys.
+    Users belong to a tenant (organization) and can have API keys and
+    linked OAuth accounts.
 
     Attributes:
         id: UUID primary key
@@ -43,7 +45,7 @@ class User(BaseModel, table=True):
     Relationships:
         tenant: The organization this user belongs to
         api_keys: API keys owned by this user
-        refresh_tokens: Active refresh tokens
+        oauth_accounts: Linked OAuth provider accounts
 
     Note:
         Superusers (is_superuser=True) have access to all tenants
@@ -97,6 +99,14 @@ class User(BaseModel, table=True):
     api_keys: list[APIKey] = Relationship(
         sa_relationship=relationship(
             "APIKey",
+            back_populates="user",
+            lazy="selectin",
+        ),
+    )
+
+    oauth_accounts: list[OAuthAccount] = Relationship(
+        sa_relationship=relationship(
+            "OAuthAccount",
             back_populates="user",
             lazy="selectin",
         ),

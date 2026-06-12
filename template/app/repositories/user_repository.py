@@ -128,18 +128,20 @@ class UserRepository(BaseRepository[User]):
         full_name: str | None = None,
         tenant_id: UUID | None = None,
         is_superuser: bool = False,
+        is_verified: bool = False,
     ) -> User:
         """Create a new user with password.
 
         Args:
-            email: User's email address
-            password_hash: Bcrypt hash of password
-            full_name: Optional display name
-            tenant_id: Optional tenant ID
-            is_superuser: Whether user is admin
+            email: User's email address.
+            password_hash: Bcrypt hash of password (or random bytes for OAuth).
+            full_name: Optional display name.
+            tenant_id: Optional tenant ID.
+            is_superuser: Whether user is admin.
+            is_verified: Whether email is pre-verified (e.g. OAuth accounts).
 
         Returns:
-            Created User instance
+            Created User instance.
         """
         return await self.create(
             {
@@ -149,7 +151,7 @@ class UserRepository(BaseRepository[User]):
                 "tenant_id": tenant_id,
                 "is_superuser": is_superuser,
                 "is_active": True,
-                "is_verified": False,
+                "is_verified": is_verified,
             }
         )
 

@@ -6,6 +6,7 @@ user authentication, registration, and token management.
 
 from __future__ import annotations
 
+import secrets
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +22,7 @@ from app.core.settings import settings
 from app.models.audit_log import AuditAction
 from app.models.user import User
 from app.repositories.audit_repository import AuditLogRepository
+from app.repositories.oauth_account_repository import OAuthAccountRepository
 from app.repositories.user_repository import UserRepository
 from app.schemas.auth import RegisterRequest
 from app.schemas.auth import TokenResponse
@@ -74,6 +76,7 @@ class AuthService:
         self.session = session
         self.user_repository = UserRepository(session)
         self.audit_repository = AuditLogRepository(session)
+        self.oauth_account_repository = OAuthAccountRepository(session)
 
     async def register(
         self,
@@ -375,3 +378,161 @@ class AuthService:
         await self.user_repository.increment_token_version(user.id)
 
         logger.info("password_reset", user_id=str(user.id))
+
+    async def get_google_auth_url(self, redirect_uri: str) -> str:
+        """Build and return the Google OAuth 2.0 authorization URL.
+
+        Generates a single-use CSRF state token stored in Redis for
+        10 minutes, then constructs the Google consent-screen URL.
+        The caller must redirect the end-user to this URL.
+
+        Args:
+            redirect_uri: URL Google should redirect the user to after
+                consent. Must match a URI registered in Google Console.
+
+        Returns:
+            Full Google OAuth authorization URL with state embedded.
+
+        Raises:
+            AuthenticationError: If Google OAuth is not configured.
+        """
+        from urllib.parse import urlencode
+
+        from app.core.security import create_google_oauth_state
+
+        if not settings.GOOGLE_CLIENT_ID:
+            raise AuthenticationError("Google OAuth is not configured.")
+
+        state = await create_google_oauth_state(redirect_uri)
+        params = {
+            "client_id": settings.GOOGLE_CLIENT_ID,
+            "redirect_uri": redirect_uri,
+            "response_type": "code",
+            "scope": "openid email profile",
+            "state": state,
+            "access_type": "online",
+        }
+        return f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}"
+
+    async def google_login(
+        self, code: str, state: str, redirect_uri: str
+    ) -> TokenResponse:
+        """Authenticate or register a user via Google OAuth.
+
+        Validates the CSRF state token, exchanges the authorization code
+        for Google tokens, fetches the user's profile, then finds or
+        creates a local account linked via `OAuthAccount`. Existing
+        password-only accounts are linked by email on first Google login.
+
+        Args:
+            code: Authorization code received from Google callback.
+            state: CSRF state token from the authorization URL.
+            redirect_uri: Must exactly match the value used in the
+                authorization request.
+
+        Returns:
+            TokenResponse with access and refresh tokens.
+
+        Raises:
+            AuthenticationError: If state is invalid, Google token
+                exchange fails, or the user is inactive.
+        """
+        import httpx
+
+        from app.core.security import verify_google_oauth_state
+        from app.models.oauth_account import OAuthProvider
+
+        expected_redirect_uri = await verify_google_oauth_state(state)
+        if not expected_redirect_uri:
+            raise AuthenticationError("Invalid or expired OAuth state.")
+        if redirect_uri != expected_redirect_uri:
+            raise AuthenticationError("OAuth redirect URI mismatch.")
+
+        # Exchange authorization code for Google tokens.
+        async with httpx.AsyncClient() as client:
+            token_response = await client.post(
+                "https://oauth2.googleapis.com/token",
+                data={
+                    "code": code,
+                    "client_id": settings.GOOGLE_CLIENT_ID,
+                    "client_secret": settings.GOOGLE_CLIENT_SECRET,
+                    "redirect_uri": redirect_uri,
+                    "grant_type": "authorization_code",
+                },
+            )
+
+        if token_response.status_code != 200:
+            logger.warning(
+                "google_token_exchange_failed",
+                status=token_response.status_code,
+            )
+            raise AuthenticationError("Google token exchange failed.")
+
+        access_token = token_response.json().get("access_token")
+        if not access_token:
+            raise AuthenticationError("No access token in Google response.")
+
+        # Fetch user profile from Google.
+        async with httpx.AsyncClient() as client:
+            userinfo_response = await client.get(
+                "https://www.googleapis.com/oauth2/v2/userinfo",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+
+        if userinfo_response.status_code != 200:
+            raise AuthenticationError("Failed to fetch Google user profile.")
+
+        userinfo = userinfo_response.json()
+
+        # Reject accounts that have not verified their email with Google.
+        if not userinfo.get("verified_email", False):
+            raise AuthenticationError("Google account email is not verified.")
+
+        google_id: str = userinfo["id"]
+        email: str = userinfo["email"]
+        full_name: str | None = userinfo.get("name")
+
+        # Find existing linked account by provider subject ID.
+        oauth_account = await self.oauth_account_repository.get_by_provider(
+            OAuthProvider.GOOGLE, google_id
+        )
+
+        if oauth_account:
+            user: User | None = oauth_account.user
+        else:
+            user = await self.user_repository.get_by_email(email)
+            if user:
+                # Link Google to an existing password-based account.
+                await self.oauth_account_repository.create_link(
+                    user_id=user.id,
+                    provider=OAuthProvider.GOOGLE,
+                    provider_user_id=google_id,
+                    provider_email=email,
+                    tenant_id=user.tenant_id,
+                )
+                logger.info("google_account_linked", user_id=str(user.id))
+            else:
+                # Register a new account for first-time Google login.
+                placeholder_hash = generate_password_hash(
+                    secrets.token_urlsafe(32)
+                )
+                user = await self.user_repository.create_user(
+                    email=email,
+                    password_hash=placeholder_hash,
+                    full_name=full_name,
+                    is_verified=True,
+                )
+                await self.oauth_account_repository.create_link(
+                    user_id=user.id,
+                    provider=OAuthProvider.GOOGLE,
+                    provider_user_id=google_id,
+                    provider_email=email,
+                    tenant_id=user.tenant_id,
+                )
+                logger.info("google_user_created", user_id=str(user.id))
+
+        if not user or not user.is_active:
+            raise UserInactiveError("User account is inactive.")
+
+        logger.info("google_login_success", user_id=str(user.id))
+        return self.create_tokens(user)
