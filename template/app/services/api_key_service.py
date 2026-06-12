@@ -9,7 +9,6 @@ from __future__ import annotations
 from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
-from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,9 +25,6 @@ from app.repositories.audit_repository import AuditLogRepository
 from app.repositories.user_repository import UserRepository
 from app.schemas.api_key import APIKeyCreate
 from app.schemas.api_key import APIKeyUpdate
-
-if TYPE_CHECKING:
-    pass
 
 logger = get_logger("service.api_key")
 
