@@ -1,7 +1,7 @@
 """Pagination header utilities.
 
 This module provides helpers for building standard HTTP pagination
-headers (``X-Total-Count`` and RFC 5988 ``Link``) that complement
+headers (`X-Total-Count` and RFC 5988 `Link`) that complement
 the JSON pagination body already returned by list endpoints.
 """
 
@@ -21,12 +21,12 @@ def build_pagination_headers(
     skip: int,
     limit: int,
 ) -> dict[str, str]:
-    """Build ``X-Total-Count`` and ``Link`` headers for a paginated response.
+    """Build `X-Total-Count` and `Link` headers for a paginated response.
 
-    Constructs the ``Link`` header according to RFC 5988 with ``first``,
-    ``last``, and optional ``prev`` / ``next`` relations. All URLs
-    preserve the original query parameters and only override ``skip``
-    and ``limit``.
+    Constructs the `Link` header according to RFC 5988 with `first`,
+    `last`, and optional `prev` / `next` relations. All URLs
+    preserve the original query parameters and only override `skip`
+    and `limit`.
 
     Args:
         request: The current HTTP request (used to build relative URLs).
@@ -35,7 +35,7 @@ def build_pagination_headers(
         limit: Page size used for the current page.
 
     Returns:
-        Dict with ``X-Total-Count`` and (when applicable) ``Link`` headers.
+        Dict with `X-Total-Count` and (when applicable) `Link` headers.
     """
     headers: dict[str, str] = {"X-Total-Count": str(total)}
 
@@ -80,9 +80,9 @@ def build_pagination_headers(
 class PaginatedResponse(JSONResponse):
     """JSON response with pagination headers.
 
-    Wraps a paginated response and automatically adds ``X-Total-Count``
-    and RFC 5988 ``Link`` headers. Use as the return value from list
-    endpoints instead of manually injecting ``response.headers``.
+    Wraps a paginated response and automatically adds `X-Total-Count`
+    and RFC 5988 `Link` headers. Use as the return value from list
+    endpoints instead of manually injecting `response.headers`.
 
     Example::
 

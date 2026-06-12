@@ -97,7 +97,7 @@ def test_health_check_task_executes() -> None:
     .apply() runs the task synchronously in the current process without a
     broker, so this test passes in any environment.  It verifies that the
     worker runtime (serialisation, task binding, return value handling) works
-    end-to-end, which is what ``celery worker`` does at runtime.
+    end-to-end, which is what `celery worker` does at runtime.
     """
     from app.celery_app import health_check
 
