@@ -122,7 +122,7 @@ async def delete_me(
     """Self-service account deletion (right to erasure).
 
     Soft-deletes the account and immediately invalidates all
-    outstanding JWTs by bumping ``token_version``. The action is
+    outstanding JWTs by bumping `token_version`. The action is
     irreversible from the user's perspective and is logged for
     compliance.
     """

@@ -121,7 +121,7 @@ class PasswordResetConfirmRequest(BaseSchema):
 class GoogleAuthUrlResponse(BaseSchema):
     """Google OAuth 2.0 authorization URL response.
 
-    Returned by ``GET /auth/google`` so the client can redirect the
+    Returned by `GET /auth/google` so the client can redirect the
     user to Google's consent screen.
 
     Attributes:
@@ -134,7 +134,7 @@ class GoogleAuthUrlResponse(BaseSchema):
 class GoogleCallbackRequest(BaseSchema):
     """Google OAuth callback request.
 
-    Request body for ``POST /auth/google/callback`` after Google
+    Request body for `POST /auth/google/callback` after Google
     redirects the user back to the application.
 
     Attributes:
