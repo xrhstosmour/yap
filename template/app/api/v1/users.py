@@ -1,11 +1,12 @@
 """User management API routes.
 
 This module provides user management endpoints for
-listing, creating, and managing users.
+listing, creating, managing users, and GDPR self-service.
 """
 
 from __future__ import annotations
 
+import json
 from typing import Annotated
 from uuid import UUID
 
@@ -13,6 +14,7 @@ from fastapi import APIRouter
 from fastapi import Depends
 from fastapi import HTTPException
 from fastapi import status
+from fastapi.responses import Response
 
 from app.core.logging import get_logger
 from app.dependencies import CurrentUser
@@ -94,6 +96,55 @@ async def update_me(
     service = UserService(session)
     user = await service.update_profile(current_user, data)
     return UserResponse.model_validate(user)
+
+
+@router.delete(
+    "/me",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete own account",
+    description="Permanently delete the authenticated user's account (GDPR Article 17).",
+)
+async def delete_me(
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> None:
+    """Self-service account deletion (right to erasure).
+
+    Soft-deletes the account and immediately invalidates all
+    outstanding JWTs by bumping ``token_version``. The action is
+    irreversible from the user's perspective and is logged for
+    compliance.
+    """
+    service = UserService(session)
+    await service.delete_me(current_user)
+
+
+@router.get(
+    "/me/export",
+    summary="Export personal data",
+    description="Download all personal data held for the account (GDPR Article 20).",
+)
+async def export_my_data(
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> Response:
+    """Personal data export (right to data portability).
+
+    Returns a JSON attachment containing the user's profile, API key
+    metadata (no secrets), and audit activity. The export is logged
+    for compliance.
+    """
+    service = UserService(session)
+    data = await service.export_my_data(current_user)
+    return Response(
+        content=json.dumps(data, default=str),
+        media_type="application/json",
+        headers={
+            "Content-Disposition": 'attachment; filename="my-data.json"',
+            "Cache-Control": "no-store, private",
+            "Pragma": "no-cache",
+        },
+    )
 
 
 @router.get(
