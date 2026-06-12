@@ -6,7 +6,6 @@ user authentication, registration, and token management.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,9 +24,6 @@ from app.repositories.audit_repository import AuditLogRepository
 from app.repositories.user_repository import UserRepository
 from app.schemas.auth import RegisterRequest
 from app.schemas.auth import TokenResponse
-
-if TYPE_CHECKING:
-    pass
 
 logger = get_logger("service.auth")
 
@@ -276,7 +272,41 @@ class AuthService:
         """Mark user as verified.
 
         Args:
-            user_id: User to verify
+            user_id: User to verify.
+
+        Raises:
+            UserNotFoundError: If the user no longer exists.
         """
-        await self.user_repository.set_verified(user_id)
+        user = await self.user_repository.set_verified(user_id)
+        if not user:
+            raise UserNotFoundError(f"User {user_id!s} not found.")
         logger.info("user_verified", user_id=str(user_id))
+
+    async def send_verification_email(self, user: User) -> None:
+        """Queue an email verification message for the given user.
+
+        Generates a single-use Redis-backed token, builds the
+        verification URL, and dispatches a Celery email task.
+        The token expires after 24 hours.
+
+        Args:
+            user: User whose email address should be verified.
+        """
+        from app.core.security import create_email_verification_token
+        from app.tasks.email import send_template_email_task
+
+        token = await create_email_verification_token(user.id)
+        verification_url = f"{settings.FRONTEND_HOST}/auth/verify-email?token={token}"
+
+        send_template_email_task.delay(
+            to_email=user.email,
+            subject=f"Verify your email — {settings.PROJECT_NAME}",
+            template_name="verification.html",
+            context={
+                "name": user.full_name or user.email,
+                "verification_url": verification_url,
+                "project": settings.PROJECT_NAME,
+            },
+        )
+
+        logger.info("verification_email_queued", user_id=str(user.id))
