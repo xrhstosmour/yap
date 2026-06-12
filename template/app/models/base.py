@@ -73,7 +73,7 @@ class BaseModel(SQLModel, table=False):
 class TenantBase(SQLModel):
     """Base fields for Tenant model."""
 
-    name: str = Field(min_length=1, max_length=255, nullable=False)
+    name: str = Field(min_length=1, max_length=255, nullable=False, index=True)
     slug: str = Field(min_length=1, max_length=100, nullable=False, unique=True)
     is_active: bool = Field(default=True, nullable=False)
     settings: dict[str, Any] = Field(default_factory=dict, nullable=False)
