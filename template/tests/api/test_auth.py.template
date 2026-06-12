@@ -1,12 +1,15 @@
 """Integration tests for `Auth` API endpoints."""
 
+import sys
 from typing import cast
+from unittest.mock import MagicMock
 
 import pytest
 from httpx import ASGITransport
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import create_access_token
 from app.core.security import create_refresh_token
 from app.main import app
 from app.schemas.auth import RegisterRequest
@@ -22,6 +25,14 @@ def client_fixture():
     """Create a test client."""
     transport = ASGITransport(app=app)
     return AsyncClient(transport=transport, base_url="http://test")
+
+
+@pytest.fixture(autouse=True)
+def _mock_email_tasks():
+    """Mock email tasks module to avoid Celery dependency."""
+    mock_email = MagicMock()
+    mock_email.send_template_email_task = MagicMock()
+    sys.modules["app.tasks.email"] = mock_email
 
 
 class TestAuthLogin:
@@ -141,3 +152,121 @@ class TestAuthRegister:
         )
 
         assert response.status_code == 400
+
+
+class TestEmailVerification:
+    """Tests for POST /api/v1/auth/send-verification-email and GET /api/v1/auth/verify-email."""
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_send_verification_email_success(
+        self,
+        client: AsyncClient,
+        session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Sending a verification email should return 204 for an unverified user."""
+        auth_service = AuthService(cast(AsyncSession, session))
+        user = await auth_service.register(
+            RegisterRequest(
+                email="unverified@{{ project_slug }}.com", password="password123"
+            )
+        )
+        access_token = create_access_token(subject=user.id)
+
+        # Mock Redis-backed token creation to avoid Redis dependency.
+        async def _fake_create_token(_user_id):
+            return "test-verification-token"
+
+        monkeypatch.setattr(
+            "app.core.security.create_email_verification_token",
+            _fake_create_token,
+        )
+
+        response = await client.post(
+            "/api/v1/auth/send-verification-email",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        assert response.status_code == 204
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_send_verification_email_already_verified(
+        self,
+        client: AsyncClient,
+        session: AsyncSession,
+    ):
+        """Sending a verification email should return 400 if already verified."""
+        auth_service = AuthService(cast(AsyncSession, session))
+        user = await auth_service.register(
+            RegisterRequest(
+                email="verified@{{ project_slug }}.com", password="password123"
+            )
+        )
+        # Mark as verified directly.
+        await auth_service.verify_user(user.id)
+        access_token = create_access_token(subject=user.id)
+
+        response = await client.post(
+            "/api/v1/auth/send-verification-email",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        assert response.status_code == 400
+        assert "already verified" in response.json()["detail"]
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_verify_email_success(
+        self,
+        client: AsyncClient,
+        session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Verifying email with a valid token should return 204 and set is_verified."""
+        auth_service = AuthService(cast(AsyncSession, session))
+        user = await auth_service.register(
+            RegisterRequest(
+                email="toverify@{{ project_slug }}.com", password="password123"
+            )
+        )
+
+        # Patch token verification to return this user's id without Redis.
+        async def _fake_verify(token: str):
+            if token == "valid-token":
+                return user.id
+            return None
+
+        monkeypatch.setattr(
+            "app.api.v1.auth.verify_email_verification_token",
+            _fake_verify,
+        )
+
+        response = await client.get(
+            "/api/v1/auth/verify-email",
+            params={"token": "valid-token"},
+        )
+
+        assert response.status_code == 204
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_verify_email_invalid_token(
+        self,
+        client: AsyncClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Verifying email with an invalid token should return 400."""
+
+        async def _fake_verify(_token: str):
+            return None
+
+        monkeypatch.setattr(
+            "app.api.v1.auth.verify_email_verification_token",
+            _fake_verify,
+        )
+
+        response = await client.get(
+            "/api/v1/auth/verify-email",
+            params={"token": "expired-or-invalid"},
+        )
+
+        assert response.status_code == 400
+        assert "Invalid or expired" in response.json()["detail"]
