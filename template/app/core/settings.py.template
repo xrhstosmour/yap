@@ -234,6 +234,9 @@ class Settings(BaseSettings):
     # Google OAuth CSRF state token TTL in seconds (default: 10 minutes).
     GOOGLE_OAUTH_STATE_TTL_SECONDS: int = 600
 
+    # PostgreSQL full-text search language configuration.
+    FTS_LANGUAGE: str = "simple"
+
     # Two-factor authentication (TOTP).
     TOTP_CHALLENGE_TTL_SECONDS: int = 300
     TOTP_RATE_LIMIT_WINDOW: int = 300

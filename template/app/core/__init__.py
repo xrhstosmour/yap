@@ -24,6 +24,8 @@ from app.core.feature_flags import feature_disabled
 from app.core.feature_flags import feature_enabled
 from app.core.feature_flags import refresh_cache
 from app.core.feature_flags import sync_to_redis
+from app.core.greeklish import greek_to_greeklish
+from app.core.greeklish import greeklish_to_greek
 from app.core.logging import get_logger
 from app.core.logging import setup_logging
 from app.core.rate_limit import RateLimiter
@@ -82,5 +84,7 @@ __all__ = [
     "decrypt",
     "encrypt",
     "generate_key",
+    "greeklish_to_greek",
+    "greek_to_greeklish",
     "SYSTEM_TENANT_ID",
 ]
