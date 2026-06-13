@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import func
-from sqlalchemy import or_
-from sqlalchemy import select
+from sqlmodel import func
+from sqlmodel import or_
+from sqlmodel import select
 
 from app.core.search import SearchMode
 from app.core.search import build_fts_condition

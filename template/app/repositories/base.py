@@ -15,13 +15,13 @@ from typing import TypeVar
 from typing import cast
 from uuid import UUID
 
-from sqlalchemy import and_
-from sqlalchemy import func
 from sqlalchemy import inspect
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapper
 from sqlmodel import SQLModel
+from sqlmodel import and_
+from sqlmodel import func
+from sqlmodel import select
 
 from app.core.logging import get_logger
 from app.core.tenant import get_current_tenant_id

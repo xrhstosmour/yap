@@ -19,6 +19,7 @@ from uuid import uuid7
 from sqlalchemy import JSON
 from sqlalchemy import Index
 from sqlmodel import Field
+from sqlmodel import select
 
 from app.models.base import BaseModel
 
@@ -101,10 +102,8 @@ class Outbox:
         return event
 
     async def mark_published(self, event_id: UUID) -> None:
-        from sqlalchemy import select as sa_select
-
         result = await self.session.execute(
-            sa_select(OutboxEvent).where(OutboxEvent.id == event_id)  # type: ignore[arg-type]
+            select(OutboxEvent).where(OutboxEvent.id == event_id)  # type: ignore[arg-type]
         )
         event = result.scalar_one_or_none()
         if event:
@@ -112,10 +111,8 @@ class Outbox:
             event.published_at = datetime.now(UTC)
 
     async def mark_failed(self, event_id: UUID) -> None:
-        from sqlalchemy import select as sa_select
-
         result = await self.session.execute(
-            sa_select(OutboxEvent).where(OutboxEvent.id == event_id)  # type: ignore[arg-type]
+            select(OutboxEvent).where(OutboxEvent.id == event_id)  # type: ignore[arg-type]
         )
         event = result.scalar_one_or_none()
         if event:
@@ -126,10 +123,8 @@ class Outbox:
                 event.status = "pending"
 
     async def get_pending(self, limit: int = 100) -> list[OutboxEvent]:
-        from sqlalchemy import select as sa_select
-
         result = await self.session.execute(
-            sa_select(OutboxEvent)
+            select(OutboxEvent)
             .where(OutboxEvent.status == "pending")  # type: ignore[arg-type]
             .order_by(OutboxEvent.created_at.asc())  # type: ignore[attr-defined]
             .limit(limit)

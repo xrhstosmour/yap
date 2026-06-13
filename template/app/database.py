@@ -10,13 +10,13 @@ from collections.abc import AsyncGenerator
 from collections.abc import Generator
 
 from sqlalchemy import create_engine
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import SQLModel
+from sqlmodel import text
 
 from app.core.logging import get_logger
 from app.core.settings import settings

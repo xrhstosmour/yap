@@ -12,11 +12,11 @@ from typing import Any
 from typing import cast
 from uuid import UUID
 
-from sqlalchemy import and_
-from sqlalchemy import func
-from sqlalchemy import select
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import and_
+from sqlmodel import func
+from sqlmodel import select
 
 from app.core.logging import get_logger
 from app.core.security import verify_password

@@ -11,11 +11,11 @@ from datetime import UTC
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import and_
 from sqlalchemy import delete
-from sqlalchemy import select
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import and_
+from sqlmodel import select
 
 from app.core.cache import get_redis
 from app.core.encryption import decrypt
