@@ -101,6 +101,69 @@ jobs:
         with:
           files: ./coverage.xml
 
+  smoke:
+    needs: test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: template
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: testdb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Render templates for CI
+        run: |
+          shopt -s globstar
+          for f in $(find . -name '*.template' ! -name '.env.example.template' ! -name 'docker-compose.yml.template'); do
+            cp "$f" "${f%.template}"
+          done
+          find . -name '*.py' -o -name '*.toml' -o -name '*.md' | xargs -I{} sed -i 's/{{ project_slug }}/yap/g' {}
+          find . -name '*.py' -o -name '*.toml' -o -name '*.md' | xargs -I{} sed -i 's/{{ project_name }}/yap/g' {}
+          find . -name '*.py' -o -name '*.toml' | xargs -I{} sed -i 's/{{ author_name }}/Christos Mourtogiannis/g' {}
+          find . -name '*.py' -o -name '*.toml' | xargs -I{} sed -i 's/{{ author_email }}/c.mourtogiannis@gmail.com/g' {}
+          echo "SECRET_KEY=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')" >> $GITHUB_ENV
+          echo "CRYPTO_KEY=$(python3 -c 'import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())')" >> $GITHUB_ENV
+          echo "RABBITMQ_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')" >> $GITHUB_ENV
+          echo "FIRST_SUPERUSER_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')" >> $GITHUB_ENV
+      - run: uv sync --extra dev
+      - name: Run smoke test (server boot + auth flow)
+        run: uv run pytest tests/test_startup.py::test_api_smoke -v --tb=short
+        env:
+          SECRET_KEY: "${{ env.SECRET_KEY }}"
+          CRYPTO_KEY: "${{ env.CRYPTO_KEY }}"
+          RABBITMQ_PASSWORD: "${{ env.RABBITMQ_PASSWORD }}"
+          FIRST_SUPERUSER_PASSWORD: "${{ env.FIRST_SUPERUSER_PASSWORD }}"
+          POSTGRESQL_SERVER: localhost
+          POSTGRESQL_PORT: 5432
+          POSTGRESQL_USER: app
+          POSTGRESQL_PASSWORD: testpass
+          POSTGRESQL_DATABASE: testdb
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+          ENVIRONMENT: local
+
   security:
     needs: lint
     runs-on: ubuntu-latest
