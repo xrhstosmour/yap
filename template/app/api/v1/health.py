@@ -12,7 +12,7 @@ from typing import cast
 from fastapi import APIRouter
 from fastapi import status
 from pydantic import BaseModel
-from sqlalchemy import text
+from sqlmodel import text
 
 from app.core.cache import get_redis
 from app.core.logging import get_logger

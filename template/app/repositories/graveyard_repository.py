@@ -9,9 +9,9 @@ from typing import Any
 from typing import cast
 from uuid import UUID
 
-from sqlalchemy import select as sa_select
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import select
 
 from app.core.logging import get_logger
 from app.models.graveyard import DEFAULT_RETENTION_DAYS
@@ -103,7 +103,7 @@ class GraveyardRepository:
             Record data dict or None.
         """
         query = (
-            sa_select(Graveyard)
+            select(Graveyard)
             .where(Graveyard.record_id == record_id)  # type: ignore[arg-type]
             .order_by(Graveyard.record_deleted_at.desc())  # type: ignore[attr-defined]
             .limit(1)

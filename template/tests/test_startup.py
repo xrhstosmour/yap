@@ -106,7 +106,7 @@ def test_health_check_task_executes() -> None:
     assert result.successful()
     assert result.result["status"] == "healthy"
 
-# Process probe tests, tagged slow because they spawn real subprocesses.
+# FastAPI server smoke test — starts the server and makes real HTTP requests.
 @pytest.mark.slow
 def test_fastapi_dev_starts() -> None:
     _probe(
@@ -122,6 +122,161 @@ def test_fastapi_dev_starts() -> None:
             "8001",
         ],
     )
+
+
+@pytest.mark.slow
+@pytest.mark.skip(reason="Requires PostgreSQL + Redis on localhost:5432/6379; run via CI smoke job")
+def test_api_smoke() -> None:
+    """Start uvicorn, verify core endpoints work (auth lifecycle, health, features)."""
+    import time
+
+    import httpx
+
+    port = 17896
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "app.main:app",
+            "--host",
+            "0.0.0.0",
+            "--port",
+            str(port),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    try:
+        base = f"http://127.0.0.1:{port}"
+
+        # Wait up to 60s for the server to respond.
+        for _i in range(60):
+            try:
+                r = httpx.get(f"{base}/api/v1/live", timeout=3)
+                if r.status_code == 200:
+                    break
+            except (httpx.ConnectError, httpx.ReadTimeout):
+                pass
+            time.sleep(1)
+        else:
+            pytest.fail("Server did not start within 60s")
+
+        # Health check (liveness).
+        r = httpx.get(f"{base}/api/v1/live")
+        assert r.status_code == 200
+        assert r.json()["message"] == "Alive"
+
+        # Health check (readiness — verifies DB + Redis connectivity).
+        r = httpx.get(f"{base}/api/v1/health")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["status"] in ("healthy", "degraded")
+        assert data["database"] in ("healthy", "unhealthy")
+        assert data["cache"] in ("healthy", "unhealthy")
+
+        # Register user.
+        r = httpx.post(
+            f"{base}/api/v1/auth/register",
+            json={"email": "smoke-test@yap.com", "password": "password123"},
+        )
+        assert r.status_code == 201
+        token = r.json()["access_token"]
+        refresh_token = r.json()["refresh_token"]
+
+        # Login.
+        r = httpx.post(
+            f"{base}/api/v1/auth/login",
+            data={"username": "smoke-test@yap.com", "password": "password123"},
+        )
+        assert r.status_code == 200
+
+        # Get current user.
+        r = httpx.get(
+            f"{base}/api/v1/auth/me",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert r.status_code == 200
+        assert r.json()["email"] == "smoke-test@yap.com"
+
+        # Refresh token.
+        r = httpx.post(
+            f"{base}/api/v1/auth/refresh",
+            json={"refresh_token": refresh_token},
+        )
+        assert r.status_code == 200
+        new_token = r.json()["access_token"]
+
+        # Change password.
+        r = httpx.post(
+            f"{base}/api/v1/auth/change-password",
+            headers={"Authorization": f"Bearer {new_token}"},
+            json={"current_password": "password123", "new_password": "newpass456"},
+        )
+        assert r.status_code == 204
+
+        # Login with new password.
+        r = httpx.post(
+            f"{base}/api/v1/auth/login",
+            data={"username": "smoke-test@yap.com", "password": "newpass456"},
+        )
+        assert r.status_code == 200
+
+        # Feature endpoints exist (return any non-500 status).
+        for endpoint, method, body, needs_auth in [
+            ("/api/v1/auth/send-verification-email", "POST", None, True),
+            ("/api/v1/auth/forgot-password", "POST", {"email": "smoke-test@yap.com"}, False),
+            ("/api/v1/users/me/export", "GET", None, True),
+        ]:
+            kwargs = {}
+            if needs_auth:
+                kwargs["headers"] = {"Authorization": f"Bearer {new_token}"}
+            if body is not None:
+                kwargs["json"] = body
+            r = getattr(httpx, method.lower())(f"{base}{endpoint}", **kwargs)
+            assert r.status_code < 500, f"{method} {endpoint} returned {r.status_code}"
+
+        # Reset password endpoint with invalid token -> 400.
+        r = httpx.post(
+            f"{base}/api/v1/auth/reset-password",
+            json={"token": "invalid-token", "new_password": "newpass789"},
+        )
+        assert r.status_code == 400
+
+        # Verify email endpoint with missing token -> 400.
+        r = httpx.get(f"{base}/api/v1/auth/verify-email")
+        assert r.status_code == 400
+
+        # 2FA enroll endpoint exists (returns 400 since already logged in without pending).
+        r = httpx.post(
+            f"{base}/api/v1/auth/2fa/enroll",
+            headers={"Authorization": f"Bearer {new_token}"},
+            json={},
+        )
+        assert r.status_code in (400, 200)
+
+        # List API keys (tests pagination is wired).
+        r = httpx.get(
+            f"{base}/api/v1/api-keys",
+            headers={"Authorization": f"Bearer {new_token}"},
+        )
+        assert r.status_code == 200
+        # Pagination headers.
+        assert "x-total-count" in r.headers
+        assert "link" in r.headers
+
+        # Unconfigured Google OAuth returns 503.
+        r = httpx.get(
+            f"{base}/api/v1/auth/google",
+            params={"redirect_uri": "http://localhost:3000/callback"},
+        )
+        assert r.status_code == 503, f"Google OAuth unconfigured returned {r.status_code}"
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
 
 
 @pytest.mark.slow

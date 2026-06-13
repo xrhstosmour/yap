@@ -19,9 +19,9 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import func
-from sqlalchemy import literal_column
-from sqlalchemy import text
+from sqlmodel import func
+from sqlmodel import literal_column
+from sqlmodel import text
 
 from app.core.greeklish import greeklish_to_greek
 from app.core.settings import settings

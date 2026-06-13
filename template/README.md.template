@@ -9,26 +9,50 @@
 - **User Authentication**: JWT-based with access + refresh tokens, OAuth2 form login
 - **API Keys**: Scoped programmatic access
 - **Multi-tenancy**: Tenant isolation with full CRUD (admin), system tenant fallback
-- **Soft Deletes**: Recoverable data via deleted_at timestamps
+- **TOTP 2FA**: Time-based one-time passwords with encrypted secrets, recovery codes, rate limiting, and replay prevention
+- **Email Verification**: Redis-backed single-use tokens (24h TTL)
+- **Password Reset**: Redis-backed single-use tokens (1h TTL), invalidates all sessions on reset
+- **Google OAuth**: Multi-provider OAuth 2.0 login (Google, Apple, Microsoft via `OAuthProvider` enum)
+- **Soft Deletes**: Recoverable data via `deleted_at` timestamps
 - **Graveyard**: Centralized tombstone tracking for all deletions
-- **Audit Logging**: Complete trail of all user and system actions
+- **Audit Logging**: Complete trail of all user and system actions with GDPR compliance
 - **Field Encryption**: Fernet encryption for PII and sensitive data
 - **Outbox Pattern**: Reliable at-least-once event publishing
+
+### GDPR Compliance
+
+- **Account Deletion**: Self-service right to erasure (Article 17) — anonymizes PII, revokes API keys, invalidates all JWTs
+- **Data Export**: Right to data portability (Article 20) — JSON attachment with profile, API keys, and audit activity
 
 ### Core Infrastructure
 
 - **FastAPI 0.115+**: Modern async Python web framework
-- **SQLModel**: Pydantic + SQLAlchemy hybrid ORM
-- **PostgreSQL**: Production-grade relational database
+- **SQLModel**: Pydantic + SQLAlchemy hybrid ORM (consistent imports throughout)
+- **PostgreSQL**: Production-grade relational database with `pg_trgm` and `unaccent` extensions
+- **Compound Indexes**: Performance-optimized compound indexes on `audit_logs`, `api_keys`, and `outbox_events`
 - **Redis**: Caching, rate limiting, Celery result backend
 - **Celery**: Background task processing with RabbitMQ (AMQPS/TLS) broker
 - **RedBeat**: Redis-backed Celery beat scheduler
+
+### Search
+
+- **PostgreSQL Full-Text Search**: `to_tsvector`/`plainto_tsquery` with configurable language
+- **Trigram Similarity**: Fuzzy matching via `pg_trgm` with GIN indexes
+- **Greek Support**: Greeklish-to-Greek transliteration, unaccent normalization, Greek Hunspell configuration ready
+- **`SearchMixin`**: Reusable repository mixin for multi-field search on any SQLModel table
+- **Auto-dispatch**: Short queries use trigram, long queries use FTS
 
 ### Reliability
 
 - **Idempotency**: `X-Idempotency-Key` header support on mutating endpoints, safe retries without duplicate side effects
 - **Circuit Breaker**: Protect external service calls from cascading failures
+- **Token Invalidation**: `token_version` claim on all JWTs — password reset, 2FA change, and account deletion immediately block all sessions
 - **Resilient Container Startup**: Automated retries on transient Docker Hub/network failures
+
+### Pagination
+
+- **RFC 5988 Link Headers**: `X-Total-Count` and `Link` (first, last, prev, next) on all list endpoints
+- **`PaginatedResponse`**: Reusable response wrapper — new list endpoints auto-inherit pagination headers
 
 ### Developer Experience
 
@@ -41,9 +65,11 @@
 
 ### Security
 
-- **Rate Limiting**: Redis-based sliding window limiter
+- **TOTP 2FA**: Encrypted secrets at rest, bcrypt-hashed recovery codes, Redis-backed rate limiting and replay prevention
+- **Rate Limiting**: Redis-based sliding window limiter per user and per API key
 - **Password Hashing**: bcrypt with automatic updates
-- **Timing Attack Prevention**: Constant-time password verification
+- **Timing Attack Prevention**: Constant-time password verification with dummy hash fallback
+- **CSRF Protection**: State tokens bound to redirect URIs for OAuth flows (prevents open-redirect attacks)
 - **CORS Configuration**: Easy frontend integration
 - **TLS Everywhere**: RabbitMQ/PostgreSQL connections secured via auto-generated self-signed certificates
 
@@ -114,7 +140,7 @@ FastAPI auto-generates interactive documentation with "Try it out":
 - **ReDoc** ([http://localhost:8000/documentation](http://localhost:8000/documentation)): Clean reference documentation
 
 Operation IDs use `<tag>-<route_name>` format for clean client code generation.
-All request/response schemas are fully validated and documented.
+All request/response schemas are fully validated and documented. Paginated list endpoints return `X-Total-Count` and `Link` (RFC 5988) headers.
 
 ## License
 
