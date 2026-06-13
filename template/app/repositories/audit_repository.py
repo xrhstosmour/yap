@@ -13,9 +13,9 @@ from typing import Any
 from typing import cast
 from uuid import UUID
 
-from sqlalchemy import and_
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import and_
+from sqlmodel import select
 
 from app.core.logging import get_logger
 from app.models.audit_log import AuditAction

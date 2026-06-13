@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import select
 
 from app.core.logging import get_logger
 from app.models.feature_flag import FeatureFlag

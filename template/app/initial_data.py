@@ -5,8 +5,8 @@ import logging
 import os
 
 from sqlalchemy import create_engine
-from sqlalchemy import text
 from sqlmodel import select
+from sqlmodel import text
 
 from app.core import SYSTEM_TENANT_ID
 from app.core.security import generate_password_hash

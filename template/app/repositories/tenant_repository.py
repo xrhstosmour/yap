@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import func
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select
+from sqlmodel import func
+from sqlmodel import select
 
 from app.models.tenant import Tenant
 from app.repositories.base import BaseRepository
