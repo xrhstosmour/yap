@@ -10,6 +10,7 @@ from app.models.audit_log import AuditLog
 from app.models.base import BaseModel
 from app.models.base import TenantBase
 from app.models.feature_flag import FeatureFlag
+from app.models.file import File
 from app.models.oauth_account import OAuthAccount
 from app.models.oauth_account import OAuthProvider
 from app.models.tenant import Tenant
@@ -23,6 +24,7 @@ __all__ = [
     "AuditLog",
     "BaseModel",
     "FeatureFlag",
+    "File",
     "OAuthAccount",
     "OAuthProvider",
     "Tenant",

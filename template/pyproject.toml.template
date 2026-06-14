@@ -30,6 +30,8 @@ dependencies = [
     "pyotp>=2.9.0",
     "qrcode[pil]>=8.0",
     "webauthn>=2.8.0",
+    "boto3>=1.35.0",
+    "Pillow>=10.0.0",
     "pybreaker>=0.8.0",
     "opentelemetry-api>=1.27.0",
     "opentelemetry-sdk>=1.27.0",
@@ -83,6 +85,7 @@ module = [
     "qrcode.*",
     "PIL.*",
     "webauthn.*",
+    "boto3.*",
     "pybreaker.*",
 ]
 ignore_missing_imports = true
