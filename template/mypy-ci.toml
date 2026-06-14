@@ -19,6 +19,7 @@ module = [
     "pyotp.*",
     "qrcode.*",
     "PIL.*",
+    "boto3.*",
     "webauthn.*",
     "pybreaker.*",
 ]
