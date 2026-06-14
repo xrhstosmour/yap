@@ -496,3 +496,54 @@ def generate_recovery_codes(count: int = 10) -> list[str]:
         raw = "".join(secrets.choice(alphabet) for _ in range(8))
         codes.append(f"{raw[:4]}-{raw[4:]}")
     return codes
+
+
+# Magic link (passwordless login).
+_MAGIC_LINK_PREFIX = "magic_link"
+
+
+async def create_magic_link_token(user_id: UUID) -> str:
+    """Create a single-use magic link token stored in Redis.
+
+    The token expires after ``MAGIC_LINK_TOKEN_TTL_SECONDS`` and is
+    consumed (deleted) on first successful verification.
+
+    Args:
+        user_id: UUID of the user requesting a login link.
+
+    Returns:
+        Opaque URL-safe token string (32 bytes, base64url encoded).
+    """
+    from app.core.cache import get_redis
+
+    token = secrets.token_urlsafe(32)
+    redis = await get_redis()
+    key = f"{_MAGIC_LINK_PREFIX}:{token}"
+    await redis.setex(key, settings.MAGIC_LINK_TOKEN_TTL_SECONDS, str(user_id))
+    return token
+
+
+async def verify_magic_link_token(token: str) -> UUID | None:
+    """Consume and validate a magic link token.
+
+    Atomically retrieves and deletes the token from Redis to enforce
+    single-use semantics. A login link cannot be used twice.
+
+    Args:
+        token: Opaque token string from the magic link email.
+
+    Returns:
+        User UUID if the token is valid and unexpired, None otherwise.
+    """
+    from app.core.cache import get_redis
+
+    redis = await get_redis()
+    key = f"{_MAGIC_LINK_PREFIX}:{token}"
+
+    # Atomic get-and-delete ensures single-use semantics with no race window.
+    user_id_str: str | None = await redis.getdel(key)
+
+    if not user_id_str:
+        return None
+
+    return UUID(user_id_str)
