@@ -536,3 +536,65 @@ class AuthService:
 
         logger.info("google_login_success", user_id=str(user.id))
         return self.create_tokens(user)
+
+    async def send_magic_link(self, email: str) -> None:
+        """Queue a passwordless login link email if the account exists.
+
+        Silently does nothing when the email is not registered to
+        prevent user enumeration — callers should always return 204.
+
+        Args:
+            email: Email address of the account to send the link to.
+        """
+        from app.core.security import create_magic_link_token
+        from app.tasks.email import send_template_email_task
+
+        user = await self.user_repository.get_by_email(email)
+        if not user:
+            return
+
+        token = await create_magic_link_token(user.id)
+        login_url = f"{settings.FRONTEND_HOST}/auth/magic-link?token={token}"
+
+        send_template_email_task.delay(
+            to_email=user.email,
+            subject=f"Sign in to {settings.PROJECT_NAME}",
+            template_name="magic_link.html",
+            context={
+                "name": user.full_name or user.email,
+                "login_url": login_url,
+                "project": settings.PROJECT_NAME,
+            },
+        )
+
+        logger.info("magic_link_sent", user_id=str(user.id))
+
+    async def verify_magic_link(self, token: str) -> TokenResponse:
+        """Verify a magic link token and issue JWT tokens.
+
+        Validates and consumes the single-use token, then returns
+        a token pair for the authenticated user.
+
+        Args:
+            token: Opaque magic link token from the email.
+
+        Returns:
+            TokenResponse with access and refresh tokens.
+
+        Raises:
+            AuthenticationError: If the token is invalid or expired.
+        """
+        from app.core.security import verify_magic_link_token
+
+        user_id = await verify_magic_link_token(token)
+        if not user_id:
+            raise AuthenticationError("Invalid or expired magic link.")
+
+        user = await self.user_repository.get(user_id)
+        if not user:
+            raise AuthenticationError("Invalid or expired magic link.")
+        if not user.is_active:
+            raise UserInactiveError("User account is inactive.")
+
+        logger.info("magic_link_verified", user_id=str(user.id))
+        return self.create_tokens(user)

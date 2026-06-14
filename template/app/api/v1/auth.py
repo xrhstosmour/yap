@@ -23,6 +23,8 @@ from app.dependencies import SessionDep
 from app.schemas.auth import GoogleAuthUrlResponse
 from app.schemas.auth import GoogleCallbackRequest
 from app.schemas.auth import LoginResponse
+from app.schemas.auth import MagicLinkRequest
+from app.schemas.auth import MagicLinkVerifyRequest
 from app.schemas.auth import PasswordChangeRequest
 from app.schemas.auth import PasswordResetConfirmRequest
 from app.schemas.auth import PasswordResetRequest
@@ -34,6 +36,12 @@ from app.schemas.auth import TwoFactorConfirmRequest
 from app.schemas.auth import TwoFactorDisableRequest
 from app.schemas.auth import TwoFactorEnrollResponse
 from app.schemas.auth import TwoFactorVerifyRequest
+from app.schemas.auth import WebAuthnLoginBeginRequest
+from app.schemas.auth import WebAuthnLoginBeginResponse
+from app.schemas.auth import WebAuthnLoginCompleteRequest
+from app.schemas.auth import WebAuthnRegisterBeginResponse
+from app.schemas.auth import WebAuthnRegisterCompleteRequest
+from app.schemas.auth import WebAuthnRegisterCompleteResponse
 from app.schemas.user import UserResponse
 from app.services.auth_service import AuthenticationError
 from app.services.auth_service import AuthService
@@ -529,6 +537,162 @@ async def google_auth(
     except AuthenticationError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
+
+@router.post(
+    "/webauthn/register/begin",
+    response_model=WebAuthnRegisterBeginResponse,
+    summary="Begin WebAuthn registration",
+    description="Generate WebAuthn registration options for passkey creation.",
+)
+async def webauthn_register_begin(
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> WebAuthnRegisterBeginResponse:
+    """Begin WebAuthn passkey registration.
+
+    Returns the options dict that the frontend passes to
+    ``navigator.credentials.create()``.
+    """
+    from app.services.webauthn_service import WebAuthnService
+
+    service = WebAuthnService(session)
+    options = await service.begin_registration(current_user)
+    return WebAuthnRegisterBeginResponse(options=options)
+
+
+@router.post(
+    "/webauthn/register/complete",
+    response_model=WebAuthnRegisterCompleteResponse,
+    summary="Complete WebAuthn registration",
+    description="Verify and store a WebAuthn credential after attestation.",
+)
+async def webauthn_register_complete(
+    data: WebAuthnRegisterCompleteRequest,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> WebAuthnRegisterCompleteResponse:
+    """Complete WebAuthn passkey registration.
+
+    Verifies the attestation and stores the credential for future
+    passwordless logins.
+    """
+    from app.services.webauthn_service import WebAuthnError
+    from app.services.webauthn_service import WebAuthnService
+
+    service = WebAuthnService(session)
+    try:
+        cred = await service.complete_registration(
+            current_user, data.credential, data.device_name or "Passkey"
+        )
+    except WebAuthnError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    return WebAuthnRegisterCompleteResponse(
+        credential_id=cred.credential_id,
+        device_name=cred.device_name,
+    )
+
+
+@router.post(
+    "/webauthn/login/begin",
+    response_model=WebAuthnLoginBeginResponse,
+    summary="Begin WebAuthn login",
+    description="Generate WebAuthn authentication options for passkey login.",
+)
+async def webauthn_login_begin(
+    session: SessionDep,
+    data: WebAuthnLoginBeginRequest | None = None,
+) -> WebAuthnLoginBeginResponse:
+    """Begin WebAuthn passkey login.
+
+    Returns the options dict that the frontend passes to
+    ``navigator.credentials.get()``.
+    """
+    from app.services.webauthn_service import WebAuthnService
+
+    service = WebAuthnService(session)
+    email = data.email if data else None
+    options = await service.begin_authentication(email=email)
+    return WebAuthnLoginBeginResponse(options=options)
+
+
+@router.post(
+    "/webauthn/login/complete",
+    response_model=TokenResponse,
+    summary="Complete WebAuthn login",
+    description="Verify a WebAuthn assertion and return access tokens.",
+)
+async def webauthn_login_complete(
+    data: WebAuthnLoginCompleteRequest,
+    session: SessionDep,
+) -> TokenResponse:
+    """Complete WebAuthn passkey login.
+
+    Verifies the assertion signature and issues JWT tokens for the
+    authenticated user.
+    """
+    from app.services.webauthn_service import WebAuthnError
+    from app.services.webauthn_service import WebAuthnService
+
+    service = WebAuthnService(session)
+    try:
+        user = await service.complete_authentication(data.credential)
+    except WebAuthnError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    auth_service = AuthService(session)
+    return auth_service.create_tokens(user)
+
+
+@router.post(
+    "/magic-link",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Request magic link",
+    description="Send a passwordless login link to the given email address.",
+)
+async def request_magic_link(
+    data: MagicLinkRequest,
+    session: SessionDep,
+) -> None:
+    """Send a passwordless login link.
+
+    Always returns 204 regardless of whether the address is registered,
+    to prevent user enumeration. The login link expires in 15 minutes.
+    """
+    service = AuthService(session)
+    await service.send_magic_link(data.email)
+
+
+@router.post(
+    "/magic-link/verify",
+    response_model=TokenResponse,
+    summary="Verify magic link",
+    description="Exchange a magic link token for access tokens.",
+)
+async def verify_magic_link(
+    data: MagicLinkVerifyRequest,
+    session: SessionDep,
+) -> TokenResponse:
+    """Verify a magic link token and return JWT tokens.
+
+    Consumes the single-use token and issues a token pair.
+    Returns 400 if the token is invalid or expired.
+    """
+    service = AuthService(session)
+    try:
+        return await service.verify_magic_link(data.token)
+    except (AuthenticationError, UserInactiveError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
 

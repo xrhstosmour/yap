@@ -237,6 +237,9 @@ class Settings(BaseSettings):
     # PostgreSQL full-text search language configuration.
     FTS_LANGUAGE: str = "simple"
 
+    # Magic link (passwordless login) token TTL in seconds (default: 15 minutes).
+    MAGIC_LINK_TOKEN_TTL_SECONDS: int = 900
+
     # Two-factor authentication (TOTP).
     TOTP_CHALLENGE_TTL_SECONDS: int = 300
     TOTP_RATE_LIMIT_WINDOW: int = 300
@@ -252,6 +255,11 @@ class Settings(BaseSettings):
     SMTP_FROM_EMAIL: str = "noreply@{{ project_slug }}.com"
     SMTP_USE_TLS: bool = True
     CRYPTO_KEY: str = ""
+
+    # WebAuthn (passkey) settings.
+    WEBAUTHN_RP_ID: str = "localhost"
+    WEBAUTHN_RP_NAME: str = "{{ project_name }}"
+    WEBAUTHN_CHALLENGE_TTL_SECONDS: int = 300
 
     # Email verification token TTL in seconds (default: 24 hours).
     EMAIL_VERIFICATION_TOKEN_TTL_SECONDS: int = 86400
