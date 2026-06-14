@@ -113,6 +113,7 @@ MAP = {
     "mailpit": "email/mailpit",
     "redis_commander": "databases/manage/redis_commander",
     "flower": "monitoring/workers/flower",
+    "minio": "storage/minio",
 }
 
 

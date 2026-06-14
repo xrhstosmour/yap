@@ -50,14 +50,9 @@ class TestUploadFile:
         self, mock_s3_client: MagicMock
     ) -> None:
         """Should create bucket on first upload."""
-        mock_s3_client.head_bucket.side_effect = mock_s3_client.client_error = (
-            type("Error", (Exception,), {})()
-        )
-        mock_s3_client.client_error = type("ClientError", (Exception,), {})()
-        mock_s3_client.head_bucket.side_effect = mock_s3_client.client_error
+        mock_s3_client.head_bucket.side_effect = Exception("Not found")
 
-        with patch.object(mock_s3_client, "head_bucket", side_effect=Exception("Not found")):
-            await upload_file(content=b"test", filename="t.txt", mimetype="text/plain")
+        await upload_file(content=b"test", filename="t.txt", mimetype="text/plain")
 
         mock_s3_client.create_bucket.assert_called_once()
 

@@ -36,7 +36,7 @@ def _ensure_bucket(bucket: str) -> None:
     client = _s3_client()
     try:
         client.head_bucket(Bucket=bucket)
-    except client.exceptions.ClientError:
+    except Exception:
         client.create_bucket(Bucket=bucket)
 
 
@@ -90,7 +90,7 @@ async def upload_file(
 
             # Generate thumbnail (800px max dimension).
             thumb = img.copy()
-            thumb.thumbnail((800, 800), PIL.Image.LANCZOS)
+            thumb.thumbnail((800, 800), PIL.Image.LANCZOS)  # type: ignore[attr-defined]
             thumb_buffer = io.BytesIO()
             thumb_format = "JPEG" if mimetype == "image/jpeg" else "PNG"
             thumb.save(thumb_buffer, format=thumb_format)
@@ -104,7 +104,7 @@ async def upload_file(
                 ContentType=mimetype,
             )
         except Exception:
-            pass  # Non-image or unprocessable — thumbnails not critical.
+            pass  # Non-image or unprocessable. Thumbnails not critical.
 
     return object_key, content_hash, image_width, image_height, thumbnail_object_key
 
@@ -124,12 +124,17 @@ async def get_download_url(
     Returns:
         Presigned URL string.
     """
+    from typing import cast
+
     client = _s3_client()
     bucket = bucket or settings.STORAGE_BUCKET
-    return client.generate_presigned_url(
-        "get_object",
-        Params={"Bucket": bucket, "Key": object_key},
-        ExpiresIn=expires_in,
+    return cast(
+        str,
+        client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": bucket, "Key": object_key},
+            ExpiresIn=expires_in,
+        ),
     )
 
 
@@ -148,4 +153,4 @@ async def delete_object(
     try:
         client.delete_object(Bucket=bucket, Key=object_key)
     except client.exceptions.ClientError:
-        pass  # Already deleted — idempotent.
+        pass  # Already deleted. Idempotent.
