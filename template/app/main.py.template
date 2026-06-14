@@ -35,7 +35,7 @@ logger = get_logger("app")
 
 def custom_generate_unique_id(route: APIRoute) -> str:
     """Generate unique operation IDs based on tag and route name."""
-    tag = route.tags[0] if route.tags else "default"
+    tag = route.tags[0] if route.tags else "default"  # type: ignore[attr-defined]
     return f"{tag}-{route.name}"
 
 
