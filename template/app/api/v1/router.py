@@ -6,9 +6,9 @@ This module combines all v1 API endpoints into a single router.
 from fastapi import APIRouter
 
 from app.api.v1.api_keys import router as api_keys_router
-from app.api.v1.files import router as files_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.feature_flags import router as feature_flags_router
+from app.api.v1.files import router as files_router
 from app.api.v1.health import router as health_router
 from app.api.v1.tenants import router as tenants_router
 from app.api.v1.users import router as users_router

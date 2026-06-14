@@ -31,9 +31,11 @@ class TestFileUpload:
 
     @pytest.mark.usefixtures("override_get_async_session")
     async def test_upload_success(
-        self, client: AsyncClient, session: AsyncSession
+        self, client: AsyncClient, session: AsyncSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Uploading a file should return 201 with metadata."""
+        import hashlib
+
         auth_service = AuthService(cast(AsyncSession, session))
         user = await auth_service.register(
             RegisterRequest(
@@ -41,6 +43,16 @@ class TestFileUpload:
             )
         )
         token = create_access_token(subject=user.id)
+
+        # Mock blob storage to avoid S3 credentials.
+        async def _fake_upload(content, filename, mimetype, bucket=None):
+            content_hash = hashlib.sha256(content).hexdigest()
+            return f"uploads/{content_hash}", content_hash, None, None, None
+
+        monkeypatch.setattr(
+            "app.services.file_service.upload_file",
+            _fake_upload,
+        )
 
         content = b"hello world"
         files = {"file": ("test.txt", content, "text/plain")}

@@ -261,6 +261,16 @@ class Settings(BaseSettings):
     WEBAUTHN_RP_NAME: str = "{{ project_name }}"
     WEBAUTHN_CHALLENGE_TTL_SECONDS: int = 300
 
+    #     # File storage (MinIO / S3-compatible).
+    STORAGE_BACKEND: str = "file"
+    STORAGE_ENDPOINT: str = ""
+    STORAGE_ACCESS_KEY: str = ""
+    STORAGE_SECRET_KEY: str = ""
+    STORAGE_BUCKET: str = "{{ project_slug }}-files"
+    STORAGE_REGION: str = "us-east-1"
+    STORAGE_MAX_FILE_SIZE: int = 10485760
+    STORAGE_PUBLIC_URL: str = ""
+
     # Email verification token TTL in seconds (default: 24 hours).
     EMAIL_VERIFICATION_TOKEN_TTL_SECONDS: int = 86400
 

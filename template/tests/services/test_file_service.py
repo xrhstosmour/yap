@@ -24,7 +24,13 @@ def mock_session() -> MagicMock:
 @pytest.fixture
 def service(mock_session: MagicMock) -> FileService:
     svc = FileService(mock_session)
-    svc.file_repository = MagicMock()
+    repo = AsyncMock()
+    repo.get_by_content_hash = AsyncMock()
+    repo.get_owned = AsyncMock()
+    repo.increment_reference_count = AsyncMock()
+    repo.decrement_reference_count = AsyncMock()
+    repo.delete = AsyncMock()
+    svc.file_repository = repo
     return svc
 
 

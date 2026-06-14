@@ -2,6 +2,9 @@ include:
   - containers/databases/postgresql/docker-compose.yml
   - containers/databases/redis/docker-compose.yml
   - containers/distribute/brokers/rabbitmq/docker-compose.yml
+{%- if include_minio %}
+  - containers/storage/minio/docker-compose.yml
+{%- endif %}
 {%- if include_traefik %}
   - containers/networking/proxies/traefik/docker-compose.yml
 {%- endif %}
