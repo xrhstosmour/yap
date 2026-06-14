@@ -256,6 +256,11 @@ class Settings(BaseSettings):
     SMTP_USE_TLS: bool = True
     CRYPTO_KEY: str = ""
 
+    # WebAuthn (passkey) settings.
+    WEBAUTHN_RP_ID: str = "localhost"
+    WEBAUTHN_RP_NAME: str = "{{ project_name }}"
+    WEBAUTHN_CHALLENGE_TTL_SECONDS: int = 300
+
     # Email verification token TTL in seconds (default: 24 hours).
     EMAIL_VERIFICATION_TOKEN_TTL_SECONDS: int = 86400
 

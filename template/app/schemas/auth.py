@@ -249,3 +249,87 @@ class RecoveryCodesResponse(BaseSchema):
     recovery_codes: list[str] = Field(
         description="New one-time recovery codes; store these in a safe place"
     )
+
+
+class MagicLinkRequest(BaseSchema):
+    """Request for POST /auth/magic-link.
+
+    Attributes:
+        email: Email address to send the magic link to.
+    """
+
+    email: str = Field(description="Email address to send the magic link to")
+
+
+class MagicLinkVerifyRequest(BaseSchema):
+    """Request for POST /auth/magic-link/verify.
+
+    Attributes:
+        token: Magic link token from the email.
+    """
+
+    token: str = Field(description="Magic link token from the email")
+
+
+class WebAuthnRegisterBeginResponse(BaseSchema):
+    """Response from POST /auth/webauthn/register/begin.
+
+    Attributes:
+        options: The ``PublicKeyCredentialCreationOptions`` dict.
+    """
+
+    options: dict = Field(description="WebAuthn registration options for the frontend")
+
+
+class WebAuthnRegisterCompleteRequest(BaseSchema):
+    """Request for POST /auth/webauthn/register/complete.
+
+    Attributes:
+        credential: The credential object from ``navigator.credentials.create()``.
+        device_name: Optional human-readable name for the passkey.
+    """
+
+    credential: dict = Field(description="Credential from navigator.credentials.create()")
+    device_name: str | None = Field(default=None, description="Human-readable device name")
+
+
+class WebAuthnRegisterCompleteResponse(BaseSchema):
+    """Response from POST /auth/webauthn/register/complete.
+
+    Attributes:
+        credential_id: The stored credential ID.
+        device_name: Human-readable name for the passkey.
+    """
+
+    credential_id: str = Field(description="Stored credential ID")
+    device_name: str = Field(description="Human-readable device name")
+
+
+class WebAuthnLoginBeginRequest(BaseSchema):
+    """Request for POST /auth/webauthn/login/begin.
+
+    Attributes:
+        email: Optional email to narrow which credentials are accepted.
+    """
+
+    email: str | None = Field(default=None, description="Email to narrow credentials")
+
+
+class WebAuthnLoginBeginResponse(BaseSchema):
+    """Response from POST /auth/webauthn/login/begin.
+
+    Attributes:
+        options: The ``PublicKeyCredentialRequestOptions`` dict.
+    """
+
+    options: dict = Field(description="WebAuthn authentication options for the frontend")
+
+
+class WebAuthnLoginCompleteRequest(BaseSchema):
+    """Request for POST /auth/webauthn/login/complete.
+
+    Attributes:
+        credential: The credential object from ``navigator.credentials.get()``.
+    """
+
+    credential: dict = Field(description="Credential from navigator.credentials.get()")

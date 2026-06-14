@@ -19,6 +19,7 @@ module = [
     "pyotp.*",
     "qrcode.*",
     "PIL.*",
+    "webauthn.*",
     "pybreaker.*",
 ]
 ignore_missing_imports = true
