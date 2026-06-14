@@ -15,6 +15,7 @@ from app.models.oauth_account import OAuthProvider
 from app.models.tenant import Tenant
 from app.models.totp_recovery_code import TotpRecoveryCode
 from app.models.user import User
+from app.models.webauthn_credential import WebAuthnCredential
 
 __all__ = [
     "APIKey",
@@ -28,4 +29,5 @@ __all__ = [
     "TenantBase",
     "TotpRecoveryCode",
     "User",
+    "WebAuthnCredential",
 ]
