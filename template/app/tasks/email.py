@@ -60,7 +60,7 @@ def send_email_task(
 
     except Exception as e:
         logger.error("email_task_failed", error=str(e))
-        raise self.retry(exc=e)
+        raise self.retry(exc=e) from e
 
 
 @celery_app.task(
@@ -110,7 +110,7 @@ def send_batch_emails_task(
 
     except Exception as e:
         logger.error("batch_email_task_failed", error=str(e))
-        raise self.retry(exc=e)
+        raise self.retry(exc=e) from e
 
 
 @celery_app.task(
@@ -159,7 +159,7 @@ def send_template_email_task(
 
     except Exception as e:
         logger.error("template_email_failed", error=str(e))
-        raise self.retry(exc=e)
+        raise self.retry(exc=e) from e
 
 
 @celery_app.task(
@@ -182,10 +182,19 @@ def send_welcome_email_task(self, email: str, name: str | None = None) -> dict:
     project = settings.PROJECT_NAME
 
     subject = f"Welcome to {project}!"
-    body = f"Hi {display_name},\n\nWelcome to {project}! We're glad to have you on board.\n\nBest regards,\nThe {project} Team"
-    html = f"""<h1>Welcome, {_html.escape(display_name)}!</h1>
-<p>Thank you for joining <strong>{_html.escape(project)}</strong>. We're glad to have you on board.</p>
-<p>Best regards,<br>The {_html.escape(project)} Team</p>"""
+    body = (
+        f"Hi {display_name},\n\n"
+        f"Welcome to {project}! We're glad to have you on board.\n\n"
+        f"Best regards,\nThe {project} Team"
+    )
+    html = (
+        f"<h1>Welcome, {_html.escape(display_name)}!</h1>\n"
+        f"<p>Thank you for joining "
+        f"<strong>{_html.escape(project)}</strong>. "
+        f"We're glad to have you on board.</p>\n"
+        f"<p>Best regards,<br>The "
+        f"{_html.escape(project)} Team</p>"
+    )
 
     send_email_task.delay(
         to_email=email,
