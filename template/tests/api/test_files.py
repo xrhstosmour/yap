@@ -15,7 +15,7 @@ from app.services.auth_service import AuthService
 
 
 @pytest.fixture(name="client")
-def client_fixture():
+def client_fixture() -> AsyncClient:
     transport = ASGITransport(app=app)
     return AsyncClient(transport=transport, base_url="http://test")
 
@@ -31,7 +31,10 @@ class TestFileUpload:
 
     @pytest.mark.usefixtures("override_get_async_session")
     async def test_upload_success(
-        self, client: AsyncClient, session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+        self,
+        client: AsyncClient,
+        session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Uploading a file should return 201 with metadata."""
         import hashlib
@@ -39,7 +42,7 @@ class TestFileUpload:
         auth_service = AuthService(cast(AsyncSession, session))
         user = await auth_service.register(
             RegisterRequest(
-                email="file-upload@{{ project_slug }}.com", password="password123"
+                email="file-upload@testapp.com", password="password123"
             )
         )
         token = create_access_token(subject=user.id)

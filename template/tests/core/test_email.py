@@ -6,7 +6,7 @@ from app.core.email import send_batch_emails
 
 
 @pytest.mark.asyncio
-async def test_send_batch_emails_with_no_recipients():
+async def test_send_batch_emails_with_no_recipients() -> None:
     """Batch email with empty list should return zero counts."""
     result = await send_batch_emails(
         recipients=[],
@@ -17,7 +17,7 @@ async def test_send_batch_emails_with_no_recipients():
 
 
 @pytest.mark.asyncio
-async def test_send_batch_emails_skips_missing_email():
+async def test_send_batch_emails_skips_missing_email() -> None:
     """Recipients without 'email' key should be counted as failed."""
     result = await send_batch_emails(
         recipients=[{"name": "No Email"}],

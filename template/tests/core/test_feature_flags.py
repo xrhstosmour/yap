@@ -20,7 +20,7 @@ from app.core.feature_flags import sync_to_redis
 
 
 @pytest.fixture(autouse=True)
-def clear_in_memory_cache():
+def clear_in_memory_cache() -> None:
     """Clear the in-memory cache before each test."""
     _in_memory_cache.clear()
     yield
@@ -28,28 +28,28 @@ def clear_in_memory_cache():
 
 
 @pytest.fixture(autouse=True)
-def mock_redis():
+def mock_redis() -> None:
     """Mock Redis client retrieval for all tests."""
     with patch("app.core.feature_flags._get_redis", return_value=None):
         yield
 
 
 @pytest.mark.asyncio
-async def test_feature_enabled_returns_false_for_unknown_flag():
+async def test_feature_enabled_returns_false_for_unknown_flag() -> None:
     """Unknown flags should default to False."""
     result = await feature_enabled("nonexistent_feature")
     assert result is False
 
 
 @pytest.mark.asyncio
-async def test_feature_disabled_returns_true_for_unknown_flag():
+async def test_feature_disabled_returns_true_for_unknown_flag() -> None:
     """feature_disabled should be the inverse of feature_enabled."""
     result = await feature_disabled("nonexistent_feature")
     assert result is True
 
 
 @pytest.mark.asyncio
-async def test_feature_enabled_uses_in_memory_cache():
+async def test_feature_enabled_uses_in_memory_cache() -> None:
     """Once fetched, a flag should be served from in-memory cache."""
     from app.core.feature_flags import _make_cache_entry
 
@@ -60,7 +60,7 @@ async def test_feature_enabled_uses_in_memory_cache():
 
 
 @pytest.mark.asyncio
-async def test_feature_enabled_falls_back_to_settings():
+async def test_feature_enabled_falls_back_to_settings() -> None:
     """Settings defaults should be used when no DB entry exists."""
     with patch("app.core.feature_flags._get_settings_default", return_value=True):
         result = await feature_enabled("settings_enabled_flag")
@@ -68,7 +68,7 @@ async def test_feature_enabled_falls_back_to_settings():
 
 
 @pytest.mark.asyncio
-async def test_refresh_cache_removes_from_memory():
+async def test_refresh_cache_removes_from_memory() -> None:
     """refresh_cache should clear the in-memory entry."""
     from app.core.feature_flags import _make_cache_entry
 
@@ -79,7 +79,7 @@ async def test_refresh_cache_removes_from_memory():
 
 
 @pytest.mark.asyncio
-async def test_sync_to_redis_updates_cache():
+async def test_sync_to_redis_updates_cache() -> None:
     """sync_to_redis should update in-memory cache."""
     mock_redis = MagicMock()
     mock_redis.set = AsyncMock()
@@ -91,7 +91,7 @@ async def test_sync_to_redis_updates_cache():
 
 
 @pytest.mark.asyncio
-async def test_feature_disabled_matches_feature_enabled_inverse():
+async def test_feature_disabled_matches_feature_enabled_inverse() -> None:
     """feature_disabled should always be the negation of feature_enabled."""
     from app.core.feature_flags import _make_cache_entry
 
@@ -105,7 +105,7 @@ async def test_feature_disabled_matches_feature_enabled_inverse():
 
 
 @pytest.mark.asyncio
-async def test_concurrent_feature_enabled_does_not_corrupt_cache():
+async def test_concurrent_feature_enabled_does_not_corrupt_cache() -> None:
     """Concurrent feature lookups should not corrupt in-memory cache."""
     flag_names = [f"concurrent_flag_{idx}" for idx in range(20)]
 
