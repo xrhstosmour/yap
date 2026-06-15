@@ -11,7 +11,9 @@ available) or skip.
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -185,3 +187,221 @@ class TestIdempotencyMiddleware:
         )
         assert resp.status_code == 500
         mock_service.set.assert_not_awaited()
+
+
+# Service-level tests with mocked Redis (unit tests, no live Redis needed)
+
+
+class TestCachedResponseFormat:
+    """Tests for CachedResponse serialization format."""
+
+    def test_serialized_output_is_valid_json_bytes(self) -> None:
+        """_serialize returns valid JSON bytes with the expected keys."""
+        svc = IdempotencyService()
+        resp = CachedResponse(
+            b'{"ok":true}',
+            201,
+            "application/json",
+            headers={"X-Custom": "val"},
+        )
+        raw = svc._serialize(resp)
+
+        assert isinstance(raw, bytes)
+        data = json.loads(raw)
+        assert "b" in data
+        assert "s" in data
+        assert "m" in data
+        assert "h" in data
+        assert data["s"] == 201
+        assert data["m"] == "application/json"
+        assert data["h"] == {"X-Custom": "val"}
+
+
+class TestIdempotencyServiceWithMock:
+    """Tests for IdempotencyService async methods with mocked Redis."""
+
+    @pytest.mark.anyio
+    async def test_cache_hit_returns_cached_response(self) -> None:
+        """get returns deserialized CachedResponse when cache hit."""
+        svc = IdempotencyService()
+        original = CachedResponse(b'{"x":1}', 201, "application/json")
+        serialized = svc._serialize(original)
+
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=serialized)
+
+        with patch(
+            "app.core.idempotency.get_redis", AsyncMock(return_value=mock_redis)
+        ):
+            result = await svc.get("test-key")
+
+        assert result == original
+
+    @pytest.mark.anyio
+    async def test_cache_miss_returns_none(self) -> None:
+        """get returns None when no cached data exists."""
+        svc = IdempotencyService()
+
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=None)
+
+        with patch(
+            "app.core.idempotency.get_redis", AsyncMock(return_value=mock_redis)
+        ):
+            result = await svc.get("test-key")
+
+        assert result is None
+
+    @pytest.mark.anyio
+    async def test_try_lock_acquires_with_ttl(self) -> None:
+        """try_lock returns True and sets lock with TTL when available."""
+        svc = IdempotencyService()
+
+        mock_redis = AsyncMock()
+        mock_redis.set = AsyncMock(return_value=True)
+
+        with patch(
+            "app.core.idempotency.get_redis", AsyncMock(return_value=mock_redis)
+        ):
+            result = await svc.try_lock("test-key")
+
+        assert result is True
+        mock_redis.set.assert_awaited_once_with(
+            "idempotency:lock:test-key", "1", nx=True, ex=60
+        )
+
+    @pytest.mark.anyio
+    async def test_try_lock_fails_on_conflict(self) -> None:
+        """try_lock returns a falsy value when lock is already held."""
+        svc = IdempotencyService()
+
+        mock_redis = AsyncMock()
+        # Redis returns None when SET NX fails (key already exists).
+        mock_redis.set = AsyncMock(return_value=None)
+
+        with patch(
+            "app.core.idempotency.get_redis", AsyncMock(return_value=mock_redis)
+        ):
+            result = await svc.try_lock("test-key")
+
+        assert not result
+
+    @pytest.mark.anyio
+    async def test_release_lock_deletes_lock_key(self) -> None:
+        """release_lock deletes the lock key from Redis."""
+        svc = IdempotencyService()
+
+        mock_redis = AsyncMock()
+        mock_redis.delete = AsyncMock()
+
+        with patch(
+            "app.core.idempotency.get_redis", AsyncMock(return_value=mock_redis)
+        ):
+            await svc.release_lock("test-key")
+
+        mock_redis.delete.assert_awaited_once_with("idempotency:lock:test-key")
+
+    @pytest.mark.anyio
+    async def test_set_stores_serialized_response_with_ttl(self) -> None:
+        """set stores serialized CachedResponse with the configured TTL."""
+        svc = IdempotencyService()
+        resp = CachedResponse(b'{"ok":true}', 200, "application/json")
+
+        mock_redis = AsyncMock()
+        mock_redis.setex = AsyncMock()
+
+        with patch(
+            "app.core.idempotency.get_redis", AsyncMock(return_value=mock_redis)
+        ):
+            await svc.set("test-key", resp)
+
+        mock_redis.setex.assert_awaited_once()
+        call_args = mock_redis.setex.call_args
+        assert call_args[0][0] == "idempotency:test-key"
+        # Default IDEMPOTENCY_TTL_HOURS is 24 → 86400 seconds.
+        assert call_args[0][1] == 86400
+
+    @pytest.mark.anyio
+    async def test_lock_releases_after_context_exit(self) -> None:
+        """release_lock is called when using try_lock/release_lock as a context."""
+        from contextlib import asynccontextmanager
+
+        svc = IdempotencyService()
+
+        mock_redis = AsyncMock()
+        mock_redis.set = AsyncMock(return_value=True)
+        mock_redis.delete = AsyncMock()
+
+        cm_entered = False
+
+        @asynccontextmanager
+        async def idempotency_lock(key: str):
+            nonlocal cm_entered
+            acquired = await svc.try_lock(key)
+            assert acquired is True
+            cm_entered = True
+            try:
+                yield
+            finally:
+                await svc.release_lock(key)
+
+        with patch(
+            "app.core.idempotency.get_redis", AsyncMock(return_value=mock_redis)
+        ):
+            async with idempotency_lock("test-key"):
+                assert cm_entered is True
+                mock_redis.delete.assert_not_awaited()
+
+        # After context exit, release_lock should have been called.
+        mock_redis.delete.assert_awaited_once_with("idempotency:lock:test-key")
+
+    @pytest.mark.anyio
+    async def test_get_returns_none_for_expired_key(self) -> None:
+        """get returns None when the cached key has expired (Redis returns None)."""
+        svc = IdempotencyService()
+
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=None)  # Key expired / not found
+
+        with patch(
+            "app.core.idempotency.get_redis", AsyncMock(return_value=mock_redis)
+        ):
+            result = await svc.get("expired-key")
+
+        assert result is None
+
+
+class TestCachedResponse:
+    """Tests for the CachedResponse dataclass."""
+
+    def test_cached_response_with_custom_headers(self) -> None:
+        """CachedResponse stores custom headers."""
+        resp = CachedResponse(
+            body=b'{"ok":true}',
+            status_code=200,
+            media_type="application/json",
+            headers={"X-Custom": "value", "X-Another": "data"},
+        )
+        assert resp.body == b'{"ok":true}'
+        assert resp.status_code == 200
+        assert resp.media_type == "application/json"
+        assert resp.headers == {"X-Custom": "value", "X-Another": "data"}
+
+    def test_cached_response_with_custom_status_code(self) -> None:
+        """CachedResponse accepts any HTTP status code."""
+        resp = CachedResponse(
+            body=b"",
+            status_code=201,
+            media_type=None,
+        )
+        assert resp.status_code == 201
+        assert resp.media_type is None
+        assert resp.headers is None
+
+    def test_cached_response_defaults(self) -> None:
+        """CachedResponse defaults headers to None."""
+        resp = CachedResponse(body=b"data", status_code=204, media_type=None)
+        assert resp.headers is None
+        assert resp.media_type is None
+        assert resp.body == b"data"
+        assert resp.status_code == 204
