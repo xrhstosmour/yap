@@ -15,16 +15,23 @@ Celery is split into two concerns:
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 
 import pytest
 
+try:
+    import redbeat  # noqa
+    HAS_REDBEAT = True
+except ImportError:
+    HAS_REDBEAT = False
+
 
 def _probe(args: list[str]) -> None:
     proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     try:
-        proc.wait(timeout=5.0)
+        proc.wait(timeout=15.0)
         stdout = proc.stdout.read().decode(errors="replace") if proc.stdout else ""
         stderr = proc.stderr.read().decode(errors="replace") if proc.stderr else ""
         pytest.fail(
@@ -107,6 +114,8 @@ def test_health_check_task_executes() -> None:
     assert result.result["status"] == "healthy"
 
 # FastAPI server smoke test — starts the server and makes real HTTP requests.
+# NOTE: Uses fixed port 8001. If occupied, test will fail.
+# Consider using portpicker for dynamic port selection in CI.
 @pytest.mark.slow
 def test_fastapi_dev_starts() -> None:
     _probe(
@@ -124,8 +133,18 @@ def test_fastapi_dev_starts() -> None:
     )
 
 
+def _services_available() -> bool:
+    return all([
+        os.environ.get("POSTGRESQL_HOST"),
+        os.environ.get("REDIS_HOST"),
+    ])
+
+
 @pytest.mark.slow
-@pytest.mark.skip(reason="Requires PostgreSQL + Redis on localhost:5432/6379; run via CI smoke job")
+@pytest.mark.skipif(
+    not _services_available(),
+    reason="Requires running PostgreSQL and Redis",
+)
 def test_api_smoke() -> None:
     """Start uvicorn, verify core endpoints work (auth lifecycle, health, features)."""
     import time
@@ -225,7 +244,12 @@ def test_api_smoke() -> None:
         # Feature endpoints exist (return any non-500 status).
         for endpoint, method, body, needs_auth in [
             ("/api/v1/auth/send-verification-email", "POST", None, True),
-            ("/api/v1/auth/forgot-password", "POST", {"email": "smoke-test@yap.com"}, False),
+            (
+                "/api/v1/auth/forgot-password",
+                "POST",
+                {"email": "smoke-test@yap.com"},
+                False,
+            ),
             ("/api/v1/users/me/export", "GET", None, True),
         ]:
             kwargs = {}
@@ -247,7 +271,8 @@ def test_api_smoke() -> None:
         r = httpx.get(f"{base}/api/v1/auth/verify-email")
         assert r.status_code == 400
 
-        # 2FA enroll endpoint exists (returns 400 since already logged in without pending).
+        # 2FA enroll endpoint exists
+        # (returns 400 since already logged in without pending).
         r = httpx.post(
             f"{base}/api/v1/auth/2fa/enroll",
             headers={"Authorization": f"Bearer {new_token}"},
@@ -270,7 +295,9 @@ def test_api_smoke() -> None:
             f"{base}/api/v1/auth/google",
             params={"redirect_uri": "http://localhost:3000/callback"},
         )
-        assert r.status_code == 503, f"Google OAuth unconfigured returned {r.status_code}"
+        assert (
+            r.status_code == 503
+        ), f"Google OAuth unconfigured returned {r.status_code}"
     finally:
         proc.terminate()
         try:
@@ -295,7 +322,8 @@ def test_celery_worker_starts() -> None:
 
 
 @pytest.mark.slow
-def test_celery_beat_starts() -> None:
+@pytest.mark.skipif(not HAS_REDBEAT, reason="RedBeat not installed")
+def test_celery_beat_redbeat_starts() -> None:
     _probe(
         [
             sys.executable,
@@ -306,6 +334,22 @@ def test_celery_beat_starts() -> None:
             "beat",
             "-S",
             "redbeat.RedBeatScheduler",
+            "-l",
+            "info",
+        ],
+    )
+
+
+@pytest.mark.slow
+def test_celery_beat_default_starts() -> None:
+    _probe(
+        [
+            sys.executable,
+            "-m",
+            "celery",
+            "-A",
+            "app.celery_app",
+            "beat",
             "-l",
             "info",
         ],
