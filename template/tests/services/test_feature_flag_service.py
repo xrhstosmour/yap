@@ -1,0 +1,239 @@
+"""Tests for FeatureFlagService."""
+
+from __future__ import annotations
+
+from datetime import UTC
+from datetime import datetime
+from unittest.mock import AsyncMock
+from unittest.mock import MagicMock
+from unittest.mock import patch
+from uuid import UUID
+
+import pytest
+
+from app.models.feature_flag import FeatureFlag
+from app.schemas.feature_flag import FeatureFlagCreate
+from app.schemas.feature_flag import FeatureFlagUpdate
+from app.services.feature_flag_service import FeatureFlagService
+from app.services.feature_flag_service import FeatureFlagServiceError
+
+
+@pytest.fixture
+def mock_session() -> MagicMock:
+    return MagicMock()
+
+
+@pytest.fixture
+def service(mock_session: MagicMock) -> FeatureFlagService:
+    svc = FeatureFlagService(mock_session)
+    svc.repository = AsyncMock()
+    return svc
+
+
+def _make_flag(
+    name: str = "test_flag",
+    state: bool = True,
+    description: str | None = "Test flag",
+    flag_id: UUID | None = None,
+) -> FeatureFlag:
+    """Factory helper for creating FeatureFlag instances in tests."""
+    return FeatureFlag(
+        id=flag_id or UUID("00000000-0000-0000-0000-000000000001"),
+        name=name,
+        state=state,
+        description=description,
+        created_at=datetime(2025, 1, 1, tzinfo=UTC),
+        updated_at=datetime(2025, 1, 1, tzinfo=UTC),
+    )
+
+
+class TestCreateFlag:
+    """Tests for create_flag()."""
+
+    @pytest.mark.asyncio
+    async def test_create_flag_success(self, service: FeatureFlagService) -> None:
+        """Should create a flag when name does not exist."""
+        service.repository.name_exists = AsyncMock(return_value=False)
+        flag = _make_flag()
+        service.repository.create = AsyncMock(return_value=flag)
+
+        with patch(
+            "app.services.feature_flag_service.ff.sync_to_redis", new_callable=AsyncMock
+        ) as mock_sync:
+            result = await service.create_flag(
+                FeatureFlagCreate(name="test_flag", state=True, description="Test flag")
+            )
+
+        assert result is flag
+        assert result.name == "test_flag"
+        assert result.state is True
+        service.repository.name_exists.assert_awaited_once_with("test_flag")
+        service.repository.create.assert_awaited_once_with(
+            {"name": "test_flag", "state": True, "description": "Test flag"}
+        )
+        mock_sync.assert_awaited_once_with("test_flag", True)
+
+    @pytest.mark.asyncio
+    async def test_create_flag_duplicate_name_raises(
+        self, service: FeatureFlagService
+    ) -> None:
+        """Should raise FeatureFlagServiceError when name already exists."""
+        service.repository.name_exists = AsyncMock(return_value=True)
+
+        with pytest.raises(
+            FeatureFlagServiceError, match="Feature flag 'test_flag' already exists"
+        ):
+            await service.create_flag(
+                FeatureFlagCreate(name="test_flag", state=True)
+            )
+
+        service.repository.name_exists.assert_awaited_once_with("test_flag")
+        service.repository.create.assert_not_awaited()
+
+
+class TestGetByName:
+    """Tests for get_by_name()."""
+
+    @pytest.mark.asyncio
+    async def test_get_by_name_found(self, service: FeatureFlagService) -> None:
+        """Should return the flag when found by name."""
+        flag = _make_flag(name="my_feature")
+        service.repository.get_by_name = AsyncMock(return_value=flag)
+
+        result = await service.get_by_name("my_feature")
+
+        assert result is flag
+        assert result.name == "my_feature"
+        service.repository.get_by_name.assert_awaited_once_with("my_feature")
+
+    @pytest.mark.asyncio
+    async def test_get_by_name_not_found(self, service: FeatureFlagService) -> None:
+        """Should return None when flag is not found."""
+        service.repository.get_by_name = AsyncMock(return_value=None)
+
+        result = await service.get_by_name("nonexistent")
+
+        assert result is None
+        service.repository.get_by_name.assert_awaited_once_with("nonexistent")
+
+
+class TestListFlags:
+    """Tests for list_flags()."""
+
+    @pytest.mark.asyncio
+    async def test_list_flags_returns_tuple(self, service: FeatureFlagService) -> None:
+        """Should return a tuple of (flags, total_count)."""
+        flag1 = _make_flag(name="flag_a", flag_id=UUID("00000000-0000-0000-0000-000000000001"))
+        flag2 = _make_flag(name="flag_b", flag_id=UUID("00000000-0000-0000-0000-000000000002"))
+        service.repository.list = AsyncMock(return_value=([flag1, flag2], 2))
+
+        flags, total = await service.list_flags()
+
+        assert len(flags) == 2
+        assert total == 2
+        assert flags[0].name == "flag_a"
+        assert flags[1].name == "flag_b"
+        service.repository.list.assert_awaited_once_with(skip=0, limit=20)
+
+
+class TestUpdateFlag:
+    """Tests for update_flag()."""
+
+    @pytest.mark.asyncio
+    async def test_update_flag_description(
+        self, service: FeatureFlagService
+    ) -> None:
+        """Should update only the description and not sync to Redis."""
+        existing = _make_flag(name="test_flag", description="Old desc")
+        updated = _make_flag(name="test_flag", description="New desc")
+        service.repository.get_by_name = AsyncMock(return_value=existing)
+        service.repository.update = AsyncMock(return_value=updated)
+
+        with patch(
+            "app.services.feature_flag_service.ff.sync_to_redis", new_callable=AsyncMock
+        ) as mock_sync:
+            result = await service.update_flag(
+                "test_flag",
+                FeatureFlagUpdate(description="New desc"),
+            )
+
+        assert result is not None
+        assert result.description == "New desc"
+        service.repository.get_by_name.assert_awaited_once_with("test_flag")
+        service.repository.update.assert_awaited_once_with(
+            existing.id, {"description": "New desc"}
+        )
+        mock_sync.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_update_flag_not_found(
+        self, service: FeatureFlagService
+    ) -> None:
+        """Should return None when flag does not exist."""
+        service.repository.get_by_name = AsyncMock(return_value=None)
+
+        result = await service.update_flag(
+            "missing", FeatureFlagUpdate(description="ignored")
+        )
+
+        assert result is None
+        service.repository.update.assert_not_awaited()
+
+
+class TestToggleFlag:
+    """Tests for toggle_flag()."""
+
+    @pytest.mark.asyncio
+    async def test_toggle_flag_true_to_false(
+        self, service: FeatureFlagService
+    ) -> None:
+        """Should toggle state from True to False and sync to Redis."""
+        existing = _make_flag(name="test_flag", state=True)
+        toggled = _make_flag(name="test_flag", state=False)
+        service.repository.get_by_name = AsyncMock(return_value=existing)
+        service.repository.update = AsyncMock(return_value=toggled)
+
+        with patch(
+            "app.services.feature_flag_service.ff.sync_to_redis", new_callable=AsyncMock
+        ) as mock_sync:
+            result = await service.toggle_flag("test_flag", False)
+
+        assert result is not None
+        assert result.state is False
+        service.repository.get_by_name.assert_awaited_once_with("test_flag")
+        mock_sync.assert_awaited_once_with("test_flag", False)
+
+
+class TestDeleteFlag:
+    """Tests for delete_flag()."""
+
+    @pytest.mark.asyncio
+    async def test_delete_flag_success(self, service: FeatureFlagService) -> None:
+        """Should delete the flag, return True, and remove from Redis."""
+        flag = _make_flag(name="test_flag")
+        service.repository.get_by_name = AsyncMock(return_value=flag)
+        service.repository.delete = AsyncMock(return_value=True)
+
+        with patch(
+            "app.services.feature_flag_service.ff.remove_from_redis",
+            new_callable=AsyncMock,
+        ) as mock_remove:
+            result = await service.delete_flag("test_flag")
+
+        assert result is True
+        service.repository.get_by_name.assert_awaited_once_with("test_flag")
+        service.repository.delete.assert_awaited_once_with(flag.id)
+        mock_remove.assert_awaited_once_with("test_flag")
+
+    @pytest.mark.asyncio
+    async def test_delete_flag_not_found(
+        self, service: FeatureFlagService
+    ) -> None:
+        """Should return False when flag does not exist."""
+        service.repository.get_by_name = AsyncMock(return_value=None)
+
+        result = await service.delete_flag("nonexistent")
+
+        assert result is False
+        service.repository.get_by_name.assert_awaited_once_with("nonexistent")
+        service.repository.delete.assert_not_awaited()
