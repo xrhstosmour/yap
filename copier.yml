@@ -10,6 +10,7 @@ project_slug:
   type: str
   help: "Enter a lowercase, URL-friendly version of the name of your project:"
   default: "{{ project_name|lower|replace('-', '_')|replace(' ', '_') }}"
+  validator: "{% if not project_slug or not project_slug|regex_search('^[a-z][a-z0-9_]*$') %}Project slug must be lowercase letters, digits, and underscores only, starting with a letter{% endif %}"
 
 description:
   type: str
@@ -19,12 +20,13 @@ description:
 author_name:
   type: str
   help: "Enter the name of the project's author:"
-  default: "Christos Mourtogiannis"
+  default: "Your Name"
 
 author_email:
   type: str
   help: "Enter the email address of the project's author:"
-  default: "c.mourtogiannis@gmail.com"
+  default: "email@example.com"
+  validator: "{% if not author_email or not author_email|regex_search('^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$') %}Please enter a valid email address{% endif %}"
 
 jwt_secret_key:
   type: str
@@ -70,7 +72,7 @@ traefik_host:
   type: str
   help: "Domain for Traefik dashboard:"
   default: "traefik.{{ project_slug }}.local"
-  when: "{{ include_traefik }}"
+  when: "include_traefik"
 
 timezone:
   type: str
@@ -86,7 +88,7 @@ glitchtip_secret_key:
   type: str
   help: "Secret key for GlitchTip (leave empty to auto-generate):"
   default: ""
-  when: "{{ include_glitchtip }}"
+  when: "include_glitchtip"
 
 include_metabase:
   type: bool
@@ -97,7 +99,7 @@ metabase_read_only_password:
   type: str
   help: "Password for Metabase read-only database user (leave empty to auto-generate):"
   default: ""
-  when: "{{ include_metabase }}"
+  when: "include_metabase"
 
 include_pgadmin4:
   type: bool
@@ -108,7 +110,7 @@ pgadmin4_password:
   type: str
   help: "Password for pgAdmin4 (leave empty to auto-generate):"
   default: ""
-  when: "{{ include_pgadmin4 }}"
+  when: "include_pgadmin4"
 
 include_mailpit:
   type: bool
@@ -124,7 +126,7 @@ redis_commander_password:
   type: str
   help: "Password for Redis Commander (leave empty to auto-generate):"
   default: ""
-  when: "{{ include_redis_commander }}"
+  when: "include_redis_commander"
 
 include_flower:
   type: bool
@@ -135,7 +137,7 @@ flower_password:
   type: str
   help: "Password for Flower dashboard (leave empty to auto-generate):"
   default: ""
-  when: "{{ include_flower }}"
+  when: "include_flower"
 
 include_redbeat:
   type: bool
@@ -151,10 +153,10 @@ storage_region:
   type: str
   help: "S3 storage region (e.g. eu-central-1, eu-west-1, us-east-1):"
   default: "eu-central-1"
-  when: "{{ include_minio }}"
+  when: "include_minio"
 
 _exclude:
-  - __pycache__
+  - "**/__pycache__"
   - "*.pyc"
   - .coverage
   - .cache
@@ -164,9 +166,9 @@ _exclude:
   - .pytest_cache
   - .ruff_cache
   - .vscode
+  - .idea
+  - "*.DS_Store"
   - uv.lock
-  - poetry.lock
-  - poetry.toml
 
 _tasks:
   - "python3 scripts/assemble.py"
