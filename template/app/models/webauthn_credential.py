@@ -23,7 +23,8 @@ class WebAuthnCredential(BaseModel, table=True):
         public_key: PEM-encoded EC2 or RSA public key.
         user_handle: Base64url-encoded user handle (user.id) used during registration.
         sign_count: Signature counter value for replay detection.
-        device_name: Human-readable name set by the user (e.g. "iPhone 15", "YubiKey 5").
+        device_name: Human-readable name set by the user
+            (e.g. "iPhone 15", "YubiKey 5").
         last_used_at: When this credential was last used for authentication.
         created_at: When this credential was registered.
         updated_at: When this credential was last modified.

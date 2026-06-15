@@ -120,7 +120,9 @@ def greek_to_greeklish(text: str, max_expansions: int = 10) -> list[str]:
     limited to ``max_expansions`` entries.
 
     Args:
-        text: Greek text (e.g. ``"\\u03b1\\u03bd\\u03b8\\u03c1\\u03c9\\u03c0\\u03bf\\u03c2"``).
+        text: Greek text (
+            e.g. ``"\\u03b1\\u03bd\\u03b8\\u03c1\\u03c9\\u03c0\\u03bf\\u03c2"``
+        ).
         max_expansions: Maximum number of Greeklish candidates to return.
 
     Returns:
