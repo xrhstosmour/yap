@@ -14,6 +14,8 @@ from fastapi.encoders import jsonable_encoder
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+MAX_PAGE_SIZE = 100
+
 
 def build_pagination_headers(
     request: Request,
@@ -42,10 +44,14 @@ def build_pagination_headers(
     if total == 0:
         return headers
 
+    limit = min(limit, MAX_PAGE_SIZE)
+    skip = max(0, skip)
+
     # Use path-only URLs to prevent Host-header injection in the Link header.
     base_path = request.url.path
 
-    # Preserve all existing query params including multi-value ones; override skip/limit.
+    # Preserve all existing query params including multi-value ones;
+    # override skip/limit.
     base_params = [
         (k, v)
         for k, v in request.query_params.multi_items()
@@ -97,15 +103,15 @@ class PaginatedResponse(JSONResponse):
 
     def __init__(
         self,
-        content: Any,
+        content: Any,  # noqa: ANN401
         total: int,
         skip: int,
         limit: int,
         request: Request,
-        **kwargs: Any,
+        **kwargs: Any,  # noqa: ANN401
     ) -> None:
         pagination_headers = build_pagination_headers(request, total, skip, limit)
-        headers = kwargs.pop("headers", {})
+        headers = dict(kwargs.pop("headers", {}))
         headers.update(pagination_headers)
         super().__init__(content=jsonable_encoder(content), headers=headers, **kwargs)
 

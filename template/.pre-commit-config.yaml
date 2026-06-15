@@ -10,7 +10,7 @@ repos:
     rev: v1.14.0
     hooks:
       - id: mypy
-        args: [--strict]
+        args: [--config-file, mypy-ci.toml]
         additional_dependencies:
           - pydantic>=2.6.0
           - fastapi>=0.115.0
@@ -26,3 +26,7 @@ repos:
       - id: check-json
       - id: check-toml
       - id: debug-statements
+      - id: detect-private-key
+      - id: detect-aws-credentials
+      - id: check-merge-conflict
+      - id: name-tests-test

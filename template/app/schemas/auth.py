@@ -289,8 +289,12 @@ class WebAuthnRegisterCompleteRequest(BaseSchema):
         device_name: Optional human-readable name for the passkey.
     """
 
-    credential: dict = Field(description="Credential from navigator.credentials.create()")
-    device_name: str | None = Field(default=None, description="Human-readable device name")
+    credential: dict = Field(
+        description="Credential from navigator.credentials.create()"
+    )
+    device_name: str | None = Field(
+        default=None, description="Human-readable device name"
+    )
 
 
 class WebAuthnRegisterCompleteResponse(BaseSchema):
@@ -322,7 +326,9 @@ class WebAuthnLoginBeginResponse(BaseSchema):
         options: The ``PublicKeyCredentialRequestOptions`` dict.
     """
 
-    options: dict = Field(description="WebAuthn authentication options for the frontend")
+    options: dict = Field(
+        description="WebAuthn authentication options for the frontend"
+    )
 
 
 class WebAuthnLoginCompleteRequest(BaseSchema):

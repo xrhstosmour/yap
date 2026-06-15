@@ -52,7 +52,7 @@ class TestUpload:
         mock_file = MagicMock()
         mock_file.filename = "test.txt"
         mock_file.content_type = "text/plain"
-        mock_file.read = AsyncMock(return_value=b"unique content")
+        mock_file.read = AsyncMock(side_effect=[b"unique content", b""])
 
         service.file_repository.get_by_content_hash = AsyncMock(return_value=None)
 
@@ -78,7 +78,7 @@ class TestUpload:
         mock_file = MagicMock()
         mock_file.filename = "dup.txt"
         mock_file.content_type = "text/plain"
-        mock_file.read = AsyncMock(return_value=b"duplicate content")
+        mock_file.read = AsyncMock(side_effect=[b"duplicate content", b""])
 
         existing = File(
             filename="dup.txt",
@@ -126,5 +126,7 @@ class TestDelete:
         with patch("app.services.file_service.delete_object") as mock_delete:
             await service.delete(file_id, user)
 
-        mock_delete.assert_called_once_with(object_key="uploads/abc123", bucket="default")
+        mock_delete.assert_called_once_with(
+            object_key="uploads/abc123", bucket="default"
+        )
         service.file_repository.delete.assert_awaited_once_with(file_id)

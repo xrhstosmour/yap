@@ -6,8 +6,12 @@ operations, automatic tenant filtering, and soft delete support.
 
 from __future__ import annotations
 
+import base64
 from datetime import UTC
+from datetime import date as date_type
 from datetime import datetime
+from decimal import Decimal
+from enum import Enum
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import Protocol
@@ -24,6 +28,7 @@ from sqlmodel import func
 from sqlmodel import select
 
 from app.core.logging import get_logger
+from app.core.pagination import MAX_PAGE_SIZE
 from app.core.tenant import get_current_tenant_id
 
 if TYPE_CHECKING:
@@ -33,17 +38,27 @@ logger = get_logger("repository")
 
 T = TypeVar("T", bound=SQLModel)
 
+FALLBACK_TENANT_ID = UUID("00000000-0000-0000-0000-000000000000")
 
-def _jsonable(value: Any) -> Any:
+
+def _jsonable(value: Any, _depth: int = 0) -> Any:  # noqa: ANN401
     """Convert model values to JSON-serializable primitives."""
+    if _depth > 10:
+        return str(value)
     if isinstance(value, UUID):
         return str(value)
-    if isinstance(value, datetime):
+    if isinstance(value, datetime) or isinstance(value, date_type):
         return value.isoformat()
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, bytes):
+        return base64.b64encode(value).decode()
     if isinstance(value, dict):
-        return {key: _jsonable(val) for key, val in value.items()}
+        return {key: _jsonable(val, _depth + 1) for key, val in value.items()}
     if isinstance(value, list):
-        return [_jsonable(item) for item in value]
+        return [_jsonable(item, _depth + 1) for item in value]
     return value
 
 
@@ -85,7 +100,7 @@ class BaseRepository[T: SQLModel]:
     def _model_with_columns(self) -> ModelColumns:
         return cast(ModelColumns, self.model)
 
-    def _apply_tenant_filter(self, query) -> Any:
+    def _apply_tenant_filter(self, query) -> Any:  # noqa: ANN401
         """Apply tenant filter to query if model has tenant_id.
 
         For multi-tenant models, automatically filters to only
@@ -102,14 +117,17 @@ class BaseRepository[T: SQLModel]:
         if tenant_id is None:
             return query
 
-        if hasattr(self.model, "tenant_id"):
+        mapper = inspect(self.model)
+        if mapper is not None and "tenant_id" in {col.key for col in mapper.columns}:
             model_tenant_id = getattr(self.model, "tenant_id", None)
             if model_tenant_id is not None:
                 return query.where(model_tenant_id == tenant_id)
 
         return query
 
-    def _apply_soft_delete_filter(self, query, include_deleted: bool = False) -> Any:
+    def _apply_soft_delete_filter(
+        self, query, include_deleted: bool = False
+    ) -> Any:  # noqa: ANN401
         """Apply soft delete filter to query.
 
         Args:
@@ -141,7 +159,7 @@ class BaseRepository[T: SQLModel]:
         # Add tenant_id if model has it and not already set.
         tenant_id = get_current_tenant_id()
         if tenant_id and hasattr(self.model, "tenant_id"):
-            if "tenant_id" not in data or data["tenant_id"] is None:
+            if "tenant_id" not in data:
                 data["tenant_id"] = tenant_id
 
         # Set timestamps.
@@ -240,6 +258,7 @@ class BaseRepository[T: SQLModel]:
             query = query.order_by(created_at.desc())
 
         # Apply pagination.
+        limit = min(limit, MAX_PAGE_SIZE)
         query = query.offset(skip).limit(limit)
 
         # Execute.
@@ -250,6 +269,10 @@ class BaseRepository[T: SQLModel]:
 
     async def update(self, id: UUID | str, data: dict[str, Any]) -> T | None:
         """Update record by ID.
+
+        Note: concurrent updates to the same record are subject to last-write-wins
+        race conditions. For critical data, use optimistic locking (version column)
+        or SELECT ... FOR UPDATE.
 
         Args:
             id: Record UUID
@@ -293,9 +316,10 @@ class BaseRepository[T: SQLModel]:
         if hard:
             await self.session.delete(database_object)
         else:
-            database_object.deleted_at = datetime.now(UTC)
-            database_object.updated_at = datetime.now(UTC)
-            await self._bury(database_object, id)
+            async with self.session.begin_nested():
+                database_object.deleted_at = datetime.now(UTC)
+                database_object.updated_at = datetime.now(UTC)
+                await self._bury(database_object, id)
 
         await self.session.flush()
 
@@ -314,15 +338,17 @@ class BaseRepository[T: SQLModel]:
 
         tenant_id = getattr(database_object, "tenant_id", None)
         if tenant_id is None:
-            tenant_id = UUID("00000000-0000-0000-0000-000000000000")
+            tenant_id = FALLBACK_TENANT_ID
         record_id = getattr(database_object, "id", id)
 
         if isinstance(record_id, str):
             record_id = UUID(record_id)
+        elif not isinstance(record_id, UUID):
+            record_id = str(record_id)
 
         await GraveyardRepository(self.session).bury(
             model_name=str(self._model_with_columns.__tablename__),
-            record_id=record_id,
+            record_id=record_id,  # type: ignore[arg-type]
             data=data,
             tenant_id=tenant_id,
         )

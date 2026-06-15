@@ -159,7 +159,13 @@ class TwoFactorAuthService:
 
         await self._check_totp_rate_limit(user.id)
 
-        secret = decrypt(user.totp_secret_encrypted)
+        try:
+            secret = decrypt(user.totp_secret_encrypted)
+        except Exception as e:
+            raise TwoFactorError(
+                "TOTP secret corrupted, please re-enroll"
+            ) from e
+
         if not verify_totp(secret, totp_code):
             raise InvalidTOTPError("Invalid TOTP code.")
 
@@ -192,7 +198,11 @@ class TwoFactorAuthService:
         """
         token = secrets.token_urlsafe(32)
         redis = await get_redis()
-        await redis.setex(f"2fa_challenge:{token}", settings.TOTP_CHALLENGE_TTL_SECONDS, str(user.id))
+        await redis.setex(
+            f"2fa:challenge:{token}",
+            settings.TOTP_CHALLENGE_TTL_SECONDS,
+            str(user.id),
+        )
         logger.debug("totp_challenge_issued", user_id=str(user.id))
         return token
 
@@ -220,7 +230,13 @@ class TwoFactorAuthService:
         if not user.totp_secret_encrypted:
             raise TwoFactorError("User has no TOTP secret.")
 
-        secret = decrypt(user.totp_secret_encrypted)
+        try:
+            secret = decrypt(user.totp_secret_encrypted)
+        except Exception as e:
+            raise TwoFactorError(
+                "TOTP secret corrupted, please re-enroll"
+            ) from e
+
         if not verify_totp(secret, totp_code):
             raise InvalidTOTPError("Invalid TOTP code.")
 
@@ -251,6 +267,9 @@ class TwoFactorAuthService:
         user = await self._consume_challenge(challenge_token)
 
         # Find and consume a matching unused recovery code.
+        # NOTE: TotpRecoveryCode does not have a tenant_id field — recovery
+        # codes are tenant-agnostic. Projects requiring tenant isolation
+        # should add a tenant_id column and join through the User model.
         query = select(TotpRecoveryCode).where(
             and_(
                 TotpRecoveryCode.user_id == user.id,  # type: ignore[arg-type]
@@ -303,7 +322,13 @@ class TwoFactorAuthService:
         if not user.totp_secret_encrypted:
             raise TwoFactorError("User has no TOTP secret.")
 
-        secret = decrypt(user.totp_secret_encrypted)
+        try:
+            secret = decrypt(user.totp_secret_encrypted)
+        except Exception as e:
+            raise TwoFactorError(
+                "TOTP secret corrupted, please re-enroll"
+            ) from e
+
         if not verify_totp(secret, totp_code):
             raise InvalidTOTPError("Invalid TOTP code.")
 
@@ -347,7 +372,13 @@ class TwoFactorAuthService:
         if not user.totp_secret_encrypted:
             raise TwoFactorError("User has no TOTP secret.")
 
-        secret = decrypt(user.totp_secret_encrypted)
+        try:
+            secret = decrypt(user.totp_secret_encrypted)
+        except Exception as e:
+            raise TwoFactorError(
+                "TOTP secret corrupted, please re-enroll"
+            ) from e
+
         if not verify_totp(secret, totp_code):
             raise InvalidTOTPError("Invalid TOTP code.")
 
@@ -368,7 +399,7 @@ class TwoFactorAuthService:
             InvalidTOTPError: If challenge is expired or invalid.
         """
         redis = await get_redis()
-        user_id_str = await redis.getdel(f"2fa_challenge:{challenge_token}")
+        user_id_str = await redis.getdel(f"2fa:challenge:{challenge_token}")
 
         if not user_id_str:
             raise InvalidTOTPError("Challenge token expired or invalid.")
@@ -390,9 +421,9 @@ class TwoFactorAuthService:
         redis = await get_redis()
         key = f"totp_attempts:{user_id}"
         count = await redis.incr(key)
-        if count == 1:
-            # Set TTL on first increment.
-            await redis.expire(key, settings.TOTP_RATE_LIMIT_WINDOW)
+        # Always refresh TTL to avoid race condition between INCR and EXPIRE.
+        # Calling EXPIRE unconditionally is idempotent and safe.
+        await redis.expire(key, settings.TOTP_RATE_LIMIT_WINDOW)
         if count > settings.TOTP_MAX_ATTEMPTS:
             logger.warning("totp_rate_limit_exceeded", user_id=str(user_id))
             raise TwoFactorRateLimitError(
@@ -402,18 +433,19 @@ class TwoFactorAuthService:
     async def _prevent_replay(self, user_id: UUID, totp_code: str) -> None:
         """Prevent TOTP code replay within the same time window.
 
-        Stores a used-code marker in Redis for 90 seconds (3 windows).
-        If the marker already exists, the code was already used.
+        Stores a used-code marker in Redis for 90 seconds (3 windows)
+        using an atomic SET NX EX command. If the marker already exists,
+        the code was already used.
 
         Raises:
             InvalidTOTPError: If the code was already used recently.
         """
         redis = await get_redis()
         key = f"totp_used:{user_id}:{totp_code}"
-        was_new = await redis.setnx(key, "1")
-        if not was_new:
+        # Single atomic SET NX EX — no race condition between setnx and expire.
+        result = await redis.set(key, "1", nx=True, ex=settings.TOTP_REPLAY_TTL)
+        if result is None:
             raise InvalidTOTPError("TOTP code has already been used.")
-        await redis.expire(key, settings.TOTP_REPLAY_TTL)
 
     async def _replace_recovery_codes(
         self,
@@ -422,16 +454,19 @@ class TwoFactorAuthService:
     ) -> None:
         """Delete all existing recovery codes and insert new hashed ones.
 
+        Wrapped in a savepoint so the delete-and-insert is atomic.
+
         Args:
             user_id: User whose codes to replace.
             plaintext_codes: New plaintext codes to hash and store.
         """
-        await self._delete_all_recovery_codes(user_id)
-        for code in plaintext_codes:
-            code_hash = generate_password_hash(code)
-            new_code = TotpRecoveryCode(user_id=user_id, code_hash=code_hash)
-            self.session.add(new_code)
-        await self.session.flush()
+        async with self.session.begin_nested():
+            await self._delete_all_recovery_codes(user_id)
+            for code in plaintext_codes:
+                code_hash = generate_password_hash(code)
+                new_code = TotpRecoveryCode(user_id=user_id, code_hash=code_hash)
+                self.session.add(new_code)
+            await self.session.flush()
 
     async def _delete_all_recovery_codes(self, user_id: UUID) -> None:
         """Hard-delete all recovery codes for a user.

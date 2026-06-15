@@ -84,12 +84,14 @@ class UserRepository(SearchMixin, BaseRepository[User]):
         Returns:
             Tuple of (users, total_count)
         """
-        return await self.search_combined(
+        users, total = await self.search_combined(
             query_str=query_str,
             fields=["email", "full_name"],
             skip=skip,
             limit=limit,
         )
+
+        return users, total
 
     async def create_user(
         self,

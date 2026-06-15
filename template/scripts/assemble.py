@@ -10,11 +10,12 @@ import os
 import shutil
 import subprocess
 import sys
+from typing import Any
 
 REPO_URL = "https://github.com/xrhstosmour/containers.git"
 
 
-def run_openssl(*args) -> None:
+def run_openssl(*args: Any) -> None:  # noqa: ANN401
     subprocess.run(
         ["openssl"] + list(args),
         check=True,
@@ -36,7 +37,11 @@ def generate_certs(cert_dir, project_slug) -> None:
         srv_key = os.path.join(cert_dir, "server_key.pem")
         srv_req = os.path.join(cert_dir, "server_request.pem")
         srv_crt = os.path.join(cert_dir, "server_certificate.pem")
-        subj = f"/C=GR/L=Athens/O={project_slug}.self_signed/CN={project_slug}.self_signed.com"
+        subj = (
+            f"/C=GR/L=Athens"
+            f"/O={project_slug}.self_signed"
+            f"/CN={project_slug}.self_signed.com"
+        )
         run_openssl("genrsa", "-out", ca_key, "2048")
         run_openssl(
             "req",
@@ -213,7 +218,8 @@ def main() -> None:
                             print("  Generated htpasswd")
                         else:
                             print(
-                                "  Warning: openssl not available, htpasswd left as placeholder"
+                                "  Warning: openssl not available, "
+                                "htpasswd left as placeholder"
                             )
 
     # Generate self-signed certificates for all services.

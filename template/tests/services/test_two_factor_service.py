@@ -252,7 +252,12 @@ class TestVerifyChallenge:
         valid_code = pyotp.TOTP(secret).now()
 
         with (
-            patch.object(service, "_consume_challenge", new_callable=AsyncMock, return_value=user_with_secret),
+            patch.object(
+                service,
+                "_consume_challenge",
+                new_callable=AsyncMock,
+                return_value=user_with_secret,
+            ),
             patch.object(service, "_check_totp_rate_limit", new_callable=AsyncMock),
             patch.object(service, "_prevent_replay", new_callable=AsyncMock),
         ):
@@ -268,7 +273,12 @@ class TestVerifyChallenge:
     ) -> None:
         """Invalid TOTP code should raise InvalidTOTPError."""
         with (
-            patch.object(service, "_consume_challenge", new_callable=AsyncMock, return_value=user_with_secret),
+            patch.object(
+                service,
+                "_consume_challenge",
+                new_callable=AsyncMock,
+                return_value=user_with_secret,
+            ),
             patch.object(service, "_check_totp_rate_limit", new_callable=AsyncMock),
             pytest.raises(InvalidTOTPError),
         ):
@@ -281,7 +291,9 @@ class TestVerifyChallenge:
     ) -> None:
         """Expired challenge token should raise InvalidTOTPError."""
         mock_consume = AsyncMock()
-        mock_consume.side_effect = InvalidTOTPError("Challenge token expired or invalid.")
+        mock_consume.side_effect = InvalidTOTPError(
+            "Challenge token expired or invalid."
+        )
         with (
             patch.object(service, "_consume_challenge", mock_consume),
             pytest.raises(InvalidTOTPError),
@@ -313,10 +325,22 @@ class TestVerifyChallengeWithRecovery:
         mock_result.scalars.return_value.all.return_value = mock_codes
 
         with (
-            patch.object(service, "_consume_challenge", new_callable=AsyncMock, return_value=user),
-            patch.object(service.session, "execute", new_callable=AsyncMock, return_value=mock_result),
+            patch.object(
+                service,
+                "_consume_challenge",
+                new_callable=AsyncMock,
+                return_value=user,
+            ),
+            patch.object(
+                service.session,
+                "execute",
+                new_callable=AsyncMock,
+                return_value=mock_result,
+            ),
         ):
-            result = await service.verify_challenge_with_recovery("token", recovery_codes[0])
+            result = await service.verify_challenge_with_recovery(
+                "token", recovery_codes[0]
+            )
 
         assert result is user
 
@@ -332,8 +356,18 @@ class TestVerifyChallengeWithRecovery:
         mock_result.scalars.return_value.all.return_value = []
 
         with (
-            patch.object(service, "_consume_challenge", new_callable=AsyncMock, return_value=user),
-            patch.object(service.session, "execute", new_callable=AsyncMock, return_value=mock_result),
+            patch.object(
+                service,
+                "_consume_challenge",
+                new_callable=AsyncMock,
+                return_value=user,
+            ),
+            patch.object(
+                service.session,
+                "execute",
+                new_callable=AsyncMock,
+                return_value=mock_result,
+            ),
             pytest.raises(InvalidTOTPError),
         ):
             await service.verify_challenge_with_recovery("token", "invalid-code")
