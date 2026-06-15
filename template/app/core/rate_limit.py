@@ -46,11 +46,28 @@ class RateLimiter:
     This provides accurate rate limiting across multiple server instances
     while minimizing Redis memory usage.
 
-    The algorithm:
+    The algorithm (executed as an atomic Lua script):
     1. Remove expired entries from the window
     2. Count remaining entries
-    3. If under limit, add new entry
-    4. Return remaining count and retry time
+    3. If under limit, add new entry and return 0 (allowed)
+    4. If over limit, return 1 (rate limited)
+    """
+
+    _RATE_LIMIT_SCRIPT = """
+    local key = KEYS[1]
+    local now = tonumber(ARGV[1])
+    local window = tonumber(ARGV[2])
+    local max_requests = tonumber(ARGV[3])
+    local member = ARGV[4]
+
+    redis.call("ZREMRANGEBYSCORE", key, 0, now - window)
+    local count = redis.call("ZCARD", key)
+    if count < max_requests then
+        redis.call("ZADD", key, now, member)
+        redis.call("EXPIRE", key, window)
+        return 0
+    end
+    return 1
     """
 
     def __init__(
@@ -77,8 +94,8 @@ class RateLimiter:
     async def check_rate_limit(self, identifier: str) -> tuple[bool, int, int]:
         """Check if request is within rate limit.
 
-        Uses Redis MULTI/EXEC for atomic operations to ensure
-        accurate counting across concurrent requests.
+        Uses an atomic Redis Lua script to eliminate the race condition
+        between removal, counting, and insertion across concurrent requests.
 
         Args:
             identifier: Unique identifier (e.g., user_id, api_key, IP)
@@ -92,32 +109,25 @@ class RateLimiter:
         redis_client = await get_redis()
         key = self._make_key(identifier)
         now = time.time()
-        window_start = now - self.window
+        member = f"{now}:{secrets.token_hex(4)}"
 
-        # Use pipeline for atomic operations.
-        pipe = redis_client.pipeline()
+        result = await redis_client.eval(  # type: ignore[misc]
+            self._RATE_LIMIT_SCRIPT,
+            1,
+            key,
+            str(now),
+            str(self.window),
+            str(self.limit),
+            member,
+        )
 
-        # Remove old entries outside the window.
-        pipe.zremrangebyscore(key, 0, window_start)
-
-        # Count current entries in window.
-        pipe.zcard(key)
-
-        # Execute both commands.
-        results = await pipe.execute()
-        current_count = results[1]
-
-        if current_count < self.limit:
-            # Under limit - add new entry.
-            pipe2 = redis_client.pipeline()
-            pipe2.zadd(key, {f"{now}:{secrets.token_hex(4)}": now})
-            pipe2.expire(key, self.window)
-            await pipe2.execute()
-
-            remaining = self.limit - current_count - 1
+        if result == 0:
+            # Allowed. Remaining count requires a separate read.
+            current_count = await redis_client.zcard(key)
+            remaining = max(0, self.limit - current_count)
             return True, remaining, 0
         else:
-            # Over limit - calculate retry time.
+            # Rate limited. Calculate retry time from oldest entry.
             oldest_entries = await redis_client.zrange(key, 0, 0, withscores=True)
             if oldest_entries:
                 oldest_time = oldest_entries[0][1]
