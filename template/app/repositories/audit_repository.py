@@ -121,7 +121,7 @@ class AuditLogRepository(BaseRepository[AuditLog]):
         email: str | None,
         resource_type: str | None = None,
         resource_id: str | None = None,
-        **kwargs,
+        **kwargs: Any,  # noqa: ANN401
     ) -> AuditLog:
         """Log an action performed by a user.
 
@@ -145,7 +145,7 @@ class AuditLogRepository(BaseRepository[AuditLog]):
         tenant_id: str | UUID,
         resource_type: str | None = None,
         resource_id: str | None = None,
-        **kwargs,
+        **kwargs: Any,  # noqa: ANN401
     ) -> AuditLog:
         """Log an action performed by an API key.
 

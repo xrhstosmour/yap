@@ -41,7 +41,12 @@ def add_correlation_id(
     if "correlation_id" not in event_dict:
         import uuid
 
-        event_dict["correlation_id"] = str(uuid.uuid7())
+        try:
+            request_id = str(uuid.uuid7())
+        except AttributeError:
+            # Python < 3.14 fallback
+            request_id = str(uuid.uuid4())
+        event_dict["correlation_id"] = request_id
     return event_dict
 
 
@@ -82,7 +87,10 @@ def rename_event_key(
     Returns:
         Updated event dictionary with 'message' key
     """
-    event_dict["message"] = event_dict.pop("event", "")
+    if "event" in event_dict:
+        event_dict["message"] = event_dict.pop("event")
+    elif "_record" in event_dict:
+        event_dict["message"] = event_dict.pop("_record").get("msg", "")
     return event_dict
 
 
@@ -141,11 +149,18 @@ def setup_logging(log_level: str = "INFO") -> None:
         cache_logger_on_first_use=True,
     )
 
+    # Validate and normalize log level.
+    valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+    if log_level.upper() not in valid_levels:
+        logging.warning("Invalid LOG_LEVEL '%s', defaulting to INFO", log_level)
+        log_level = "INFO"
+    level = getattr(logging, log_level.upper())
+
     # Configure standard library logging.
     logging.basicConfig(
         format="%(message)s",
         stream=sys.stdout,
-        level=getattr(logging, log_level.upper()),
+        level=level,
     )
 
     # Reduce noise from third-party libraries.
@@ -179,9 +194,12 @@ def get_logger(name: str | None = None) -> structlog.stdlib.BoundLogger:
     return logger
 
 
-# Pre-configured loggers for common components.
-api_logger = get_logger("api")
-auth_logger = get_logger("auth")
-db_logger = get_logger("database")
-cache_logger = get_logger("cache")
-task_logger = get_logger("tasks")
+# Note: Pre-configured module-level loggers are intentionally removed.
+# Each module should call get_logger(__name__) itself. This ensures
+# structlog is properly configured via setup_logging() before any
+# logger is created, preventing loggers from being initialized with
+# default (non-structured) configuration.
+#
+# Usage in other modules:
+#   from app.core.logging import get_logger
+#   logger = get_logger(__name__)

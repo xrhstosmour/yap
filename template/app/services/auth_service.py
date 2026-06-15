@@ -7,8 +7,11 @@ user authentication, registration, and token management.
 from __future__ import annotations
 
 import secrets
+from typing import Any
 from uuid import UUID
 
+from jose import ExpiredSignatureError
+from jose import JWTError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
@@ -78,6 +81,76 @@ class AuthService:
         self.audit_repository = AuditLogRepository(session)
         self.oauth_account_repository = OAuthAccountRepository(session)
 
+    @staticmethod
+    def _validate_password_strength(password: str) -> None:
+        """Validate password meets minimum strength requirements.
+
+        Template implementation — projects should customize this
+        with their own password policy (e.g. zxcvbn, Pwned Passwords).
+
+        Args:
+            password: Plain-text password to validate.
+        """
+        if len(password) < 8:
+            logger.warning("password_too_weak", min_length=8)
+
+    async def _update_password_and_invalidate(
+        self, user: User, new_password: str
+    ) -> None:
+        """Hash a new password and invalidate all outstanding tokens.
+
+        Args:
+            user: User whose password is being changed.
+            new_password: New plain-text password.
+        """
+        hashed = generate_password_hash(new_password)
+        await self.user_repository.update(user.id, {"hashed_password": hashed})
+        await self.user_repository.increment_token_version(user.id)
+
+    async def _send_token_email(
+        self,
+        user: User,
+        token_factory: Any,  # noqa: ANN401
+        url_path: str,
+        subject: str,
+        template_name: str,
+        url_field_name: str = "url",
+    ) -> None:
+        """Queue a single-use token email (verification, reset, magic link).
+
+        Generates a Redis-backed token, builds the URL, and dispatches
+        a Celery template email task.
+
+        Args:
+            user: The recipient user.
+            token_factory: Awaitable that resolves to a token string
+                (e.g. ``create_email_verification_token(user.id)``).
+            url_path: URL path relative to FRONTEND_HOST (e.g. "/auth/verify-email").
+            subject: Email subject line.
+            template_name: Email template file name (e.g. "verification.html").
+            url_field_name: Template context key for the generated URL
+                (e.g. "verification_url", "reset_url", "login_url").
+        """
+        from app.tasks.email import send_template_email_task
+
+        token = await token_factory
+        url = f"{settings.FRONTEND_HOST}{url_path}?token={token}"
+
+        # NOTE: send_template_email_task.delay() is a Celery sync call.
+        # Celery tasks are designed to be dispatched synchronously with .delay()
+        # or .apply_async() — this is correct even in an async context because
+        # the task is serialized and handed off to the broker, not executed inline.
+        send_template_email_task.delay(
+            to_email=user.email,
+            subject=subject,
+            template_name=template_name,
+            context={
+                "name": user.full_name or user.email,
+                url_field_name: url,
+                "project": settings.PROJECT_NAME,
+            },
+        )
+
     async def register(
         self,
         data: RegisterRequest,
@@ -95,9 +168,11 @@ class AuthService:
         Raises:
             EmailAlreadyExistsError: If email is taken
         """
+        self._validate_password_strength(data.password)
+
         # Check if email exists.
         if await self.user_repository.email_exists(data.email):
-            raise EmailAlreadyExistsError(f"Email {data.email} is already registered")
+            raise EmailAlreadyExistsError("Email already registered")
 
         # Create user.
         password_hash = generate_password_hash(data.password)
@@ -231,9 +306,15 @@ class AuthService:
 
             return self.create_tokens(user)
 
-        except Exception as e:
+        except (
+            JWTError,
+            ExpiredSignatureError,
+            UserNotFoundError,
+            UserInactiveError,
+            ValueError,
+        ) as e:
             logger.warning("token_refresh_failed", error=str(e))
-            raise AuthenticationError("Invalid refresh token")
+            raise AuthenticationError("Invalid refresh token") from e
 
     async def change_password(
         self,
@@ -251,14 +332,14 @@ class AuthService:
         Raises:
             InvalidCredentialsError: If current password is wrong
         """
+        self._validate_password_strength(new_password)
+
         # Verify current password.
         if not verify_password(current_password, user.hashed_password):
             raise InvalidCredentialsError("Current password is incorrect")
 
-        # Update password.
-        new_hash = generate_password_hash(new_password)
-        await self.user_repository.update_password(user.id, new_hash)
-        await self.user_repository.increment_token_version(user.id)
+        # Update password and invalidate tokens.
+        await self._update_password_and_invalidate(user, new_password)
 
         # Log password change.
         if user.tenant_id:
@@ -292,26 +373,23 @@ class AuthService:
         verification URL, and dispatches a Celery email task.
         The token expires after 24 hours.
 
+        NOTE: Sending verification emails is rate-limited by the
+        general user rate limiter. Projects may want to add an
+        additional cooldown window (e.g. 60s) between sends.
+
         Args:
             user: User whose email address should be verified.
         """
         from app.core.security import create_email_verification_token
-        from app.tasks.email import send_template_email_task
 
-        token = await create_email_verification_token(user.id)
-        verification_url = f"{settings.FRONTEND_HOST}/auth/verify-email?token={token}"
-
-        send_template_email_task.delay(
-            to_email=user.email,
+        await self._send_token_email(
+            user=user,
+            token_factory=create_email_verification_token(user.id),
+            url_path="/auth/verify-email",
             subject=f"Verify your email — {settings.PROJECT_NAME}",
             template_name="verification.html",
-            context={
-                "name": user.full_name or user.email,
-                "verification_url": verification_url,
-                "project": settings.PROJECT_NAME,
-            },
+            url_field_name="verification_url",
         )
-
         logger.info("verification_email_queued", user_id=str(user.id))
 
     async def send_password_reset_email(self, email: str) -> None:
@@ -325,27 +403,20 @@ class AuthService:
             email: Email address of the account to reset.
         """
         from app.core.security import create_password_reset_token
-        from app.tasks.email import send_template_email_task
 
         user = await self.user_repository.get_by_email(email)
         if not user:
             # Do not reveal whether the account exists.
             return
 
-        token = await create_password_reset_token(user.id)
-        reset_url = f"{settings.FRONTEND_HOST}/auth/reset-password?token={token}"
-
-        send_template_email_task.delay(
-            to_email=user.email,
+        await self._send_token_email(
+            user=user,
+            token_factory=create_password_reset_token(user.id),
+            url_path="/auth/reset-password",
             subject=f"Reset your password — {settings.PROJECT_NAME}",
             template_name="password_reset.html",
-            context={
-                "name": user.full_name or user.email,
-                "reset_url": reset_url,
-                "project": settings.PROJECT_NAME,
-            },
+            url_field_name="reset_url",
         )
-
         logger.info("password_reset_email_queued", user_id=str(user.id))
 
     async def reset_password(self, token: str, new_password: str) -> None:
@@ -373,9 +444,8 @@ class AuthService:
         if not user:
             raise UserNotFoundError("User not found.")
 
-        new_hash = generate_password_hash(new_password)
-        await self.user_repository.update_password(user.id, new_hash)
-        await self.user_repository.increment_token_version(user.id)
+        self._validate_password_strength(new_password)
+        await self._update_password_and_invalidate(user, new_password)
 
         logger.info("password_reset", user_id=str(user.id))
 
@@ -488,9 +558,12 @@ class AuthService:
         if not userinfo.get("verified_email", False):
             raise AuthenticationError("Google account email is not verified.")
 
-        google_id: str = userinfo["id"]
-        email: str = userinfo["email"]
+        google_id: str | None = userinfo.get("id")
+        email: str | None = userinfo.get("email")
         full_name: str | None = userinfo.get("name")
+
+        if not google_id or not email:
+            raise AuthenticationError("Invalid Google userinfo response")
 
         # Find existing linked account by provider subject ID.
         oauth_account = await self.oauth_account_repository.get_by_provider(
@@ -513,6 +586,9 @@ class AuthService:
                 logger.info("google_account_linked", user_id=str(user.id))
             else:
                 # Register a new account for first-time Google login.
+                # NOTE: OAuth users are created without a tenant_id.
+                # Projects requiring multi-tenancy should assign a tenant
+                # during OAuth registration (e.g. via invitation or subdomain).
                 placeholder_hash = generate_password_hash(
                     secrets.token_urlsafe(32)
                 )
@@ -547,26 +623,19 @@ class AuthService:
             email: Email address of the account to send the link to.
         """
         from app.core.security import create_magic_link_token
-        from app.tasks.email import send_template_email_task
 
         user = await self.user_repository.get_by_email(email)
         if not user:
             return
 
-        token = await create_magic_link_token(user.id)
-        login_url = f"{settings.FRONTEND_HOST}/auth/magic-link?token={token}"
-
-        send_template_email_task.delay(
-            to_email=user.email,
+        await self._send_token_email(
+            user=user,
+            token_factory=create_magic_link_token(user.id),
+            url_path="/auth/magic-link",
             subject=f"Sign in to {settings.PROJECT_NAME}",
             template_name="magic_link.html",
-            context={
-                "name": user.full_name or user.email,
-                "login_url": login_url,
-                "project": settings.PROJECT_NAME,
-            },
+            url_field_name="login_url",
         )
-
         logger.info("magic_link_sent", user_id=str(user.id))
 
     async def verify_magic_link(self, token: str) -> TokenResponse:

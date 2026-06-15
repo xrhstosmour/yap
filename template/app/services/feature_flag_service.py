@@ -20,6 +20,10 @@ from app.schemas.feature_flag import FeatureFlagUpdate
 logger = get_logger("service.feature_flag")
 
 
+class FeatureFlagServiceError(Exception):
+    """Base exception for feature flag service operations."""
+
+
 class FeatureFlagService:
     """Service for feature flag operations.
 
@@ -84,10 +88,12 @@ class FeatureFlagService:
             Created FeatureFlag
 
         Raises:
-            ValueError: If name already exists
+            FeatureFlagServiceError: If name already exists
         """
         if await self.repository.name_exists(data.name):
-            raise ValueError(f"Feature flag '{data.name}' already exists")
+            raise FeatureFlagServiceError(
+                f"Feature flag '{data.name}' already exists"
+            )
 
         flag = await self.repository.create(
             {

@@ -63,6 +63,9 @@ else
     GLITCHTIP_SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
     REDIS_COMMANDER_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(12))")
     METABASE_READ_ONLY_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")
+    STORAGE_SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+    GOOGLE_CLIENT_SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(24))")
+    SMTP_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")
 
     cp .env.example .env
 
@@ -86,6 +89,9 @@ else
     "${SED_INPLACE[@]}" "s/GLITCHTIP_SECRET_KEY=.*/GLITCHTIP_SECRET_KEY=${GLITCHTIP_SECRET_KEY}/" .env
     "${SED_INPLACE[@]}" "s/REDIS_COMMANDER_PASSWORD=.*/REDIS_COMMANDER_PASSWORD=${REDIS_COMMANDER_PASSWORD}/" .env
     "${SED_INPLACE[@]}" "s/METABASE_READ_ONLY_PASSWORD=.*/METABASE_READ_ONLY_PASSWORD=${METABASE_READ_ONLY_PASSWORD}/" .env
+    "${SED_INPLACE[@]}" "s/STORAGE_SECRET_KEY=.*/STORAGE_SECRET_KEY=${STORAGE_SECRET_KEY}/" .env
+    "${SED_INPLACE[@]}" "s/GOOGLE_CLIENT_SECRET=.*/GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}/" .env
+    "${SED_INPLACE[@]}" "s/SMTP_PASSWORD=.*/SMTP_PASSWORD=${SMTP_PASSWORD}/" .env
 
     "${SED_INPLACE[@]}" "s/SECRET_KEY=.*/SECRET_KEY=your-secret-key/" .env.example
     "${SED_INPLACE[@]}" "s/CRYPTO_KEY=.*/CRYPTO_KEY=your-32-bit-fernet-key==/" .env.example
@@ -152,7 +158,7 @@ if command -v docker >/dev/null 2>&1; then
     if docker compose ps -q 2>/dev/null | grep -q .; then
         warn "Stopping any existing containers, volumes preserved..."
     fi
-    docker compose down 2>/dev/null || true
+    docker compose down -v 2>/dev/null || true
 
     # Pull images first, with retries, to avoid transient Docker Hub failures.
     info "Pulling container images..."
@@ -165,7 +171,7 @@ if command -v docker >/dev/null 2>&1; then
     done
 
     for i in $(seq 1 3); do
-        if docker compose up -d postgresql --force-recreate; then
+        if docker compose up -d postgresql redis --force-recreate; then
             break
         fi
         if [ "$i" -lt 3 ]; then
@@ -193,16 +199,29 @@ if command -v docker >/dev/null 2>&1; then
             uv run --env-file .env python app/initial_data.py || warn "Initial PostgreSQL data seeding failed!"
         fi
 
-        # Start remaining services now that the database is ready.
+        # Start all included services individually so one unhealthy container
+        # does not block the others.  Services that fail (e.g. port conflict in
+        # CI) do not halt the startup; their containers simply won't be running.
         info "Starting remaining services..."
-        for i in $(seq 1 3); do
-            if docker compose up -d --force-recreate; then
-                break
-            fi
-            if [ "$i" -lt 3 ]; then
-                warn "Remaining services start failed ($i/3), retrying in 5 s..."
-                sleep 5
-            fi
+        for svc in $(docker compose config --services 2>/dev/null); do
+            if [ "$svc" = "postgresql" ]; then continue; fi
+            for attempt in 1 2 3; do
+                if docker compose up -d --no-deps "$svc" --force-recreate 2>/dev/null; then
+                    break
+                fi
+                if [ "$attempt" -lt 3 ]; then
+                    warn "Service $svc failed to start ($attempt/3), retrying..."
+                    sleep 5
+                fi
+            done
+        done
+
+        # Wait for containers to report healthy status.
+        info "Waiting for services to become healthy..."
+        for _ in $(seq 1 30); do
+            unhealthy=$(docker compose ps 2>/dev/null | awk 'NR>1 && $5!="healthy" && $5!="running"' | wc -l || echo 0)
+            if [ "$unhealthy" -eq 0 ]; then break; fi
+            sleep 2
         done
     else
         warn "Skipping migrations and seeding..."

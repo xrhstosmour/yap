@@ -51,6 +51,7 @@ class APIKeyService:
         user_id: UUID,
         tenant_id: UUID,
         data: APIKeyCreate,
+        user_email: str | None = None,
     ) -> tuple[APIKey, str]:
         """Create a new API key.
 
@@ -58,6 +59,7 @@ class APIKeyService:
             user_id: User creating the key
             tenant_id: Tenant for the key
             data: API key creation data
+            user_email: Pre-fetched user email for audit logging (avoids N+1)
 
         Returns:
             Tuple of (APIKey, raw_key) where raw_key is shown only once
@@ -66,12 +68,21 @@ class APIKeyService:
         full_key, hashed_key = generate_api_key()
         key_id = generate_api_key_id()
 
+        # Validate expiration bounds.
+        if data.expires_in_days is not None:
+            if data.expires_in_days < 1 or data.expires_in_days > 365:
+                raise ValueError("expires_in_days must be between 1 and 365")
+
         # Calculate expiration.
         expires_at = None
         if data.expires_in_days:
             expires_at = datetime.now(UTC) + timedelta(days=data.expires_in_days)
 
         # Create API key.
+        # NOTE: key_prefix stores the first 12 chars of the raw secret for
+        # identification (Stripe-style). The full key is never stored; only a
+        # bcrypt hash is persisted. The prefix allows users to recognize their
+        # keys in listings without exposing the full secret.
         api_key = await self.apikey_repository.create(
             {
                 "key_id": key_id,
@@ -92,7 +103,7 @@ class APIKeyService:
             action=AuditAction.APIKEY_CREATE,
             user_id=user_id,
             tenant_id=tenant_id,
-            email=None,
+            email=user_email,
             resource_type="api_key",
             resource_id=key_id,
             metadata={"name": data.name},
@@ -165,6 +176,7 @@ class APIKeyService:
         user_id: UUID,
         tenant_id: UUID,
         data: APIKeyUpdate,
+        user_email: str | None = None,
     ) -> APIKey | None:
         """Update an API key.
 
@@ -173,6 +185,7 @@ class APIKeyService:
             user_id: User making the update
             tenant_id: Tenant context
             data: Update data
+            user_email: Pre-fetched user email for audit logging (avoids N+1)
 
         Returns:
             Updated APIKey or None
@@ -200,7 +213,7 @@ class APIKeyService:
                 action=AuditAction.APIKEY_UPDATE,
                 user_id=user_id,
                 tenant_id=tenant_id,
-                email=None,
+                email=user_email,
                 resource_type="api_key",
                 resource_id=str(key_id),
                 changes=update_data,
@@ -213,6 +226,7 @@ class APIKeyService:
         key_id: UUID,
         user_id: UUID,
         tenant_id: UUID,
+        user_email: str | None = None,
     ) -> bool:
         """Revoke an API key.
 
@@ -220,6 +234,7 @@ class APIKeyService:
             key_id: API key ID
             user_id: User revoking the key
             tenant_id: Tenant context
+            user_email: Pre-fetched user email for audit logging (avoids N+1)
 
         Returns:
             True if revoked
@@ -235,7 +250,7 @@ class APIKeyService:
             action=AuditAction.APIKEY_REVOKE,
             user_id=user_id,
             tenant_id=tenant_id,
-            email=None,
+            email=user_email,
             resource_type="api_key",
             resource_id=str(key_id),
         )
@@ -249,6 +264,7 @@ class APIKeyService:
         key_id: UUID,
         user_id: UUID,
         tenant_id: UUID,
+        user_email: str | None = None,
     ) -> bool:
         """Delete an API key (soft delete).
 
@@ -256,6 +272,7 @@ class APIKeyService:
             key_id: API key ID
             user_id: User deleting the key
             tenant_id: Tenant context
+            user_email: Pre-fetched user email for audit logging (avoids N+1)
 
         Returns:
             True if deleted
@@ -271,7 +288,7 @@ class APIKeyService:
             action=AuditAction.APIKEY_DELETE,
             user_id=user_id,
             tenant_id=tenant_id,
-            email=None,
+            email=user_email,
             resource_type="api_key",
             resource_id=str(key_id),
         )

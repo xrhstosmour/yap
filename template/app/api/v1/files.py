@@ -82,11 +82,11 @@ async def get_file_url(
     service = FileService(session)
     try:
         record = await service.get_owned_file(file_id, current_user)
-    except ValueError:
+    except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="File not found.",
-        )
+        ) from e
     url = await service.get_download_url(record)
     thumbnail_url = await service.get_thumbnail_url(record)
     return FileUrlResponse(url=url, thumbnail_url=thumbnail_url)
@@ -107,11 +107,11 @@ async def get_file_metadata(
     service = FileService(session)
     try:
         record = await service.get_owned_file(file_id, current_user)
-    except ValueError:
+    except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="File not found.",
-        )
+        ) from e
     return FileMetadataResponse(
         id=record.id,
         filename=record.filename,
@@ -132,7 +132,10 @@ async def get_file_metadata(
     "/{file_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete a file",
-    description="Soft-delete a file. Purges from storage when reference count reaches zero.",
+    description=(
+        "Soft-delete a file. Purges from storage "
+        "when reference count reaches zero."
+    ),
 )
 async def delete_file(
     file_id: UUID,
@@ -147,8 +150,8 @@ async def delete_file(
     service = FileService(session)
     try:
         await service.delete(file_id, current_user)
-    except ValueError:
+    except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="File not found.",
-        )
+        ) from e

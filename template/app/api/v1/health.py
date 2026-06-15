@@ -128,7 +128,7 @@ async def readiness_check(session: SessionDep) -> MessageResponse:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Not ready",
-        )
+        ) from e
 
 
 @router.get(

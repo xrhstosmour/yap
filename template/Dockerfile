@@ -1,10 +1,11 @@
+# Consider pinning to a digest: python:3.13-alpine@sha256:xxxxx
 FROM python:3.13-alpine AS builder
 
 WORKDIR /app
 
 RUN apk add --no-cache build-base postgresql-dev
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.7.3 /uv /usr/local/bin/uv
 
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-cache --no-install-project
@@ -13,8 +14,8 @@ FROM python:3.13-alpine
 
 WORKDIR /app
 
-RUN apk add --no-cache libpq ca-certificates tzdata \
-    && adduser -D -s /bin/bash appuser
+RUN apk add --no-cache libpq ca-certificates tzdata curl \
+    && adduser -D -s /bin/sh appuser
 
 COPY --from=builder --chown=appuser:appuser /app/.venv /app/.venv
 COPY --chown=appuser:appuser pyproject.toml uv.lock ./
@@ -31,7 +32,7 @@ USER appuser
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import httpx; httpx.get('http://localhost:8000/api/v1/live')" || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD curl -f http://localhost:8000/api/v1/live || exit 1
 
 CMD ["fastapi", "run", "app/main.py", "--host", "0.0.0.0", "--port", "8000"]

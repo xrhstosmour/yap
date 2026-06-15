@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
+import os
 from uuid import UUID
 
 from fastapi import UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
+from app.core.settings import settings
 from app.core.storage import delete_object
 from app.core.storage import get_download_url
 from app.core.storage import upload_file
@@ -16,6 +19,12 @@ from app.models.user import User
 from app.repositories.file_repository import FileRepository
 
 logger = get_logger("service.file")
+
+MAX_UPLOAD_SIZE = 25 * 1024 * 1024  # 25MB
+
+
+class FileServiceError(Exception):
+    """Base exception for file service operations."""
 
 
 class FileService:
@@ -49,11 +58,32 @@ class FileService:
         Returns:
             The created ``File`` record.
         """
-        content = await file.read()
+        # Sanitize filename to prevent path traversal.
+        safe_filename = os.path.basename(file.filename or "untitled")
+        safe_filename = safe_filename.replace("\x00", "")
+
         mimetype = file.content_type or "application/octet-stream"
 
+        # Stream the file in chunks to limit memory usage and compute hash.
+        content = b""
+        hash_sha256 = hashlib.sha256()
+        while True:
+            chunk = await file.read(8192)
+            if not chunk:
+                break
+            content += chunk
+            hash_sha256.update(chunk)
+            if len(content) > MAX_UPLOAD_SIZE:
+                raise FileServiceError(
+                    f"File exceeds maximum size of {MAX_UPLOAD_SIZE} bytes"
+                )
+        content_hash = hash_sha256.hexdigest()
+
         # Dedup check.
-        content_hash = hashlib_content(content)
+        # NOTE: In production, the get_by_content_hash → increment_reference_count
+        # sequence is not atomic. Two concurrent uploads of the same content can
+        # both pass the existence check and create duplicate records. Mitigate
+        # this with a DB-level unique constraint on content_hash or a row lock.
         existing = await self.file_repository.get_by_content_hash(content_hash)
         if existing:
             await self.file_repository.increment_reference_count(content_hash)
@@ -67,16 +97,16 @@ class FileService:
         # Upload to blob storage.
         object_key, _, image_width, image_height, thumbnail_key = await upload_file(
             content=content,
-            filename=file.filename or "untitled",
+            filename=safe_filename,
             mimetype=mimetype,
         )
 
         record = File(
-            filename=file.filename or "untitled",
+            filename=safe_filename,
             mimetype=mimetype,
             size=len(content),
             content_hash=content_hash,
-            bucket="default",  # Managed via settings.STORAGE_BUCKET in core.
+            bucket=settings.STORAGE_BUCKET,
             object_key=object_key,
             thumbnail_object_key=thumbnail_key,
             image_width=image_width,
@@ -102,11 +132,11 @@ class FileService:
         """Get a file owned by the current user.
 
         Raises:
-            ValueError: If the file is not found or not owned by the user.
+            FileServiceError: If the file is not found or not owned by the user.
         """
         record = await self.file_repository.get_owned(file_id, user.id)
         if not record:
-            raise ValueError("File not found.")
+            raise FileServiceError("File not found.")
         return record
 
     async def get_download_url(self, record: File) -> str:
@@ -133,18 +163,20 @@ class FileService:
             user: The authenticated user requesting deletion.
 
         Raises:
-            ValueError: If the file is not found or not owned.
+            FileServiceError: If the file is not found or not owned.
         """
         record = await self.get_owned_file(file_id, user)
         new_count = await self.file_repository.decrement_reference_count(file_id)
 
         if new_count == 0:
-            await delete_object(object_key=record.object_key, bucket=record.bucket)
+            # Delete thumbnail FIRST to avoid orphaned thumbnails if main
+            # delete succeeds but thumbnail delete fails.
             if record.thumbnail_object_key:
                 await delete_object(
                     object_key=record.thumbnail_object_key,
                     bucket=record.bucket,
                 )
+            await delete_object(object_key=record.object_key, bucket=record.bucket)
 
         await self.file_repository.delete(file_id)
 
@@ -155,8 +187,3 @@ class FileService:
         )
 
 
-def hashlib_content(content: bytes) -> str:
-    """Compute SHA-256 hex digest of file content."""
-    import hashlib
-
-    return hashlib.sha256(content).hexdigest()

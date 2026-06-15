@@ -81,7 +81,7 @@ async def register(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
-        )
+        ) from e
 
 
 @router.post(
@@ -109,12 +109,12 @@ async def login(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(e),
             headers={"WWW-Authenticate": "Bearer"},
-        )
+        ) from e
     except UserInactiveError as e:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=str(e),
-        )
+        ) from e
 
     # If 2FA is active, issue a challenge token instead of full tokens.
     if user.is_2fa_enabled:
@@ -155,12 +155,14 @@ async def enroll_2fa(
 
     service = TwoFactorAuthService(session)
     try:
-        _secret, qr_data_url, recovery_codes = await service.begin_enrollment(current_user)
+        _secret, qr_data_url, recovery_codes = (
+            await service.begin_enrollment(current_user)
+        )
     except TwoFactorAlreadyEnabledError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(e),
-        )
+        ) from e
     return TwoFactorEnrollResponse(
         qr_data_url=qr_data_url,
         recovery_codes=recovery_codes,
@@ -193,12 +195,12 @@ async def confirm_2fa(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=str(e),
             headers={"Retry-After": "300"},
-        )
+        ) from e
     except (InvalidTOTPError, TwoFactorError, TwoFactorAlreadyEnabledError) as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
-        )
+        ) from e
 
 
 @router.post(
@@ -242,12 +244,12 @@ async def verify_2fa(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=str(e),
             headers={"Retry-After": "300"},
-        )
+        ) from e
     except (InvalidTOTPError, TwoFactorError) as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(e),
-        )
+        ) from e
 
     return auth_service.create_tokens(user)
 
@@ -277,18 +279,18 @@ async def disable_2fa(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
-        )
+        ) from e
     except TwoFactorRateLimitError as e:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=str(e),
             headers={"Retry-After": "300"},
-        )
+        ) from e
     except (InvalidTOTPError, TwoFactorError) as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
-        )
+        ) from e
 
 
 @router.post(
@@ -311,23 +313,25 @@ async def regenerate_recovery_codes(
 
     service = TwoFactorAuthService(session)
     try:
-        new_codes = await service.regenerate_recovery_codes(current_user, data.totp_code)
+        new_codes = await service.regenerate_recovery_codes(
+            current_user, data.totp_code
+        )
     except TwoFactorNotEnabledError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
-        )
+        ) from e
     except TwoFactorRateLimitError as e:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=str(e),
             headers={"Retry-After": "300"},
-        )
+        ) from e
     except (InvalidTOTPError, TwoFactorError) as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
-        )
+        ) from e
     return RecoveryCodesResponse(recovery_codes=new_codes)
 
 
@@ -350,11 +354,11 @@ async def refresh_token(
 
     try:
         return await service.refresh_tokens(data.refresh_token)
-    except Exception:
+    except AuthenticationError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid refresh token",
-        )
+        ) from exc
 
 
 @router.post(
@@ -384,7 +388,7 @@ async def change_password(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
-        )
+        ) from e
 
 
 @router.get(
@@ -424,6 +428,8 @@ async def send_verification_email(
         )
 
     service = AuthService(session)
+    # NOTE: Consider adding a per-user cooldown between verification email sends
+    # to prevent email flooding abuse.
     await service.send_verification_email(current_user)
 
 
@@ -435,7 +441,10 @@ async def send_verification_email(
 )
 async def verify_email(
     session: SessionDep,
-    token: Annotated[str | None, Query(description="Verification token from email")] = None,
+    token: Annotated[
+        str | None,
+        Query(description="Verification token from email"),
+    ] = None,
 ) -> None:
     """Verify a user's email address.
 
@@ -459,11 +468,11 @@ async def verify_email(
     service = AuthService(session)
     try:
         await service.verify_user(user_id)
-    except UserNotFoundError:
+    except UserNotFoundError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=INVALID_VERIFICATION_TOKEN,
-        )
+        ) from e
 
 
 @router.post(
@@ -714,6 +723,10 @@ async def google_callback(
     creates a local account. Returns YAP JWT tokens on success.
     Returns 400 if the state is invalid or the code exchange fails.
     Returns 403 if the account is inactive.
+
+    The redirect_uri is validated against the value stored in Redis
+    during /google initiation (see auth_service.google_login), which
+    prevents open-redirect attacks via parameter manipulation.
     """
     service = AuthService(session)
     try:

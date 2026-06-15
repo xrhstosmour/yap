@@ -42,10 +42,15 @@ def generate_password_hash(password: str) -> str:
     Returns:
         Bcrypt hash string suitable for storage
 
+    Raises:
+        ValueError: If password exceeds 128 characters (bcrypt truncates at 72 bytes)
+
     Note:
         bcrypt is intentionally slow (cost factor) to resist brute force attacks.
         The default cost factor takes ~250ms per hash on modern hardware.
     """
+    if len(password) > 128:
+        raise ValueError("Password exceeds maximum length of 128 characters")
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 
@@ -69,7 +74,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 # Generated at module load to avoid hardcoded values.
 # Used when user/key is not found to maintain consistent response time.
 # Any valid bcrypt hash works here — the actual value is not a secret.
-DUMMY_PASSWORD_HASH: str = generate_password_hash("dummy")
+DUMMY_PASSWORD_HASH: str = generate_password_hash(secrets.token_urlsafe(32))
 
 
 # JWT Token Management.
@@ -256,6 +261,41 @@ def mask_api_key(key: str) -> str:
     return f"{key[:8]}****"
 
 
+# Rate limiting for token creation to prevent abuse.
+
+
+class TokenRateLimitError(Exception):
+    """Raised when a token creation rate limit is exceeded."""
+
+
+async def _check_token_rate_limit(
+    redis_client, key_prefix: str, user_id: str, cooldown_seconds: int
+) -> None:
+    """Check and enforce a cooldown on token creation per user.
+
+    Uses Redis SET with NX and EX options atomically to create a cooldown
+    key with expiration. If the key already exists, the user must wait
+    before creating another token.
+
+    Args:
+        redis_client: Redis client instance.
+        key_prefix: Prefix for the rate limit key
+            (e.g. "rate_limit:email_verification").
+        user_id: User identifier for the rate limit key.
+        cooldown_seconds: Cooldown duration in seconds.
+
+    Raises:
+        TokenRateLimitError: If a token was recently created for this user.
+    """
+    key = f"rate_limit:{key_prefix}:{user_id}"
+    result = await redis_client.set(key, "1", nx=True, ex=cooldown_seconds)
+    if result is None:
+        raise TokenRateLimitError(
+            f"Token creation rate limited for {key_prefix}. "
+            f"Wait {cooldown_seconds} seconds."
+        )
+
+
 # Single-use Redis-backed token configuration.
 
 # Email verification.
@@ -274,11 +314,16 @@ async def create_email_verification_token(user_id: UUID) -> str:
 
     Returns:
         Opaque URL-safe token string (32 bytes, base64url encoded).
+
+    Raises:
+        TokenRateLimitError: If a token was recently created for this user.
     """
     from app.core.cache import get_redis
 
-    token = secrets.token_urlsafe(32)
     redis = await get_redis()
+    await _check_token_rate_limit(redis, "email_verification", str(user_id), 60)
+
+    token = secrets.token_urlsafe(32)
     key = f"{_EMAIL_VERIFICATION_PREFIX}:{token}"
     await redis.setex(key, settings.EMAIL_VERIFICATION_TOKEN_TTL_SECONDS, str(user_id))
     return token
@@ -326,11 +371,16 @@ async def create_password_reset_token(user_id: UUID) -> str:
 
     Returns:
         Opaque URL-safe token string (32 bytes, base64url encoded).
+
+    Raises:
+        TokenRateLimitError: If a token was recently created for this user.
     """
     from app.core.cache import get_redis
 
-    token = secrets.token_urlsafe(32)
     redis = await get_redis()
+    await _check_token_rate_limit(redis, "password_reset", str(user_id), 60)
+
+    token = secrets.token_urlsafe(32)
     key = f"{_PASSWORD_RESET_PREFIX}:{token}"
     await redis.setex(key, settings.PASSWORD_RESET_TOKEN_TTL_SECONDS, str(user_id))
     return token
@@ -380,11 +430,16 @@ async def create_google_oauth_state(redirect_uri: str) -> str:
 
     Returns:
         Opaque URL-safe state string (32 bytes, base64url encoded).
+
+    Raises:
+        TokenRateLimitError: If a token was recently created for this redirect URI.
     """
     from app.core.cache import get_redis
 
-    state = secrets.token_urlsafe(32)
     redis = await get_redis()
+    await _check_token_rate_limit(redis, "google_oauth_state", redirect_uri, 10)
+
+    state = secrets.token_urlsafe(32)
     key = f"{_GOOGLE_OAUTH_STATE_PREFIX}:{state}"
     await redis.setex(key, settings.GOOGLE_OAUTH_STATE_TTL_SECONDS, redirect_uri)
     return state
@@ -513,11 +568,16 @@ async def create_magic_link_token(user_id: UUID) -> str:
 
     Returns:
         Opaque URL-safe token string (32 bytes, base64url encoded).
+
+    Raises:
+        TokenRateLimitError: If a token was recently created for this user.
     """
     from app.core.cache import get_redis
 
-    token = secrets.token_urlsafe(32)
     redis = await get_redis()
+    await _check_token_rate_limit(redis, "magic_link", str(user_id), 30)
+
+    token = secrets.token_urlsafe(32)
     key = f"{_MAGIC_LINK_PREFIX}:{token}"
     await redis.setex(key, settings.MAGIC_LINK_TOKEN_TTL_SECONDS, str(user_id))
     return token

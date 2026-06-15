@@ -25,7 +25,7 @@ def process_outbox(self) -> dict:
         from app.database import async_session_factory
         from app.models.outbox import Outbox
 
-        async def _run():
+        async def _run() -> tuple[int, int]:
             processed = 0
             failed = 0
 

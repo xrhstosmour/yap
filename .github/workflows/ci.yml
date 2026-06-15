@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -19,23 +20,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - name: Render templates for CI
+      - name: Generate project via copier
         run: |
-          shopt -s globstar
-          for f in $(find . -name '*.template' ! -name '.env.example.template' ! -name 'docker-compose.yml.template'); do
-            cp "$f" "${f%.template}"
-          done
-          find . -name '*.py' -o -name '*.toml' -o -name '*.md' | xargs -I{} sed -i 's/{{ project_slug }}/yap/g' {}
-          find . -name '*.py' -o -name '*.toml' -o -name '*.md' | xargs -I{} sed -i 's/{{ project_name }}/yap/g' {}
-          find . -name '*.py' -o -name '*.toml' -o -name '*.md' | xargs -I{} sed -i 's/{{ first_superuser_full_name }}/Admin/g' {}
-          find . -name '*.py' -o -name '*.toml' -o -name '*.md' | xargs -I{} sed -i 's/{{ description }}/A production-ready FastAPI backend template/g' {}
-          find . -name '*.py' -o -name '*.toml' | xargs -I{} sed -i 's/{{ author_name }}/Christos Mourtogiannis/g' {}
-          find . -name '*.py' -o -name '*.toml' | xargs -I{} sed -i 's/{{ author_email }}/c.mourtogiannis@gmail.com/g' {}
+          pip install copier
+          python3 -c "
+          from copier import run_copy
+          run_copy(
+              src_path='${{ github.workspace }}',
+              dst_path='.',
+              data={
+                  'project_name': 'yap',
+                  'project_slug': 'yap',
+                  'author_name': 'Christos Mourtogiannis',
+                  'author_email': 'c.mourtogiannis@gmail.com',
+                  'first_superuser_full_name': 'Admin',
+                  'description': 'A production-ready FastAPI backend template',
+              },
+              defaults=True,
+              overwrite=True,
+              unsafe=True,
+              skip_tasks=True,
+          )
+          "
       - run: uv sync --extra dev
       - run: uv run ruff check app/ tests/
       - run: uv run ruff format app/ tests/
       - run: uv run ruff format --check app/ tests/
       - run: uv run mypy app/ --config-file mypy-ci.toml
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        if: github.event_name == 'pull_request'
+        with:
+          allow-ghsas: GHSA-69fq-xp46-6x23
 
   test:
     needs: lint
@@ -43,126 +59,54 @@ jobs:
     defaults:
       run:
         working-directory: template
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: app
-          POSTGRES_PASSWORD: testpass
-          POSTGRES_DB: testdb
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 5
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 5
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - name: Render templates for CI
+      - name: Generate project via copier
         run: |
-          shopt -s globstar
-          for f in $(find . -name '*.template' ! -name '.env.example.template' ! -name 'docker-compose.yml.template'); do
-            cp "$f" "${f%.template}"
-          done
-          find . -name '*.py' -o -name '*.toml' -o -name '*.md' | xargs -I{} sed -i 's/{{ project_slug }}/yap/g' {}
-          find . -name '*.py' -o -name '*.toml' -o -name '*.md' | xargs -I{} sed -i 's/{{ project_name }}/yap/g' {}
-          find . -name '*.py' -o -name '*.toml' -o -name '*.md' | xargs -I{} sed -i 's/{{ first_superuser_full_name }}/Admin/g' {}
-          find . -name '*.py' -o -name '*.toml' -o -name '*.md' | xargs -I{} sed -i 's/{{ description }}/A production-ready FastAPI backend template/g' {}
-          find . -name '*.py' -o -name '*.toml' | xargs -I{} sed -i 's/{{ author_name }}/Christos Mourtogiannis/g' {}
-          find . -name '*.py' -o -name '*.toml' | xargs -I{} sed -i 's/{{ author_email }}/c.mourtogiannis@gmail.com/g' {}
-          echo "SECRET_KEY=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')" >> $GITHUB_ENV
-          echo "CRYPTO_KEY=$(python3 -c 'import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())')" >> $GITHUB_ENV
-          echo "RABBITMQ_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')" >> $GITHUB_ENV
-          echo "FIRST_SUPERUSER_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')" >> $GITHUB_ENV
-      - run: uv sync --extra dev
-      - run: uv run pytest tests/ -v --tb=short --cov=app --cov-report=xml
+          pip install copier
+          python3 -c "
+          from copier import run_copy
+          run_copy(
+              src_path='${{ github.workspace }}',
+              dst_path='.',
+              data={
+                  'project_name': 'yap',
+                  'project_slug': 'yap',
+                  'author_name': 'Christos Mourtogiannis',
+                  'author_email': 'c.mourtogiannis@gmail.com',
+                  'first_superuser_full_name': 'Admin',
+                  'description': 'A production-ready FastAPI backend template',
+              },
+              defaults=True,
+              overwrite=True,
+              unsafe=True,
+              skip_tasks=False,
+          )
+          "
+      # Source the .env generated by setup.sh, then run tests.
+      # .env values are overridden where needed for test-specific database.
+      - run: |
+          set -a
+          source .env 2>/dev/null || true
+          set +a
+          uv run pytest tests/ -v --tb=short --cov=app --cov-report=xml
         env:
-          POSTGRESQL_SERVER: localhost
-          POSTGRESQL_PORT: 5432
-          POSTGRESQL_USER: app
-          POSTGRESQL_PASSWORD: testpass
           POSTGRESQL_DATABASE: testdb
-          REDIS_HOST: localhost
-          REDIS_PORT: 6379
+          ENVIRONMENT: local
+      - name: Run smoke test
+        run: |
+          set -a
+          source .env 2>/dev/null || true
+          set +a
+          uv run pytest tests/test_startup.py::test_api_smoke -v --tb=short
+        env:
+          POSTGRESQL_DATABASE: testdb
           ENVIRONMENT: local
       - uses: codecov/codecov-action@v5
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
         with:
           files: ./coverage.xml
-
-  smoke:
-    needs: test
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: template
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: app
-          POSTGRES_PASSWORD: testpass
-          POSTGRES_DB: testdb
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 5
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 5
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-      - name: Render templates for CI
-        run: |
-          shopt -s globstar
-          for f in $(find . -name '*.template' ! -name '.env.example.template' ! -name 'docker-compose.yml.template'); do
-            cp "$f" "${f%.template}"
-          done
-          find . -name '*.py' -o -name '*.toml' -o -name '*.md' | xargs -I{} sed -i 's/{{ project_slug }}/yap/g' {}
-          find . -name '*.py' -o -name '*.toml' -o -name '*.md' | xargs -I{} sed -i 's/{{ project_name }}/yap/g' {}
-          find . -name '*.py' -o -name '*.toml' | xargs -I{} sed -i 's/{{ author_name }}/Christos Mourtogiannis/g' {}
-          find . -name '*.py' -o -name '*.toml' | xargs -I{} sed -i 's/{{ author_email }}/c.mourtogiannis@gmail.com/g' {}
-          echo "SECRET_KEY=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')" >> $GITHUB_ENV
-          echo "CRYPTO_KEY=$(python3 -c 'import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())')" >> $GITHUB_ENV
-          echo "RABBITMQ_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')" >> $GITHUB_ENV
-          echo "FIRST_SUPERUSER_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')" >> $GITHUB_ENV
-      - run: uv sync --extra dev
-      - name: Run smoke test (server boot + auth flow)
-        run: uv run pytest tests/test_startup.py::test_api_smoke -v --tb=short
-        env:
-          SECRET_KEY: "${{ env.SECRET_KEY }}"
-          CRYPTO_KEY: "${{ env.CRYPTO_KEY }}"
-          RABBITMQ_PASSWORD: "${{ env.RABBITMQ_PASSWORD }}"
-          FIRST_SUPERUSER_PASSWORD: "${{ env.FIRST_SUPERUSER_PASSWORD }}"
-          POSTGRESQL_SERVER: localhost
-          POSTGRESQL_PORT: 5432
-          POSTGRESQL_USER: app
-          POSTGRESQL_PASSWORD: testpass
-          POSTGRESQL_DATABASE: testdb
-          REDIS_HOST: localhost
-          REDIS_PORT: 6379
-          ENVIRONMENT: local
 
   security:
     needs: lint
@@ -174,5 +118,5 @@ jobs:
         with:
           scan-type: fs
           scan-ref: template
-          severity: CRITICAL,HIGH
+          severity: CRITICAL,HIGH,MEDIUM
           exit-code: 1

@@ -15,6 +15,8 @@ from fastapi import HTTPException
 from fastapi import Request
 from fastapi import status
 from fastapi.security import OAuth2PasswordBearer
+from jose import ExpiredSignatureError
+from jose import JWTError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
@@ -78,11 +80,11 @@ async def get_current_user(
                 detail="Invalid token",
             )
 
-    except Exception:
+    except (JWTError, ExpiredSignatureError) as e:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Could not validate credentials",
-        )
+        ) from e
 
     user_repository = UserRepository(session)
     user = await user_repository.get(UUID(user_id))
@@ -226,7 +228,7 @@ async def get_optional_current_user(
         if not user_id:
             return None
 
-    except Exception:
+    except (JWTError, ExpiredSignatureError):
         return None
 
     user_repository = UserRepository(session)

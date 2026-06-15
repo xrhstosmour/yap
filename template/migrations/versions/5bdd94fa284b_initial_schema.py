@@ -10,6 +10,7 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 import sqlmodel
+from sqlmodel.sql.sqltypes import AutoString
 
 
 # revision identifiers, used by Alembic.
@@ -27,68 +28,153 @@ def upgrade() -> None:
     sa.Column('updated_at', sa.DateTime(), nullable=False),
     sa.Column('deleted_at', sa.DateTime(), nullable=True),
     sa.Column('tenant_id', sa.Uuid(), nullable=True),
-    sa.Column('name', sqlmodel.sql.sqltypes.AutoString(length=255), nullable=False),
+    sa.Column('name', AutoString(length=255), nullable=False),
     sa.Column('state', sa.Boolean(), nullable=False),
-    sa.Column('description', sqlmodel.sql.sqltypes.AutoString(length=500), nullable=True),
+    sa.Column('description', AutoString(length=500), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
-    op.create_index(op.f('ix_feature_flags_created_at'), 'feature_flags', ['created_at'], unique=False)
-    op.create_index(op.f('ix_feature_flags_deleted_at'), 'feature_flags', ['deleted_at'], unique=False)
-    op.create_index(op.f('ix_feature_flags_id'), 'feature_flags', ['id'], unique=False)
-    op.create_index(op.f('ix_feature_flags_name'), 'feature_flags', ['name'], unique=True)
-    op.create_index(op.f('ix_feature_flags_tenant_id'), 'feature_flags', ['tenant_id'], unique=False)
+    op.create_index(
+        op.f('ix_feature_flags_created_at'),
+        'feature_flags',
+        ['created_at'],
+        unique=False,
+    )
+    op.create_index(
+        op.f('ix_feature_flags_deleted_at'),
+        'feature_flags',
+        ['deleted_at'],
+        unique=False,
+    )
+    op.create_index(
+        op.f('ix_feature_flags_id'),
+        'feature_flags',
+        ['id'],
+        unique=False,
+    )
+    op.create_index(
+        op.f('ix_feature_flags_name'),
+        'feature_flags',
+        ['name'],
+        unique=True,
+    )
+    op.create_index(
+        op.f('ix_feature_flags_tenant_id'),
+        'feature_flags',
+        ['tenant_id'],
+        unique=False,
+    )
     op.create_table('tenants',
     sa.Column('id', sa.Uuid(), nullable=False),
     sa.Column('created_at', sa.DateTime(), nullable=False),
     sa.Column('updated_at', sa.DateTime(), nullable=False),
     sa.Column('deleted_at', sa.DateTime(), nullable=True),
     sa.Column('tenant_id', sa.Uuid(), nullable=True),
-    sa.Column('name', sqlmodel.sql.sqltypes.AutoString(length=255), nullable=False),
-    sa.Column('slug', sqlmodel.sql.sqltypes.AutoString(length=100), nullable=False),
+    sa.Column('name', AutoString(length=255), nullable=False),
+    sa.Column('slug', AutoString(length=100), nullable=False),
     sa.Column('is_active', sa.Boolean(), nullable=False),
     sa.Column('settings', sa.JSON(), nullable=False),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('slug')
     )
-    op.create_index(op.f('ix_tenants_created_at'), 'tenants', ['created_at'], unique=False)
-    op.create_index(op.f('ix_tenants_deleted_at'), 'tenants', ['deleted_at'], unique=False)
-    op.create_index(op.f('ix_tenants_id'), 'tenants', ['id'], unique=False)
-    op.create_index(op.f('ix_tenants_tenant_id'), 'tenants', ['tenant_id'], unique=False)
+    op.create_index(
+        op.f('ix_tenants_created_at'),
+        'tenants',
+        ['created_at'],
+        unique=False,
+    )
+    op.create_index(
+        op.f('ix_tenants_deleted_at'),
+        'tenants',
+        ['deleted_at'],
+        unique=False,
+    )
+    op.create_index(
+        op.f('ix_tenants_id'),
+        'tenants',
+        ['id'],
+        unique=False,
+    )
+    op.create_index(
+        op.f('ix_tenants_tenant_id'),
+        'tenants',
+        ['tenant_id'],
+        unique=False,
+    )
     op.create_table('audit_logs',
     sa.Column('id', sa.Uuid(), nullable=False),
     sa.Column('created_at', sa.DateTime(), nullable=False),
     sa.Column('updated_at', sa.DateTime(), nullable=False),
     sa.Column('deleted_at', sa.DateTime(), nullable=True),
-    sa.Column('action', sqlmodel.sql.sqltypes.AutoString(length=50), nullable=False),
-    sa.Column('actor_type', sqlmodel.sql.sqltypes.AutoString(length=20), nullable=False),
-    sa.Column('actor_id', sqlmodel.sql.sqltypes.AutoString(length=100), nullable=False),
-    sa.Column('actor_email', sqlmodel.sql.sqltypes.AutoString(length=255), nullable=True),
-    sa.Column('resource_type', sqlmodel.sql.sqltypes.AutoString(length=50), nullable=True),
-    sa.Column('resource_id', sqlmodel.sql.sqltypes.AutoString(length=100), nullable=True),
+    sa.Column('action', AutoString(length=50), nullable=False),
+    sa.Column('actor_type', AutoString(length=20), nullable=False),
+    sa.Column('actor_id', AutoString(length=100), nullable=False),
+    sa.Column('actor_email', AutoString(length=255), nullable=True),
+    sa.Column('resource_type', AutoString(length=50), nullable=True),
+    sa.Column('resource_id', AutoString(length=100), nullable=True),
     sa.Column('changes', sa.JSON(), nullable=False),
     sa.Column('extra_data', sa.JSON(), nullable=False),
-    sa.Column('status', sqlmodel.sql.sqltypes.AutoString(length=20), nullable=False),
-    sa.Column('error_message', sqlmodel.sql.sqltypes.AutoString(length=1000), nullable=True),
+    sa.Column('status', AutoString(length=20), nullable=False),
+    sa.Column('error_message', AutoString(length=1000), nullable=True),
     sa.Column('tenant_id', sa.Uuid(), nullable=False),
     sa.ForeignKeyConstraint(['tenant_id'], ['tenants.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
-    op.create_index(op.f('ix_audit_logs_action'), 'audit_logs', ['action'], unique=False)
-    op.create_index(op.f('ix_audit_logs_actor_id'), 'audit_logs', ['actor_id'], unique=False)
-    op.create_index(op.f('ix_audit_logs_created_at'), 'audit_logs', ['created_at'], unique=False)
-    op.create_index(op.f('ix_audit_logs_deleted_at'), 'audit_logs', ['deleted_at'], unique=False)
-    op.create_index(op.f('ix_audit_logs_id'), 'audit_logs', ['id'], unique=False)
-    op.create_index(op.f('ix_audit_logs_resource_id'), 'audit_logs', ['resource_id'], unique=False)
-    op.create_index(op.f('ix_audit_logs_resource_type'), 'audit_logs', ['resource_type'], unique=False)
-    op.create_index(op.f('ix_audit_logs_tenant_id'), 'audit_logs', ['tenant_id'], unique=False)
+    op.create_index(
+        op.f('ix_audit_logs_action'),
+        'audit_logs',
+        ['action'],
+        unique=False,
+    )
+    op.create_index(
+        op.f('ix_audit_logs_actor_id'),
+        'audit_logs',
+        ['actor_id'],
+        unique=False,
+    )
+    op.create_index(
+        op.f('ix_audit_logs_created_at'),
+        'audit_logs',
+        ['created_at'],
+        unique=False,
+    )
+    op.create_index(
+        op.f('ix_audit_logs_deleted_at'),
+        'audit_logs',
+        ['deleted_at'],
+        unique=False,
+    )
+    op.create_index(
+        op.f('ix_audit_logs_id'),
+        'audit_logs',
+        ['id'],
+        unique=False,
+    )
+    op.create_index(
+        op.f('ix_audit_logs_resource_id'),
+        'audit_logs',
+        ['resource_id'],
+        unique=False,
+    )
+    op.create_index(
+        op.f('ix_audit_logs_resource_type'),
+        'audit_logs',
+        ['resource_type'],
+        unique=False,
+    )
+    op.create_index(
+        op.f('ix_audit_logs_tenant_id'),
+        'audit_logs',
+        ['tenant_id'],
+        unique=False,
+    )
     op.create_table('users',
     sa.Column('id', sa.Uuid(), nullable=False),
     sa.Column('created_at', sa.DateTime(), nullable=False),
     sa.Column('updated_at', sa.DateTime(), nullable=False),
     sa.Column('deleted_at', sa.DateTime(), nullable=True),
-    sa.Column('email', sqlmodel.sql.sqltypes.AutoString(length=255), nullable=False),
-    sa.Column('full_name', sqlmodel.sql.sqltypes.AutoString(length=255), nullable=True),
-    sa.Column('hashed_password', sqlmodel.sql.sqltypes.AutoString(length=255), nullable=False),
+    sa.Column('email', AutoString(length=255), nullable=False),
+    sa.Column('full_name', AutoString(length=255), nullable=True),
+    sa.Column('hashed_password', AutoString(length=255), nullable=False),
     sa.Column('is_active', sa.Boolean(), nullable=False),
     sa.Column('is_superuser', sa.Boolean(), nullable=False),
     sa.Column('is_verified', sa.Boolean(), nullable=False),
@@ -97,21 +183,46 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['tenant_id'], ['tenants.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
-    op.create_index(op.f('ix_users_created_at'), 'users', ['created_at'], unique=False)
-    op.create_index(op.f('ix_users_deleted_at'), 'users', ['deleted_at'], unique=False)
-    op.create_index(op.f('ix_users_email'), 'users', ['email'], unique=True)
-    op.create_index(op.f('ix_users_id'), 'users', ['id'], unique=False)
-    op.create_index(op.f('ix_users_tenant_id'), 'users', ['tenant_id'], unique=False)
+    op.create_index(
+        op.f('ix_users_created_at'),
+        'users',
+        ['created_at'],
+        unique=False,
+    )
+    op.create_index(
+        op.f('ix_users_deleted_at'),
+        'users',
+        ['deleted_at'],
+        unique=False,
+    )
+    op.create_index(
+        op.f('ix_users_email'),
+        'users',
+        ['email'],
+        unique=True,
+    )
+    op.create_index(
+        op.f('ix_users_id'),
+        'users',
+        ['id'],
+        unique=False,
+    )
+    op.create_index(
+        op.f('ix_users_tenant_id'),
+        'users',
+        ['tenant_id'],
+        unique=False,
+    )
     op.create_table('api_keys',
     sa.Column('id', sa.Uuid(), nullable=False),
     sa.Column('created_at', sa.DateTime(), nullable=False),
     sa.Column('updated_at', sa.DateTime(), nullable=False),
     sa.Column('deleted_at', sa.DateTime(), nullable=True),
-    sa.Column('key_id', sqlmodel.sql.sqltypes.AutoString(length=100), nullable=False),
-    sa.Column('key_hash', sqlmodel.sql.sqltypes.AutoString(length=255), nullable=False),
-    sa.Column('key_prefix', sqlmodel.sql.sqltypes.AutoString(length=20), nullable=False),
-    sa.Column('name', sqlmodel.sql.sqltypes.AutoString(length=255), nullable=False),
-    sa.Column('description', sqlmodel.sql.sqltypes.AutoString(length=500), nullable=True),
+    sa.Column('key_id', AutoString(length=100), nullable=False),
+    sa.Column('key_hash', AutoString(length=255), nullable=False),
+    sa.Column('key_prefix', AutoString(length=20), nullable=False),
+    sa.Column('name', AutoString(length=255), nullable=False),
+    sa.Column('description', AutoString(length=500), nullable=True),
     sa.Column('scopes', sa.JSON(), nullable=False),
     sa.Column('is_active', sa.Boolean(), nullable=False),
     sa.Column('last_used_at', sa.DateTime(), nullable=True),
@@ -122,12 +233,42 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
-    op.create_index(op.f('ix_api_keys_created_at'), 'api_keys', ['created_at'], unique=False)
-    op.create_index(op.f('ix_api_keys_deleted_at'), 'api_keys', ['deleted_at'], unique=False)
-    op.create_index(op.f('ix_api_keys_id'), 'api_keys', ['id'], unique=False)
-    op.create_index(op.f('ix_api_keys_key_id'), 'api_keys', ['key_id'], unique=True)
-    op.create_index(op.f('ix_api_keys_tenant_id'), 'api_keys', ['tenant_id'], unique=False)
-    op.create_index(op.f('ix_api_keys_user_id'), 'api_keys', ['user_id'], unique=False)
+    op.create_index(
+        op.f('ix_api_keys_created_at'),
+        'api_keys',
+        ['created_at'],
+        unique=False,
+    )
+    op.create_index(
+        op.f('ix_api_keys_deleted_at'),
+        'api_keys',
+        ['deleted_at'],
+        unique=False,
+    )
+    op.create_index(
+        op.f('ix_api_keys_id'),
+        'api_keys',
+        ['id'],
+        unique=False,
+    )
+    op.create_index(
+        op.f('ix_api_keys_key_id'),
+        'api_keys',
+        ['key_id'],
+        unique=True,
+    )
+    op.create_index(
+        op.f('ix_api_keys_tenant_id'),
+        'api_keys',
+        ['tenant_id'],
+        unique=False,
+    )
+    op.create_index(
+        op.f('ix_api_keys_user_id'),
+        'api_keys',
+        ['user_id'],
+        unique=False,
+    )
     # ### end Alembic commands ###
 
 

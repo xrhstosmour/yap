@@ -8,11 +8,9 @@ lifecycle for automatic tenant filtering.
 from __future__ import annotations
 
 from contextvars import ContextVar
-from typing import TYPE_CHECKING
 from uuid import UUID
 
-if TYPE_CHECKING:
-    pass
+from starlette.responses import Response
 
 # Context variable to store current tenant ID.
 _current_tenant_id: ContextVar[UUID | None] = ContextVar(
@@ -109,7 +107,7 @@ class TenantContextMiddleware:
     tenant context for the duration of the request.
     """
 
-    async def __call__(self, request, call_next):
+    async def __call__(self, request, call_next) -> Response:
         """Process request with tenant context.
 
         Extracts tenant ID from authentication credentials
@@ -128,4 +126,4 @@ class TenantContextMiddleware:
             )
             response = await call_next(request)
 
-        return response
+        return response  # type: ignore[no-any-return]

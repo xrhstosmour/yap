@@ -13,7 +13,7 @@ from typing import Any
 from app.core.settings import settings
 
 
-def _s3_client() -> Any:
+def _s3_client() -> Any:  # noqa: ANN401
     """Create a boto3 S3 client configured for MinIO or cloud S3."""
     import boto3
 

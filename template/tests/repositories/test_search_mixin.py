@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 import pytest
@@ -58,10 +59,10 @@ class TestSearchMixin:
         """
         repository = RepositoryUnderTest(session)
 
-        async def _mock_search_fts(**_kwargs):
+        async def _mock_search_fts(**_kwargs: Any):  # noqa: ANN401
             return ["fts"], 1
 
-        async def _mock_search_trigram(**_kwargs):
+        async def _mock_search_trigram(**_kwargs: Any):  # noqa: ANN401
             return ["trigram"], 1
 
         monkeypatch.setattr(repository, "search_fts", _mock_search_fts)
@@ -90,10 +91,10 @@ class TestSearchMixin:
         """
         repository = RepositoryUnderTest(session)
 
-        async def _mock_search_fts(**_kwargs):
+        async def _mock_search_fts(**_kwargs: Any):  # noqa: ANN401
             return ["fts"], 1
 
-        async def _mock_search_trigram(**_kwargs):
+        async def _mock_search_trigram(**_kwargs: Any):  # noqa: ANN401
             return ["trigram"], 1
 
         monkeypatch.setattr(repository, "search_fts", _mock_search_fts)
@@ -250,3 +251,83 @@ class TestSearchMixin:
 
         assert total == 5
         assert len(records) == 2
+
+    @pytest.mark.anyio
+    async def test_search_fts_raises_valueerror_for_empty_fields(
+        self, session
+    ) -> None:
+        """Ensure search_fts() raises ValueError when fields list is empty.
+
+        Args:
+            session: Async database session fixture.
+
+        Returns:
+            None.
+        """
+        repository = RepositoryUnderTest(session)
+
+        with pytest.raises(ValueError, match="at least one model attribute"):
+            await repository.search_fts(
+                query_str="anything",
+                fields=[],
+            )
+
+    @pytest.mark.anyio
+    async def test_search_fts_raises_valueerror_for_no_valid_fields(
+        self, session
+    ) -> None:
+        """Ensure search_fts() raises ValueError when no field exists on model.
+
+        Args:
+            session: Async database session fixture.
+
+        Returns:
+            None.
+        """
+        repository = RepositoryUnderTest(session)
+
+        with pytest.raises(ValueError, match="No valid searchable fields"):
+            await repository.search_fts(
+                query_str="anything",
+                fields=["nonexistent_field"],
+            )
+
+    @pytest.mark.anyio
+    async def test_search_trigram_raises_valueerror_for_empty_fields(
+        self, session
+    ) -> None:
+        """Ensure search_trigram() raises ValueError when fields list is empty.
+
+        Args:
+            session: Async database session fixture.
+
+        Returns:
+            None.
+        """
+        repository = RepositoryUnderTest(session)
+
+        with pytest.raises(ValueError, match="at least one model attribute"):
+            await repository.search_trigram(
+                query_str="anything",
+                fields=[],
+            )
+
+    @pytest.mark.anyio
+    async def test_search_trigram_raises_valueerror_for_no_valid_fields(
+        self, session
+    ) -> None:
+        """Ensure search_trigram() raises ValueError when no field exists on model.
+
+        Args:
+            session: Async database session fixture.
+
+        Returns:
+            None.
+        """
+        repository = RepositoryUnderTest(session)
+
+        with pytest.raises(ValueError, match="No valid searchable fields"):
+            await repository.search_trigram(
+                query_str="anything",
+                fields=["nonexistent_field"],
+            )

@@ -19,7 +19,7 @@ def _auth_service(session: AsyncSession) -> AuthService:
     return AuthService(cast(AsyncSession, session))
 
 
-async def _create_superuser(auth_service: AuthService):
+async def _create_superuser(auth_service: AuthService) -> None:
     return await auth_service.user_repository.create_user(
         email=f"admin-{uuid7()}@{{ project_slug }}.com",
         password_hash=generate_password_hash("password123"),
@@ -39,14 +39,14 @@ class TestUsersList:
     """Tests for GET /api/v1/users."""
 
     @pytest.mark.usefixtures("override_get_async_session")
-    async def test_list_users_unauthenticated(self, client: AsyncClient):
+    async def test_list_users_unauthenticated(self, client: AsyncClient) -> None:
         """List users should require authentication."""
         response = await client.get("/api/v1/users")
 
         assert response.status_code == 401
 
     @pytest.mark.usefixtures("override_get_async_session")
-    async def test_list_users_authenticated(self, client: AsyncClient, session):
+    async def test_list_users_authenticated(self, client: AsyncClient, session) -> None:
         """List users should succeed with authentication."""
         auth_service = _auth_service(session)
         await auth_service.register(
@@ -110,7 +110,7 @@ class TestUsersRead:
         assert data["email"] == "user@{{ project_slug }}.com"
 
     @pytest.mark.usefixtures("override_get_async_session")
-    async def test_read_user_not_found(self, client: AsyncClient, session):
+    async def test_read_user_not_found(self, client: AsyncClient, session) -> None:
         """Read non-existent user should return 404."""
         auth_service = _auth_service(session)
         superuser = await _create_superuser(auth_service)

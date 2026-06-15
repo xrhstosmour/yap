@@ -12,10 +12,11 @@ from typing import Union
 import sqlalchemy as sa
 import sqlmodel
 from alembic import op
+from sqlmodel.sql.sqltypes import AutoString
 
 # Revision identifiers, used by Alembic.
 revision: str = "d2f4a6b8c0e1"
-down_revision: Union[str, None] = "c9d1e3f5a7b2"
+down_revision: Union[str, None] = "f1e2d3c4b5a6"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -24,13 +25,18 @@ def upgrade() -> None:
     # Add 2FA columns to users table.
     op.add_column(
         "users",
-        sa.Column("is_2fa_enabled", sa.Boolean(), nullable=False, server_default="false"),
+        sa.Column(
+            "is_2fa_enabled",
+            sa.Boolean(),
+            nullable=False,
+            server_default="false",
+        ),
     )
     op.add_column(
         "users",
         sa.Column(
             "totp_secret_encrypted",
-            sqlmodel.sql.sqltypes.AutoString(length=500),
+            AutoString(length=500),
             nullable=True,
         ),
     )
@@ -46,7 +52,7 @@ def upgrade() -> None:
         sa.Column("user_id", sa.Uuid(), nullable=False),
         sa.Column(
             "code_hash",
-            sqlmodel.sql.sqltypes.AutoString(length=255),
+            AutoString(length=255),
             nullable=False,
         ),
         sa.Column("created_at", sa.DateTime(), nullable=False),

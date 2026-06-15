@@ -88,7 +88,8 @@ def _setup_metabase(password: str) -> None:
         try:
             conn.execute(
                 text(
-                    f'GRANT CONNECT ON DATABASE "{settings.POSTGRESQL_DATABASE}" TO metabase_readonly'
+                    "GRANT CONNECT ON DATABASE "
+                    f'"{settings.POSTGRESQL_DATABASE}" TO metabase_readonly'
                 ),
             )
         except Exception:
@@ -106,7 +107,8 @@ def _setup_metabase(password: str) -> None:
             )
             app_conn.execute(
                 text(
-                    "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO metabase_readonly"
+                    "ALTER DEFAULT PRIVILEGES IN SCHEMA public "
+                    "GRANT SELECT ON TABLES TO metabase_readonly"
                 ),
             )
         except Exception:

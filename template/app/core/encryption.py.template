@@ -44,7 +44,6 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
-import os
 
 from cryptography.fernet import Fernet
 from cryptography.fernet import MultiFernet
@@ -69,16 +68,23 @@ class CryptoService:
             from app.core.settings import settings
 
             key = getattr(settings, "CRYPTO_KEY", None)
-            if not key:
-                key = os.environ.get("CRYPTO_KEY", "")
             if key:
                 encryption_keys = [key]
 
         self._keys: list[str] = encryption_keys or []
         if self._keys:
-            fernets = [
-                Fernet(k.encode() if isinstance(k, str) else k) for k in self._keys
-            ]
+            fernets = []
+            for k in self._keys:
+                key_str = k.encode() if isinstance(k, str) else k
+                try:
+                    key_bytes = base64.urlsafe_b64decode(key_str)
+                    if len(key_bytes) != 32:
+                        raise ValueError(
+                            "Encryption key must be exactly 32 bytes (44 base64 chars)"
+                        )
+                except Exception as e:
+                    raise ValueError(f"Invalid CRYPTO_KEY: {e}") from e
+                fernets.append(Fernet(key_str))
             self._fernet: Fernet | MultiFernet | None = (
                 MultiFernet(fernets) if len(fernets) > 1 else fernets[0]
             )
@@ -143,8 +149,11 @@ class CryptoService:
         """
         if not self._keys:
             raise RuntimeError("Encryption not configured. Set CRYPTO_KEY in .env")
-        key = base64.urlsafe_b64decode(self._keys[0])
-        h = hmac.new(key, value.encode(), hashlib.sha256)
+        # Derive a separate HMAC key via domain separation — never reuse
+        # the Fernet encryption key directly as an HMAC key.
+        key_bytes = base64.urlsafe_b64decode(self._keys[0])
+        hmac_key = hashlib.sha256(key_bytes + b":search-hmac").digest()
+        h = hmac.new(hmac_key, value.encode(), hashlib.sha256)
         return "hmac:" + base64.urlsafe_b64encode(h.digest()).decode()
 
 

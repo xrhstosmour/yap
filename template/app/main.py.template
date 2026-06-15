@@ -9,6 +9,7 @@ from __future__ import annotations
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 import sentry_sdk
 from fastapi import FastAPI
@@ -24,6 +25,7 @@ from app.api.v1.router import router as api_v1_router
 from app.core.cache import close_redis
 from app.core.logging import get_logger
 from app.core.logging import setup_logging
+from app.core.security import TokenRateLimitError
 from app.core.security_middleware import SecurityHeadersMiddleware
 from app.core.settings import settings
 from app.core.tenant import tenant_context
@@ -96,13 +98,23 @@ def create_app() -> FastAPI:
     )
 
     # CORS middleware.
+    # NOTE: Deploy behind a reverse proxy (nginx/Caddy) that validates Host headers
+    # and adds X-Forwarded-* headers. The proxy also provides TrustedHost filtering
+    # which Starlette's TrustedHostMiddleware would otherwise handle.
     if settings.all_cors_origins:
         app.add_middleware(
             CORSMiddleware,
             allow_origins=settings.all_cors_origins,
             allow_credentials=True,
-            allow_methods=["*"],
-            allow_headers=["*"],
+            allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
+            allow_headers=[
+                "Authorization",
+                "Content-Type",
+                "X-Idempotency-Key",
+                "X-API-Key",
+                "X-Request-ID",
+                "Accept",
+            ],
         )
 
     # Compression middleware, for performance.
@@ -121,7 +133,9 @@ def create_app() -> FastAPI:
 
     # Tenant context middleware.
     @app.middleware("http")
-    async def tenant_middleware(request: Request, call_next):
+    async def tenant_middleware(
+        request: Request, call_next
+    ) -> Any:  # noqa: ANN401
         """Extract and set tenant context from request."""
         tenant_id = getattr(request.state, "tenant_id", None)
 
@@ -132,7 +146,9 @@ def create_app() -> FastAPI:
 
     # Request logging middleware.
     @app.middleware("http")
-    async def logging_middleware(request: Request, call_next):
+    async def logging_middleware(
+        request: Request, call_next
+    ) -> Any:  # noqa: ANN401
         """Log all requests with timing."""
         start_time = time.time()
 
@@ -150,9 +166,23 @@ def create_app() -> FastAPI:
 
         return response
 
+    # Token rate limit handler.
+    @app.exception_handler(TokenRateLimitError)
+    async def token_rate_limit_handler(
+        request: Request, exception: TokenRateLimitError
+    ) -> JSONResponse:
+        """Handle token creation rate limit exceeded."""
+        return JSONResponse(
+            status_code=429,
+            content={"detail": str(exception)},
+            headers={"Retry-After": "60"},
+        )
+
     # Global exception handler.
     @app.exception_handler(Exception)
-    async def global_exception_handler(request: Request, exc: Exception):
+    async def global_exception_handler(
+        request: Request, exc: Exception
+    ) -> JSONResponse:
         """Handle uncaught exceptions and report to Sentry/GlitchTip."""
         if settings.SENTRY_DSN:
             sentry_sdk.capture_exception(exc)

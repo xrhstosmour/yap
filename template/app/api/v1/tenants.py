@@ -23,6 +23,8 @@ from app.schemas.tenant import TenantListResponse
 from app.schemas.tenant import TenantResponse
 from app.schemas.tenant import TenantUpdate
 from app.services.tenant_service import TenantService
+from app.services.tenant_service import TenantServiceError
+from app.services.tenant_service import TenantSlugAlreadyExistsError
 
 router = APIRouter(prefix="/tenants", tags=["Tenants"])
 logger = get_logger("api.tenants")
@@ -109,8 +111,10 @@ async def create_tenant(
     try:
         tenant = await service.create(data, created_by=current_user.id)
         return TenantResponse.model_validate(tenant)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except (ValueError, TenantServiceError, TenantSlugAlreadyExistsError) as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        ) from e
 
 
 @router.patch(
@@ -127,8 +131,10 @@ async def update_tenant(
 ) -> TenantResponse:
     try:
         tenant = await service.update(tenant_id, data, updated_by=current_user.id)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except (ValueError, TenantServiceError, TenantSlugAlreadyExistsError) as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        ) from e
 
     if not tenant:
         raise HTTPException(
@@ -150,8 +156,10 @@ async def delete_tenant(
 ) -> None:
     try:
         deleted = await service.delete(tenant_id, deleted_by=current_user.id)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except (ValueError, TenantServiceError, TenantSlugAlreadyExistsError) as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        ) from e
 
     if not deleted:
         raise HTTPException(

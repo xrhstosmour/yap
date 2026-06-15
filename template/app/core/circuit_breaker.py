@@ -6,6 +6,8 @@ to prevent cascading failures when external services are unavailable.
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import threading
 from collections.abc import Callable
 from enum import StrEnum
@@ -105,12 +107,12 @@ class _CircuitBreakerLogger(CircuitBreakerListener):
             to_state=new_state.name,
         )
 
-    def failure(self, breaker: CircuitBreaker, exc: BaseException) -> None:
+    def failure(self, breaker: CircuitBreaker, exception: BaseException) -> None:
         """Log failures."""
-        logger.error(
+        logger.warning(
             "circuit_breaker_failure",
             service=self.service_name,
-            error=str(exc),
+            error=str(exception),
             fail_count=breaker.fail_counter,
         )
 
@@ -131,6 +133,21 @@ def circuit_breaker(name: str, **kwargs: int) -> Callable[[F], F]:
     breaker = CircuitBreakerService.get_breaker(name, **kwargs)
 
     def decorator(func: F) -> F:
-        return cast(F, breaker(func))
+        if asyncio.iscoroutinefunction(func):
+            @functools.wraps(func)
+            async def async_wrapper(  # noqa: ANN401
+                *args: Any,  # noqa: ANN401
+                **kwargs: Any,  # noqa: ANN401
+            ) -> Any:  # noqa: ANN401
+                try:
+                    result = await func(*args, **kwargs)
+                    breaker.success()  # type: ignore[attr-defined]
+                    return result
+                except Exception as e:
+                    breaker.failure(e)  # type: ignore[attr-defined]
+                    raise
+            return cast(F, async_wrapper)
+        else:
+            return cast(F, breaker(func))
 
     return decorator
