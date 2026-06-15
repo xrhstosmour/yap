@@ -1,3 +1,7 @@
+# Include-only compose file for infrastructure services.
+# Core application services (app, celery-worker, celery-beat) are defined
+# separately. Use `docker compose -f docker-compose.yml -f docker-compose.app.yml up`.
+
 include:
   - containers/databases/postgresql/docker-compose.yml
   - containers/databases/redis/docker-compose.yml
@@ -26,3 +30,7 @@ include:
 {%- if include_flower %}
   - containers/monitoring/workers/flower/docker-compose.yml
 {%- endif %}
+
+networks:
+  backend:
+    driver: bridge
