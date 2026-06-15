@@ -80,8 +80,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Content-Security-Policy"] = (
             "default-src 'none'; "
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval' cdn.jsdelivr.net; "
-            "style-src 'self' 'unsafe-inline' cdn.jsdelivr.net; "
+            "script-src 'self' cdn.jsdelivr.net; "
+            "style-src 'self' cdn.jsdelivr.net; "
             "img-src 'self' data:; "
             "font-src 'self' data: cdn.jsdelivr.net; "
             "connect-src 'self'; "
@@ -93,10 +93,15 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         )
         response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
         response.headers["X-DNS-Prefetch-Control"] = "off"
+        response.headers["X-Download-Options"] = "noopen"
+        response.headers["X-Permitted-Cross-Domain-Policies"] = "none"
 
-        if request.url.scheme == "https":
+        if (
+            request.url.scheme == "https"
+            or request.headers.get("X-Forwarded-Proto") == "https"
+        ):
             response.headers["Strict-Transport-Security"] = (
-                "max-age=63072000; includeSubDomains; preload"
+                "max-age=31536000; includeSubDomains; preload"
             )
 
         return response
