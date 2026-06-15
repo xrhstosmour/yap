@@ -30,6 +30,12 @@ from app.schemas.user import UserUpdateMe
 logger = get_logger("service.user")
 
 
+class UserServiceError(Exception):
+    """Base exception for user service errors."""
+
+    pass
+
+
 class UserService:
     """Service for user operations.
 
@@ -89,14 +95,18 @@ class UserService:
         Returns:
             Tuple of (users, total_count)
         """
-        if search:
-            return await self.user_repository.search(search, skip, limit)
-
-        filters = {}
+        filters: dict[str, bool] = {}
         if is_active is not None:
             filters["is_active"] = is_active
         if is_superuser is not None:
             filters["is_superuser"] = is_superuser
+
+        if search:
+            return await self.user_repository.search(
+                search,
+                skip=skip,
+                limit=limit,
+            )
 
         users, total = await self.user_repository.list(
             skip=skip,
@@ -121,7 +131,7 @@ class UserService:
         """
         # Check email exists.
         if await self.user_repository.email_exists(data.email):
-            raise ValueError(f"Email {data.email} is already registered")
+            raise UserServiceError("Email already in use")
 
         # Create user.
         password_hash = generate_password_hash(data.password)
@@ -179,9 +189,16 @@ class UserService:
         if data.is_superuser is not None:
             update_data["is_superuser"] = data.is_superuser
 
+        # Check for email conflicts if email is being changed.
+        email = update_data.get("email")
+        if isinstance(email, str) and email != user.email:
+            existing = await self.user_repository.get_by_email(email)
+            if existing:
+                raise UserServiceError("Email already in use")
+
         if update_data:
             updated_user = await self.user_repository.update(
-                user_id, update_data.copy()
+                user_id, update_data
             )
             if not updated_user:
                 return None
@@ -276,31 +293,34 @@ class UserService:
         tenant_id = user.tenant_id or SYSTEM_TENANT_ID
         now = datetime.now(UTC)
 
-        # Revoke all active API keys so key-based auth stops working immediately.
-        await self.session.execute(
-            sa_update(APIKey)
-            .where(
-                APIKey.user_id == user.id,  # type: ignore[arg-type]
-                APIKey.deleted_at.is_(None),  # type: ignore[union-attr]
+        # Wrap deletion in a savepoint so API key revocation and
+        # anonymization are atomic — if either fails, both roll back.
+        async with self.session.begin_nested():
+            # Revoke all active API keys so key-based auth stops working immediately.
+            await self.session.execute(
+                sa_update(APIKey)
+                .where(
+                    APIKey.user_id == user.id,  # type: ignore[arg-type]
+                    APIKey.deleted_at.is_(None),  # type: ignore[union-attr]
+                )
+                .values(deleted_at=now)
             )
-            .values(deleted_at=now)
-        )
 
-        # Anonymize personal fields to satisfy GDPR Article 17 right to erasure.
-        anonymized_email = f"deleted_{user.id}@deleted.invalid"
-        placeholder_hash = generate_password_hash(secrets.token_urlsafe(32))
-        await self.user_repository.update(
-            user.id,
-            {
-                "email": anonymized_email,
-                "full_name": None,
-                "hashed_password": placeholder_hash,
-            },
-        )
+            # Anonymize personal fields to satisfy GDPR Article 17 right to erasure.
+            anonymized_email = f"deleted_{user.id}@deleted.invalid"
+            placeholder_hash = generate_password_hash(secrets.token_urlsafe(32))
+            await self.user_repository.update(
+                user.id,
+                {
+                    "email": anonymized_email,
+                    "full_name": None,
+                    "hashed_password": placeholder_hash,
+                },
+            )
 
-        # Invalidate all outstanding JWTs and soft-delete the record.
-        await self.user_repository.increment_token_version(user.id)
-        await self.user_repository.delete(user.id)
+            # Invalidate all outstanding JWTs and soft-delete the record.
+            await self.user_repository.increment_token_version(user.id)
+            await self.user_repository.delete(user.id)
 
         await self.audit_repository.log_user_action(
             action=AuditAction.ACCOUNT_DELETION,
@@ -350,7 +370,6 @@ class UserService:
         api_key_repo = APIKeyRepository(self.session)
         keys, _ = await api_key_repo.list(
             filters={"user_id": user.id},
-            include_deleted=True,
         )
         api_keys = [
             {
@@ -363,7 +382,6 @@ class UserService:
                 "expires_at": k.expires_at.isoformat() if k.expires_at else None,
             }
             for k in keys
-            if k.deleted_at is None
         ]
 
         activity = [
