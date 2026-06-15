@@ -60,6 +60,7 @@ async def create_api_key(
         user_id=current_user.id,
         tenant_id=current_user.tenant_id,
         data=data,
+        user_email=current_user.email,
     )
 
     return APIKeyCreateResponse(
@@ -138,6 +139,7 @@ async def update_api_key(
         user_id=current_user.id,
         tenant_id=current_user.tenant_id,
         data=data,
+        user_email=current_user.email,
     )
 
     if not api_key:
@@ -172,6 +174,7 @@ async def delete_api_key(
         key_id=key_id,
         user_id=current_user.id,
         tenant_id=current_user.tenant_id,
+        user_email=current_user.email,
     )
 
     if not deleted:
@@ -204,6 +207,7 @@ async def revoke_api_key(
         key_id=key_id,
         user_id=current_user.id,
         tenant_id=current_user.tenant_id,
+        user_email=current_user.email,
     )
 
     if not revoked:
