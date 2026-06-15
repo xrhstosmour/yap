@@ -3,7 +3,7 @@ name = "{{ project_slug }}"
 version = "0.1.0"
 description = "{{ description }}"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.14"
 authors = [
     {name = "{{ author_name }}", email = "{{ author_email }}"}
 ]
@@ -44,22 +44,12 @@ dev = [
     "pytest>=8.3.0",
     "pytest-asyncio>=0.25.0",
     "pytest-cov>=6.0.0",
+    "pytest-xdist>=3.6.0",
     "httpx>=0.28.0",
     "mypy>=1.14.0",
     "ruff>=0.8.0",
     "pre-commit>=4.0.0",
     "celery[redis]>=5.4.0",
-]
-
-[dependency-groups]
-dev = [
-    "ruff>=0.15.8",
-]
-test = [
-    "pytest",
-    "pytest-asyncio",
-    "pytest-cov",
-    "httpx",
 ]
 
 [build-system]
@@ -108,13 +98,11 @@ select = [
 ]
 ignore = [
     "E501",  # line too long
-    "B008",  # do not perform function calls in argument defaults
     "B904",  # raise from - let HTTPExceptions pass through
-    "UP037", # quoted annotation in from __future__ annotations contexts
     "ANN001",  # missing type for self in bound tasks
     "ANN002", # missing type for *args
     "ANN003", # missing type for **kwargs
-    "ANN201", # missing return type on async functions
+    "ANN201", # missing return type on public functions
     "ANN202", # missing return type on private functions
     "ANN204", # missing return type for __call__
     "ANN401", # Any types in function signatures
@@ -124,11 +112,15 @@ ignore = [
 force-single-line = true
 known-first-party = ["app"]
 
+[tool.ruff.format]
+quote-style = "double"
+line-ending = "lf"
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
-addopts = "-v --tb=short"
+addopts = "-v --tb=short -n auto"
 markers = [
     "slow: requires running services; deselect with '-m \"not slow\"'",
 ]
@@ -138,6 +130,7 @@ source = ["app"]
 branch = true
 
 [tool.coverage.report]
+fail_under = 78
 show_missing = true
 exclude_lines = [
     "pragma: no cover",
