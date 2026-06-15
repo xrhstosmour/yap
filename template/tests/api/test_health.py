@@ -28,7 +28,7 @@ def test_health_check_requires_db(client) -> None:
     assert response.status_code in (200, 503)
 
 
-def test_metrics_endpoint(client):
+def test_metrics_endpoint(client) -> None:
     """GET /api/v1/metrics returns pool and cache stats."""
     response = client.get("/api/v1/metrics")
     assert response.status_code in (200, 500)

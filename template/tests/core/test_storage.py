@@ -12,7 +12,7 @@ from app.core.storage import upload_file
 
 
 @pytest.fixture(autouse=True)
-def mock_s3_client():
+def mock_s3_client() -> MagicMock:
     """Mock boto3 S3 client for all tests."""
     with patch("app.core.storage._s3_client") as mock:
         client = MagicMock()
@@ -39,7 +39,10 @@ class TestUploadFile:
             mimetype="text/plain",
         )
 
-        assert content_hash == "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+        assert (
+            content_hash
+            == "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+        )
         assert "uploads/" in object_key
         mock_s3_client.put_object.assert_called_once_with(
             Bucket=ANY, Key=ANY, Body=content, ContentType="text/plain"

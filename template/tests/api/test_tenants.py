@@ -88,7 +88,7 @@ async def test_list_tenants_authenticated_non_admin(
 
 @pytest.mark.anyio
 @pytest.mark.usefixtures("override_get_async_session")
-async def test_crud_tenant_as_admin(client: AsyncClient, session):
+async def test_crud_tenant_as_admin(client: AsyncClient, session) -> None:
     from app.services.auth_service import AuthService
 
     service = AuthService(session)

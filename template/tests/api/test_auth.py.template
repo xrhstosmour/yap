@@ -22,14 +22,14 @@ def _auth_service(session: AsyncSession) -> AuthService:
 
 
 @pytest.fixture(name="client")
-def client_fixture():
+def client_fixture() -> AsyncClient:
     """Create a test client."""
     transport = ASGITransport(app=app)
     return AsyncClient(transport=transport, base_url="http://test")
 
 
 @pytest.fixture(autouse=True)
-def _mock_email_tasks():
+def _mock_email_tasks() -> None:
     """Mock email tasks module to avoid Celery dependency."""
     mock_email = MagicMock()
     mock_email.send_template_email_task = MagicMock()
@@ -40,7 +40,7 @@ class TestAuthLogin:
     """Tests for POST /api/v1/auth/login."""
 
     @pytest.mark.usefixtures("override_get_async_session")
-    async def test_login_success(self, client: AsyncClient, session):
+    async def test_login_success(self, client: AsyncClient, session) -> None:
         """Login should succeed with valid credentials."""
         auth_service = _auth_service(session)
         await auth_service.register(
@@ -59,7 +59,7 @@ class TestAuthLogin:
         assert data["token_type"] == "bearer"
 
     @pytest.mark.usefixtures("override_get_async_session")
-    async def test_login_wrong_password(self, client: AsyncClient, session):
+    async def test_login_wrong_password(self, client: AsyncClient, session) -> None:
         """Login should fail with wrong password."""
         auth_service = _auth_service(session)
         await auth_service.register(
@@ -78,7 +78,7 @@ class TestAuthLogin:
         assert "Invalid email or password" in response.json()["detail"]
 
     @pytest.mark.usefixtures("override_get_async_session")
-    async def test_login_user_not_found(self, client: AsyncClient):
+    async def test_login_user_not_found(self, client: AsyncClient) -> None:
         """Login should fail for non-existent user."""
         response = await client.post(
             "/api/v1/auth/login",
@@ -95,7 +95,7 @@ class TestAuthRefresh:
     """Tests for POST /api/v1/auth/refresh."""
 
     @pytest.mark.usefixtures("override_get_async_session")
-    async def test_refresh_token(self, client: AsyncClient, session):
+    async def test_refresh_token(self, client: AsyncClient, session) -> None:
         """Refresh token should return new access token."""
         auth_service = _auth_service(session)
         user = await auth_service.register(
@@ -119,7 +119,7 @@ class TestAuthRegister:
     """Tests for POST /api/v1/auth/register."""
 
     @pytest.mark.usefixtures("override_get_async_session")
-    async def test_register_success(self, client: AsyncClient):
+    async def test_register_success(self, client: AsyncClient) -> None:
         """Registration should succeed with valid data."""
         response = await client.post(
             "/api/v1/auth/register",
@@ -135,7 +135,7 @@ class TestAuthRegister:
         assert "refresh_token" in data
 
     @pytest.mark.usefixtures("override_get_async_session")
-    async def test_register_duplicate_email(self, client: AsyncClient, session):
+    async def test_register_duplicate_email(self, client: AsyncClient, session) -> None:
         """Registration should fail with duplicate email."""
         auth_service = _auth_service(session)
         await auth_service.register(
@@ -156,7 +156,8 @@ class TestAuthRegister:
 
 
 class TestEmailVerification:
-    """Tests for POST /api/v1/auth/send-verification-email and GET /api/v1/auth/verify-email."""
+    """Tests for POST /api/v1/auth/send-verification-email
+    and GET /api/v1/auth/verify-email."""
 
     @pytest.mark.usefixtures("override_get_async_session")
     async def test_send_verification_email_success(
@@ -164,7 +165,7 @@ class TestEmailVerification:
         client: AsyncClient,
         session: AsyncSession,
         monkeypatch: pytest.MonkeyPatch,
-    ):
+    ) -> None:
         """Sending a verification email should return 204 for an unverified user."""
         auth_service = AuthService(cast(AsyncSession, session))
         user = await auth_service.register(
@@ -195,7 +196,7 @@ class TestEmailVerification:
         self,
         client: AsyncClient,
         session: AsyncSession,
-    ):
+    ) -> None:
         """Sending a verification email should return 400 if already verified."""
         auth_service = AuthService(cast(AsyncSession, session))
         user = await auth_service.register(
@@ -221,7 +222,7 @@ class TestEmailVerification:
         client: AsyncClient,
         session: AsyncSession,
         monkeypatch: pytest.MonkeyPatch,
-    ):
+    ) -> None:
         """Verifying email with a valid token should return 204 and set is_verified."""
         auth_service = AuthService(cast(AsyncSession, session))
         user = await auth_service.register(
@@ -253,7 +254,7 @@ class TestEmailVerification:
         self,
         client: AsyncClient,
         monkeypatch: pytest.MonkeyPatch,
-    ):
+    ) -> None:
         """Verifying email with an invalid token should return 400."""
 
         async def _fake_verify(_token: str):
@@ -274,7 +275,8 @@ class TestEmailVerification:
 
 
 class TestPasswordReset:
-    """Tests for POST /api/v1/auth/forgot-password and POST /api/v1/auth/reset-password."""
+    """Tests for POST /api/v1/auth/forgot-password
+    and POST /api/v1/auth/reset-password."""
 
     @pytest.mark.usefixtures("override_get_async_session")
     async def test_forgot_password_registered_email(
@@ -282,7 +284,7 @@ class TestPasswordReset:
         client: AsyncClient,
         session: AsyncSession,
         monkeypatch: pytest.MonkeyPatch,
-    ):
+    ) -> None:
         """Requesting reset for a registered email should return 204."""
         auth_service = AuthService(cast(AsyncSession, session))
         await auth_service.register(
@@ -311,8 +313,9 @@ class TestPasswordReset:
     async def test_forgot_password_unknown_email(
         self,
         client: AsyncClient,
-    ):
-        """Requesting reset for an unknown email should still return 204 (no enumeration)."""
+    ) -> None:
+        """Requesting reset for an unknown email should still return
+        204 (no enumeration)."""
         response = await client.post(
             "/api/v1/auth/forgot-password",
             json={"email": "ghost@{{ project_slug }}.com"},
@@ -327,7 +330,7 @@ class TestPasswordReset:
         client: AsyncClient,
         session: AsyncSession,
         monkeypatch: pytest.MonkeyPatch,
-    ):
+    ) -> None:
         """Resetting password with a valid token should return 204."""
         auth_service = AuthService(cast(AsyncSession, session))
         user = await auth_service.register(
@@ -359,7 +362,7 @@ class TestPasswordReset:
         self,
         client: AsyncClient,
         monkeypatch: pytest.MonkeyPatch,
-    ):
+    ) -> None:
         """Resetting password with an invalid token should return 400."""
 
         async def _fake_verify(_token: str):
@@ -388,7 +391,7 @@ class TestTwoFactorAuth:
         client: AsyncClient,
         session: AsyncSession,
         monkeypatch: pytest.MonkeyPatch,
-    ):
+    ) -> None:
         """Login should return challenge_token when 2FA is enabled."""
         auth_service = AuthService(cast(AsyncSession, session))
         user = await auth_service.register(
@@ -438,7 +441,7 @@ class TestTwoFactorAuth:
         self,
         client: AsyncClient,
         session: AsyncSession,
-    ):
+    ) -> None:
         """Login should return tokens directly when 2FA is disabled."""
         auth_service = AuthService(cast(AsyncSession, session))
         await auth_service.register(
@@ -466,7 +469,7 @@ class TestTwoFactorAuth:
         client: AsyncClient,
         session: AsyncSession,
         monkeypatch: pytest.MonkeyPatch,
-    ):
+    ) -> None:
         """Verifying a 2FA challenge should return tokens."""
         auth_service = AuthService(cast(AsyncSession, session))
         user = await auth_service.register(
@@ -507,7 +510,7 @@ class TestMagicLink:
         client: AsyncClient,
         session: AsyncSession,
         monkeypatch: pytest.MonkeyPatch,
-    ):
+    ) -> None:
         """Requesting a magic link for a registered email should return 204."""
         auth_service = AuthService(cast(AsyncSession, session))
         await auth_service.register(
@@ -536,7 +539,7 @@ class TestMagicLink:
     async def test_request_magic_link_unknown(
         self,
         client: AsyncClient,
-    ):
+    ) -> None:
         """Requesting a magic link for an unknown email should still return 204."""
         response = await client.post(
             "/api/v1/auth/magic-link",
@@ -551,7 +554,7 @@ class TestMagicLink:
         client: AsyncClient,
         session: AsyncSession,
         monkeypatch: pytest.MonkeyPatch,
-    ):
+    ) -> None:
         """Verifying a valid magic link token should return tokens."""
         auth_service = AuthService(cast(AsyncSession, session))
         user = await auth_service.register(
@@ -583,7 +586,7 @@ class TestMagicLink:
         self,
         client: AsyncClient,
         monkeypatch: pytest.MonkeyPatch,
-    ):
+    ) -> None:
         """Verifying an invalid magic link token should return 400."""
 
         async def _fake_verify_token(token: str):
@@ -610,7 +613,7 @@ class TestGoogleOAuth:
         self,
         client: AsyncClient,
         monkeypatch: pytest.MonkeyPatch,
-    ):
+    ) -> None:
         """GET /auth/google should return 503 when credentials are not set."""
         response = await client.get(
             "/api/v1/auth/google",
@@ -624,7 +627,7 @@ class TestGoogleOAuth:
         self,
         client: AsyncClient,
         monkeypatch: pytest.MonkeyPatch,
-    ):
+    ) -> None:
         """POST /auth/google/callback with an invalid state should return 400."""
 
         async def _fake_verify_state(_state: str):
