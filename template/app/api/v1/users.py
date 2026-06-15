@@ -113,7 +113,10 @@ async def update_me(
     "/me",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete own account",
-    description="Permanently delete the authenticated user's account (GDPR Article 17).",
+    description=(
+        "Permanently delete the authenticated user's account "
+        "(GDPR Article 17)."
+    ),
 )
 async def delete_me(
     current_user: CurrentUser,
@@ -204,7 +207,7 @@ async def create_user(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
-        )
+        ) from e
 
 
 @router.patch(
