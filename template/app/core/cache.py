@@ -12,6 +12,8 @@ from typing import Any
 from typing import cast
 
 import redis.asyncio as redis
+from redis.exceptions import ConnectionError
+from redis.exceptions import TimeoutError
 
 from app.core.logging import get_logger
 from app.core.settings import settings
@@ -21,6 +23,9 @@ logger = get_logger("cache")
 # Global Redis client instance with async lock for thread-safe initialization.
 _redis_client: redis.Redis | None = None
 _redis_lock: asyncio.Lock = asyncio.Lock()
+
+# Global cache instance.
+_cache: CacheService | None = None
 
 
 async def get_redis() -> redis.Redis:
@@ -85,7 +90,7 @@ class CacheService:
         """Create namespaced cache key."""
         return f"{self.prefix}:{key}"
 
-    async def get(self, key: str) -> Any | None:
+    async def get(self, key: str) -> Any:  # noqa: ANN401
         """Get value from cache.
 
         Args:
@@ -97,12 +102,29 @@ class CacheService:
         import json
 
         full_key = self._make_key(key)
-        value = await self.redis.get(full_key)
+        try:
+            value = await self.redis.get(full_key)
+        except (
+            ConnectionError,
+            TimeoutError,
+        ) as error:
+            logger.error(
+                "cache_operation_failed",
+                operation="get",
+                key=full_key,
+                error=str(error),
+            )
+            return None
 
         if value is not None:
             try:
                 return json.loads(value)
             except json.JSONDecodeError:
+                logger.warning(
+                    "cache_deserialize_failed",
+                    key=full_key,
+                    value_preview=str(value)[:100],
+                )
                 return value
 
         return None
@@ -110,36 +132,78 @@ class CacheService:
     async def set(
         self,
         key: str,
-        value: Any,
+        value: object,
         ttl: int | timedelta | None = None,
-    ) -> None:
+    ) -> bool:
         """Set value in cache with optional TTL.
 
         Args:
             key: Cache key (without prefix)
             value: Value to cache (will be JSON serialized)
             ttl: Time-to-live in seconds, or None for no expiration
+
+        Returns:
+            True if value was cached successfully, False otherwise
         """
         import json
 
         full_key = self._make_key(key)
         serialized = json.dumps(value)
 
-        if ttl is not None:
-            if isinstance(ttl, timedelta):
-                ttl = int(ttl.total_seconds())
-            await self.redis.setex(full_key, ttl, serialized)
-        else:
-            await self.redis.set(full_key, serialized)
+        max_size = getattr(settings, "CACHE_MAX_VALUE_SIZE", 1_048_576)
+        if len(serialized) > max_size:
+            logger.warning(
+                "cache_value_too_large",
+                key=full_key,
+                size=len(serialized),
+                max_size=max_size,
+            )
+            return False
 
-    async def delete(self, key: str) -> None:
+        try:
+            if ttl is not None:
+                if isinstance(ttl, timedelta):
+                    ttl = int(ttl.total_seconds())
+                await self.redis.setex(full_key, ttl, serialized)
+            else:
+                await self.redis.set(full_key, serialized)
+            return True
+        except (
+            ConnectionError,
+            TimeoutError,
+        ) as error:
+            logger.error(
+                "cache_operation_failed",
+                operation="set",
+                key=full_key,
+                error=str(error),
+            )
+            return False
+
+    async def delete(self, key: str) -> bool:
         """Delete key from cache.
 
         Args:
             key: Cache key to delete
+
+        Returns:
+            True if deletion succeeded, False otherwise
         """
         full_key = self._make_key(key)
-        await self.redis.delete(full_key)
+        try:
+            await self.redis.delete(full_key)
+            return True
+        except (
+            ConnectionError,
+            TimeoutError,
+        ) as error:
+            logger.error(
+                "cache_operation_failed",
+                operation="delete",
+                key=full_key,
+                error=str(error),
+            )
+            return False
 
     async def delete_pattern(self, pattern: str) -> int:
         """Delete all keys matching pattern.
@@ -151,13 +215,37 @@ class CacheService:
             Number of keys deleted
         """
         full_pattern = self._make_key(pattern)
-        keys = []
+        keys_set: set[str] = set()
 
-        async for key in self.redis.scan_iter(match=full_pattern):
-            keys.append(key)
+        try:
+            async for key in self.redis.scan_iter(match=full_pattern):
+                keys_set.add(key)
+        except (
+            ConnectionError,
+            TimeoutError,
+        ) as error:
+            logger.error(
+                "cache_operation_failed",
+                operation="scan",
+                key=full_pattern,
+                error=str(error),
+            )
+            return 0
 
-        if keys:
-            return cast(int, await self.redis.delete(*keys))
+        if keys_set:
+            try:
+                return cast(int, await self.redis.delete(*keys_set))
+            except (
+                ConnectionError,
+                TimeoutError,
+            ) as error:
+                logger.error(
+                    "cache_operation_failed",
+                    operation="delete_pattern",
+                    key=full_pattern,
+                    error=str(error),
+                )
+                return 0
         return 0
 
     async def exists(self, key: str) -> bool:
@@ -196,10 +284,6 @@ class CacheService:
         """
         full_key = self._make_key(key)
         return cast(int, await self.redis.ttl(full_key))
-
-
-# Global cache instance.
-_cache: CacheService | None = None
 
 
 async def get_cache() -> CacheService:

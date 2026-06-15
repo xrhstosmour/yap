@@ -20,6 +20,11 @@ from typing import cast
 
 from app.core.logging import get_logger
 
+try:
+    from app.core.cache import CacheService
+except ImportError:
+    CacheService = None  # type: ignore
+
 if TYPE_CHECKING:
     pass
 
@@ -33,6 +38,7 @@ CACHE_TTL = 60
 class CacheEntry(TypedDict):
     state: bool
     cached_at: float
+    jitter: int
 
 
 _in_memory_cache: dict[str, CacheEntry] = {}
@@ -55,11 +61,12 @@ def _make_cache_entry(state: bool) -> CacheEntry:
         state: Current feature state
 
     Returns:
-        Cache entry dict with state and timestamp
+        Cache entry dict with state, timestamp, and jitter
     """
     return {
         "state": state,
         "cached_at": time.time(),
+        "jitter": _jittered_ttl(),
     }
 
 
@@ -76,10 +83,10 @@ def _is_cache_valid(cached_data: CacheEntry | None) -> bool:
         return False
 
     elapsed = time.time() - cached_data["cached_at"]
-    return elapsed < _jittered_ttl()
+    return elapsed < cached_data.get("jitter", CACHE_TTL)
 
 
-async def _get_redis() -> Any:
+async def _get_redis() -> Any:  # noqa: ANN401
     """Lazily import and get Redis connection.
 
     Returns:
@@ -112,10 +119,11 @@ async def feature_enabled(name: str) -> bool:
         True if the feature is enabled
     """
     # Tier 1: In-memory cache.
-    cached = _in_memory_cache.get(name)
-    if _is_cache_valid(cached):
-        if cached is not None:
-            return cached["state"]
+    async with _cache_lock:
+        if name in _in_memory_cache:
+            entry = _in_memory_cache[name]
+            if _is_cache_valid(entry):
+                return entry["state"]
 
     # Tier 2: Redis.
     redis_client = await _get_redis()
@@ -150,7 +158,7 @@ async def feature_enabled(name: str) -> bool:
 
                 return state
     except Exception:
-        pass
+        logger.warning("feature_flag_db_fetch_failed", name=name, exc_info=True)
 
     # Tier 4: Settings fallback -> False.
     fallback = _get_settings_default(name)
@@ -199,14 +207,17 @@ def _get_settings_default(name: str) -> bool:
 async def refresh_cache(name: str) -> None:
     """Force-refresh the cache for a feature flag.
 
-    Removes the flag from in-memory cache so the next lookup
-    will fetch from Redis or database.
+    Removes the flag from in-memory cache and Redis so the next lookup
+    will fetch from the database.
 
     Args:
         name: Feature flag name
     """
     async with _cache_lock:
         _in_memory_cache.pop(name, None)
+    redis_client = await _get_redis()
+    if redis_client:
+        await redis_client.delete(f"{REDIS_PREFIX}:{name}")
 
 
 async def sync_to_redis(name: str, state: bool) -> None:
