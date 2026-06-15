@@ -60,7 +60,7 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
 
         # Derive user scope from auth token to prevent cross-user collisions.
         auth = request.headers.get("Authorization")
-        user_scope = hashlib.sha256(auth.encode()).hexdigest()[:16] if auth else "anon"
+        user_scope = hashlib.sha256(auth.encode()).hexdigest() if auth else "anon"
         scoped_key = f"{user_scope}:{request.method}:{request.url.path}:{raw_key}"
 
         cached = await idempotency_service.get(scoped_key)

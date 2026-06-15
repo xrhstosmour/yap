@@ -171,10 +171,10 @@ class SearchMixin:
         Returns:
             Tuple containing matched records and total count.
         """
-        mode = choose_mode(query_str, min_fts_length=min_fts_length)
+        mode, normalized = choose_mode(query_str, min_fts_length=min_fts_length)
         if mode == SearchMode.TRIGRAM:
             return await self.search_trigram(
-                query_str=query_str,
+                query_str=normalized,
                 fields=fields,
                 threshold=trigram_threshold,
                 skip=skip,
@@ -183,7 +183,7 @@ class SearchMixin:
             )
 
         return await self.search_fts(
-            query_str=query_str,
+            query_str=normalized,
             fields=fields,
             language=language,
             skip=skip,
