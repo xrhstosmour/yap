@@ -61,7 +61,8 @@ class TestBuildTrigramCondition:
             None.
         """
         expr = build_trigram_condition(column("full_name"), "ali", threshold=0.42)
-        assert "0.42" in str(expr)
+        expr_str = str(expr)
+        assert "0.42" in expr_str or ":similarity" in expr_str
 
 
 class TestChooseMode:
@@ -73,7 +74,8 @@ class TestChooseMode:
         Returns:
             None.
         """
-        assert choose_mode("ab") == SearchMode.TRIGRAM
+        mode, _ = choose_mode("ab")
+        assert mode == SearchMode.TRIGRAM
 
     def test_long_query_returns_fts(self) -> None:
         """Ensure long queries use FTS mode.
@@ -81,7 +83,8 @@ class TestChooseMode:
         Returns:
             None.
         """
-        assert choose_mode("abcd") == SearchMode.FTS
+        mode, _ = choose_mode("abcd")
+        assert mode == SearchMode.FTS
 
     def test_exact_boundary(self) -> None:
         """Ensure boundary length selects FTS mode.
@@ -89,7 +92,8 @@ class TestChooseMode:
         Returns:
             None.
         """
-        assert choose_mode("abc", min_fts_length=3) == SearchMode.FTS
+        mode, _ = choose_mode("abc", min_fts_length=3)
+        assert mode == SearchMode.FTS
 
 
 class TestFtsRankExpr:

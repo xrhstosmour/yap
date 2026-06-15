@@ -20,11 +20,23 @@ from enum import StrEnum
 from typing import Any
 
 from sqlmodel import func
-from sqlmodel import literal_column
 from sqlmodel import text
 
 from app.core.greeklish import greeklish_to_greek
 from app.core.settings import settings
+
+VALID_FTS_LANGUAGES = {
+    "simple",
+    "english",
+    "greek",
+    "german",
+    "french",
+    "spanish",
+    "italian",
+    "portuguese",
+    "russian",
+    "turkish",
+}
 
 __all__ = [
     "SearchMode",
@@ -69,7 +81,9 @@ class SearchMode(StrEnum):
     COMBINED = "combined"
 
 
-def build_fts_condition(column_expr, query_str: str, language: str | None = None) -> Any:
+def build_fts_condition(
+    column_expr, query_str: str, language: str | None = None
+) -> Any:  # noqa: ANN401
     """Build a PostgreSQL full-text search filter expression.
 
     Applies `unaccent()` to the column so diacritics in stored text
@@ -84,18 +98,23 @@ def build_fts_condition(column_expr, query_str: str, language: str | None = None
 
     Returns:
         SQLAlchemy expression equivalent to
-        `to_tsvector(language, unaccent(column_expr)) @@ plainto_tsquery(language, query_str)`.
+        `to_tsvector(language, unaccent(column_expr))
+        @@ plainto_tsquery(language, query_str)`.
     """
     if language is None:
         language = settings.FTS_LANGUAGE
+    if language not in VALID_FTS_LANGUAGES:
+        language = "simple"
     query_str = normalise_query(query_str)
-    language_expr: Any = literal_column(repr(language))
+    language_expr: Any = text(f"'{language}'")
     return func.to_tsvector(language_expr, func.unaccent(column_expr)).op("@@")(
         func.plainto_tsquery(language_expr, query_str)
     )
 
 
-def build_trigram_condition(column_expr, query_str: str, threshold: float = 0.3) -> Any:
+def build_trigram_condition(
+    column_expr, query_str: str, threshold: float = 0.3
+) -> Any:  # noqa: ANN401
     """Build a trigram similarity threshold expression.
 
     Applies `unaccent()` to both the column and the query so that
@@ -111,11 +130,17 @@ def build_trigram_condition(column_expr, query_str: str, threshold: float = 0.3)
         `similarity(unaccent(column_expr), unaccent(query_str)) >= threshold`.
     """
     query_str = normalise_query(query_str)
-    threshold_expr: Any = literal_column(str(float(threshold)))
-    return func.similarity(func.unaccent(column_expr), func.unaccent(query_str)) >= threshold_expr
+    return (
+        func.similarity(
+            func.unaccent(column_expr), func.unaccent(query_str)
+        )
+        >= threshold
+    )
 
 
-def build_ilike_condition(column_expr, query_str: str) -> Any:
+def build_ilike_condition(
+    column_expr, query_str: str
+) -> Any:  # noqa: ANN401
     """Build an ILIKE fallback expression for non-PostgreSQL engines.
 
     Args:
@@ -123,13 +148,18 @@ def build_ilike_condition(column_expr, query_str: str) -> Any:
         query_str: User-provided search query.
 
     Returns:
-        SQLAlchemy expression equivalent to `column_expr ILIKE %query_str%`.
+        SQLAlchemy expression equivalent to ``column_expr ILIKE %query_str%``.
+        Escapes ``%``, ``_``, and ``\\`` in the query string with a ``\\``
+        escape character.
     """
-    pattern_expr = text(":search_pattern").bindparams(search_pattern=f"%{query_str}%")
-    return column_expr.ilike(pattern_expr)
+    escaped = query_str.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    pattern = f"%{escaped}%"
+    return column_expr.ilike(pattern, escape="\\")
 
 
-def fts_rank_expr(column_expr, query_str: str, language: str | None = None) -> Any:
+def fts_rank_expr(
+    column_expr, query_str: str, language: str | None = None
+) -> Any:  # noqa: ANN401
     """Build a PostgreSQL FTS relevance ranking expression.
 
     Applies `unaccent()` to the column for consistency with
@@ -143,19 +173,22 @@ def fts_rank_expr(column_expr, query_str: str, language: str | None = None) -> A
 
     Returns:
         SQLAlchemy expression equivalent to
-        `ts_rank(to_tsvector(language, unaccent(column_expr)), plainto_tsquery(language, query_str))`.
+        `ts_rank(to_tsvector(language, unaccent(column_expr)),
+        plainto_tsquery(language, query_str))`.
     """
     if language is None:
         language = settings.FTS_LANGUAGE
+    if language not in VALID_FTS_LANGUAGES:
+        language = "simple"
     query_str = normalise_query(query_str)
-    language_expr: Any = literal_column(repr(language))
+    language_expr: Any = text(f"'{language}'")
     return func.ts_rank(
         func.to_tsvector(language_expr, func.unaccent(column_expr)),
         func.plainto_tsquery(language_expr, query_str),
     )
 
 
-def choose_mode(query_str: str, min_fts_length: int = 3) -> SearchMode:
+def choose_mode(query_str: str, min_fts_length: int = 3) -> tuple[SearchMode, str]:
     """Choose search mode based on normalized query length.
 
     The query is normalised before length-checking so that Greeklish
@@ -166,9 +199,11 @@ def choose_mode(query_str: str, min_fts_length: int = 3) -> SearchMode:
         min_fts_length: Minimum trimmed length required to use FTS.
 
     Returns:
-        SearchMode.TRIGRAM when the trimmed query is shorter than
-        `min_fts_length`. Otherwise returns SearchMode.FTS.
+        A tuple of ``(SearchMode, normalized_query)``. Callers should pass the
+        pre-normalized query to ``build_fts_condition`` / ``build_trigram_condition``
+        to avoid a second normalization pass.
     """
-    if len(normalise_query(query_str)) < min_fts_length:
-        return SearchMode.TRIGRAM
-    return SearchMode.FTS
+    normalized = normalise_query(query_str)
+    if len(normalized) < min_fts_length:
+        return SearchMode.TRIGRAM, normalized
+    return SearchMode.FTS, normalized
