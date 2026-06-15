@@ -354,3 +354,36 @@ def test_celery_beat_default_starts() -> None:
             "info",
         ],
     )
+
+
+@pytest.mark.slow
+def test_core_compose_services_running() -> None:
+    """Verify core docker-compose services (postgresql, redis) are healthy.
+
+    RabbitMQ is excluded — the container has known stability issues on CI runners
+    due to Erlang VM memory limits.  Celery beat/worker tests will skip when the
+    broker is unreachable.
+    """
+    import json
+    import subprocess
+
+    proc = subprocess.run(
+        ["docker", "compose", "ps", "--format", "json"],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert proc.returncode == 0, f"docker compose ps failed: {proc.stderr}"
+    services = [
+        json.loads(line) for line in proc.stdout.strip().split("\n") if line.strip()
+    ]
+    core_svcs = {"postgresql", "redis"}
+    unhealthy = [
+        f"{s['Service']}={s['State']}"
+        for s in services
+        if s.get("Service") in core_svcs
+        and s.get("State") not in ("running", "healthy")
+    ]
+    assert not unhealthy, (
+        f"Core services unhealthy after startup: {unhealthy}"
+    )
