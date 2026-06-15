@@ -6,6 +6,7 @@ and defines common background tasks.
 
 from __future__ import annotations
 
+import ssl
 from typing import Any
 
 from celery import Celery
@@ -53,7 +54,7 @@ celery_app.conf.update(
         {
             "broker_use_ssl": {
                 "ca_certs": settings.SSL_CERTIFICATE_PATH,
-                "cert_reqs": "required",
+                "cert_reqs": ssl.CERT_REQUIRED,
             }
         }
         if settings.SSL_CERTIFICATE_PATH

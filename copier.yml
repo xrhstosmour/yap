@@ -215,6 +215,9 @@ _message_after_copy: |
   {%- if include_redis_commander %}
     Redis Commander:   http://localhost:8082
   {%- endif %}
+  {%- if include_minio %}
+    MinIO Console:     http://localhost:9001
+  {%- endif %}
   {%- if include_traefik %}
     Traefik:           http://{{ traefik_host or 'localhost' }}:8080
   {%- endif %}
