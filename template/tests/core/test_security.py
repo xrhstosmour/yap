@@ -167,9 +167,7 @@ class TestAPIKeyGeneration:
         assert "***" in masked
 
 
-# ---------------------------------------------------------------------------
 # Password edge cases
-# ---------------------------------------------------------------------------
 
 
 class TestPasswordEdgeCases:
@@ -191,9 +189,7 @@ class TestPasswordEdgeCases:
         assert result is False
 
 
-# ---------------------------------------------------------------------------
 # Token rate limiting
-# ---------------------------------------------------------------------------
 
 
 class TestTokenRateLimit:
@@ -223,9 +219,7 @@ class TestTokenRateLimit:
             await _check_token_rate_limit(mock_redis, "test", "user-1", 60)
 
 
-# ---------------------------------------------------------------------------
 # Redis-backed token management (shared fixtures)
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -248,9 +242,7 @@ def _patch_get_redis(mock_redis: AsyncMock) -> None:
         yield
 
 
-# ---------------------------------------------------------------------------
 # Email verification tokens
-# ---------------------------------------------------------------------------
 
 
 class TestEmailVerificationTokens:
@@ -306,9 +298,7 @@ class TestEmailVerificationTokens:
         assert result is None
 
 
-# ---------------------------------------------------------------------------
 # Password reset tokens
-# ---------------------------------------------------------------------------
 
 
 class TestPasswordResetTokens:
@@ -359,9 +349,7 @@ class TestPasswordResetTokens:
         assert result is None
 
 
-# ---------------------------------------------------------------------------
 # Magic link tokens
-# ---------------------------------------------------------------------------
 
 
 class TestMagicLinkTokens:
@@ -412,9 +400,7 @@ class TestMagicLinkTokens:
         assert result is None
 
 
-# ---------------------------------------------------------------------------
 # JWT edge cases
-# ---------------------------------------------------------------------------
 
 
 class TestJWTEdgeCases:
@@ -443,3 +429,154 @@ class TestJWTEdgeCases:
         """Garbage token should raise JWTError."""
         with pytest.raises(JWTError):
             decode_token("not.a.valid.jwt")
+
+
+# Access token additional_claims
+
+
+class TestAccessTokenAdditionalClaims:
+    """Tests for create_access_token with additional_claims."""
+
+    def test_create_access_token_with_additional_claims(self) -> None:
+        """Additional claims should be embedded in the token payload."""
+        claims = {"role": "admin", "tenant": "t-123"}
+        token = create_access_token(subject="user123", additional_claims=claims)
+        payload = decode_token(token)
+
+        assert payload["role"] == "admin"
+        assert payload["tenant"] == "t-123"
+        assert payload["sub"] == "user123"
+        assert payload["type"] == "access"
+
+    def test_create_access_token_with_explicit_expires_delta(self) -> None:
+        """Custom expires_delta should result in correct expiration window."""
+        from datetime import UTC
+        from datetime import datetime
+
+        delta = timedelta(minutes=10)
+        token = create_access_token(subject="user123", expires_delta=delta)
+        payload = decode_token(token)
+
+        exp = datetime.fromtimestamp(payload["exp"], tz=UTC)
+        now = datetime.now(UTC)
+        assert exp > now
+        # Should expire within ~12 minutes of now (allow clock skew).
+        assert exp <= now + timedelta(minutes=12)
+
+
+# Refresh token explicit expires_delta and additional_claims
+
+
+class TestRefreshTokenVariants:
+    """Tests for create_refresh_token with custom options."""
+
+    def test_create_refresh_token_with_explicit_expires_delta(self) -> None:
+        """Custom expires_delta on refresh token should be respected."""
+        from datetime import UTC
+        from datetime import datetime
+
+        delta = timedelta(days=1)
+        token = create_refresh_token(subject="user123", expires_delta=delta)
+        payload = decode_token(token)
+
+        assert payload["type"] == "refresh"
+        exp = datetime.fromtimestamp(payload["exp"], tz=UTC)
+        now = datetime.now(UTC)
+        assert exp > now
+        assert exp <= now + timedelta(days=2)
+
+    def test_create_refresh_token_with_additional_claims(self) -> None:
+        """Additional claims should be embedded in the refresh token payload."""
+        claims = {"session_id": "abc-123"}
+        token = create_refresh_token(subject="user456", additional_claims=claims)
+        payload = decode_token(token)
+
+        assert payload["type"] == "refresh"
+        assert payload["session_id"] == "abc-123"
+        assert payload["sub"] == "user456"
+
+
+# TOTP / 2FA
+
+
+class TestTOTP:
+    """Tests for TOTP secret generation, verification, and provisioning URI."""
+
+    def test_generate_totp_secret_returns_base32_string(self) -> None:
+        """generate_totp_secret should return a non-empty base32 string."""
+        from app.core.security import generate_totp_secret
+
+        secret = generate_totp_secret()
+        assert isinstance(secret, str)
+        assert len(secret) > 0
+        # Base32 alphabet: A-Z and 2-7
+        assert all(c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567" for c in secret)
+
+    def test_verify_totp_correct_code_returns_true(self) -> None:
+        """verify_totp with the current correct code should return True."""
+        import pyotp
+
+        from app.core.security import verify_totp
+
+        secret = pyotp.random_base32()
+        code = pyotp.TOTP(secret).now()
+        assert verify_totp(secret, code) is True
+
+    def test_verify_totp_wrong_code_returns_false(self) -> None:
+        """verify_totp with an incorrect code should return False."""
+        import pyotp
+
+        from app.core.security import verify_totp
+
+        secret = pyotp.random_base32()
+        # Generate a code that's definitely wrong (out of valid_window).
+        assert verify_totp(secret, "000000") is False
+
+    def test_build_totp_provisioning_uri_contains_username_and_issuer(self) -> None:
+        """build_totp_provisioning_uri should return a valid otpauth:// URI."""
+        from app.core.security import build_totp_provisioning_uri
+        from app.core.security import generate_totp_secret
+
+        secret = generate_totp_secret()
+        email = "test@example.com"
+        uri = build_totp_provisioning_uri(email, secret)
+
+        from urllib.parse import quote
+
+        assert uri.startswith("otpauth://totp/")
+        # pyotp URL-encodes the name/email in the URI.
+        assert quote(email) in uri
+        assert "issuer" in uri.lower()
+
+    def test_generate_recovery_codes_returns_10_formatted_codes(self) -> None:
+        """generate_recovery_codes should return 10 codes in XXXX-XXXX format."""
+        from app.core.security import generate_recovery_codes
+
+        codes = generate_recovery_codes()
+        assert isinstance(codes, list)
+        assert len(codes) == 10
+        for code in codes:
+            assert isinstance(code, str)
+            assert len(code) == 9  # XXXX-XXXX
+            assert code[4] == "-"
+            # All chars should be uppercase alphanumeric.
+            assert all(
+                c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-" for c in code
+            )
+
+
+# DUMMY_PASSWORD_HASH always returns False (already in TestPasswordEdgeCases,
+# but explicit verification_with_any_password test)
+
+
+class TestDummyPasswordHash:
+    """Explicit tests for DUMMY_PASSWORD_HASH behavior."""
+
+    def test_verify_password_with_dummy_hash_always_false(self) -> None:
+        """verify_password with DUMMY_PASSWORD_HASH returns False for any input."""
+        from app.core.security import DUMMY_PASSWORD_HASH
+        from app.core.security import verify_password
+
+        assert verify_password("anything", DUMMY_PASSWORD_HASH) is False
+        assert verify_password("", DUMMY_PASSWORD_HASH) is False
+        assert verify_password("correcthorsebatterystaple", DUMMY_PASSWORD_HASH) is False

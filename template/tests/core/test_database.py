@@ -1,0 +1,279 @@
+"""Tests for database module: init, close, session factory, and URI."""
+
+from __future__ import annotations
+
+from unittest.mock import AsyncMock
+from unittest.mock import MagicMock
+from unittest.mock import patch
+
+import pytest
+
+# init_db
+
+
+class TestInitDb:
+    """Tests for init_db engine connection."""
+
+    @pytest.mark.anyio
+    async def test_init_db_connects_and_pings(self) -> None:
+        """init_db opens a connection and executes SELECT 1."""
+        from app.database import init_db
+
+        mock_conn = AsyncMock()
+        mock_ctx = MagicMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_ctx.__aexit__ = AsyncMock(return_value=None)
+        mock_engine = MagicMock()
+        mock_engine.connect.return_value = mock_ctx
+
+        with patch("app.database.async_engine", mock_engine):
+            await init_db()
+
+        mock_engine.connect.assert_called_once()
+        mock_conn.execute.assert_awaited_once()
+
+
+# close_db
+
+
+class TestCloseDb:
+    """Tests for close_db engine disposal."""
+
+    @pytest.mark.anyio
+    async def test_close_db_disposes_engine(self) -> None:
+        """close_db calls dispose on the async engine."""
+        from app.database import close_db
+
+        mock_engine = MagicMock()
+        mock_engine.dispose = AsyncMock()
+
+        with patch("app.database.async_engine", mock_engine):
+            await close_db()
+
+        mock_engine.dispose.assert_awaited_once()
+
+
+# get_async_session
+
+
+class TestGetAsyncSession:
+    """Tests for the get_async_session FastAPI dependency."""
+
+    @pytest.mark.anyio
+    async def test_get_async_session_yields_and_commits_and_closes(self) -> None:
+        """get_async_session yields a session, commits, and closes it."""
+        from app.database import get_async_session
+
+        mock_session = AsyncMock()
+        mock_ctx = MagicMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_ctx.__aexit__ = AsyncMock(return_value=None)
+        mock_factory = MagicMock(return_value=mock_ctx)
+
+        with patch("app.database.async_session_factory", mock_factory):
+            async for session in get_async_session():
+                assert session is mock_session
+
+        mock_session.commit.assert_awaited_once()
+        mock_session.close.assert_awaited_once()
+
+    @pytest.mark.anyio
+    async def test_get_async_session_rolls_back_on_exception(self) -> None:
+        """get_async_session rolls back when the caller sends an exception.
+
+        FastAPI dependency injection sends exceptions back into the
+        generator via ``athrow()`` so the ``except Exception`` handler
+        inside ``get_async_session`` can call ``session.rollback()``.
+        """
+        from app.database import get_async_session
+
+        mock_session = AsyncMock()
+        mock_ctx = MagicMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_ctx.__aexit__ = AsyncMock(return_value=None)
+        mock_factory = MagicMock(return_value=mock_ctx)
+
+        with patch("app.database.async_session_factory", mock_factory):
+            gen = get_async_session()
+            await gen.__anext__()
+
+            # Simulate FastAPI sending the handler exception back into the
+            # dependency generator so rollback + close run.
+            with pytest.raises(ValueError, match="boom"):
+                await gen.athrow(ValueError("boom"))
+
+        mock_session.rollback.assert_awaited_once()
+        mock_session.close.assert_awaited_once()
+
+
+# DATABASE_URI
+
+
+class TestDatabaseURI:
+    """Tests for DATABASE_URI construction from settings."""
+
+    def test_database_uri_is_built_from_settings(self) -> None:
+        """DATABASE_URI includes host, database, port, and user from settings."""
+        from app.core.settings import Settings
+
+        s = Settings(
+            SECRET_KEY="test-secret-key-for-testing-only",
+            POSTGRESQL_PASSWORD="test-password",
+            FIRST_SUPERUSER_PASSWORD="test-password",
+            RABBITMQ_PASSWORD="test-password",
+            CRYPTO_KEY="test-crypto-key",
+            GOOGLE_CLIENT_SECRET="test-secret",
+            SMTP_PASSWORD="test-smtp-pass",
+            STORAGE_SECRET_KEY="test-storage-key",
+            POSTGRESQL_USER="myuser",
+            POSTGRESQL_DATABASE="mydb",
+            POSTGRESQL_SERVER="myhost",
+            POSTGRESQL_PORT=5433,
+        )
+
+        uri = str(s.DATABASE_URI)
+        assert "myhost" in uri
+        assert "5433" in uri
+        assert "mydb" in uri
+        assert "myuser" in uri
+
+    def test_database_uri_defaults_use_localhost(self) -> None:
+        """DATABASE_URI defaults to localhost:5432/testdb."""
+        from app.core.settings import settings
+
+        uri = str(settings.DATABASE_URI)
+        assert "localhost" in uri
+        assert "5432" in uri
+        # The database name and credentials depend on .env / settings defaults.
+        # We verify that the URI points at the correct host and port.
+        assert "://" in uri and "localhost" in uri and "5432" in uri
+
+    def test_database_uri_includes_ssl_query_params(self) -> None:
+        """DATABASE_URI appends sslmode and other SSL query parameters."""
+        from app.core.settings import Settings
+
+        s = Settings(
+            SECRET_KEY="test-secret-key-for-testing-only",
+            POSTGRESQL_PASSWORD="test-password",
+            FIRST_SUPERUSER_PASSWORD="test-password",
+            RABBITMQ_PASSWORD="test-password",
+            CRYPTO_KEY="test-crypto-key",
+            GOOGLE_CLIENT_SECRET="test-secret",
+            SMTP_PASSWORD="test-smtp-pass",
+            STORAGE_SECRET_KEY="test-storage-key",
+            POSTGRESQL_USER="ssluser",
+            POSTGRESQL_DATABASE="ssldb",
+            POSTGRESQL_SERVER="sslhost",
+            POSTGRESQL_PORT=5432,
+            POSTGRESQL_SSL_MODE="require",
+            POSTGRESQL_SSL_CA="/path/to/ca.pem",
+            POSTGRESQL_SSL_CERT="/path/to/cert.pem",
+            POSTGRESQL_SSL_KEY="/path/to/key.pem",
+        )
+
+        uri = str(s.DATABASE_URI)
+        assert "sslmode=require" in uri
+        assert "sslrootcert=/path/to/ca.pem" in uri
+        assert "sslcert=/path/to/cert.pem" in uri
+        assert "sslkey=/path/to/key.pem" in uri
+
+
+# AsyncSessionFactory
+
+
+class TestAsyncSessionFactory:
+    """Tests for the async_session_factory configuration."""
+
+    def test_async_session_factory_uses_async_session_class(self) -> None:
+        """async_session_factory is configured with class_=AsyncSession."""
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        from app.database import async_session_factory
+
+        # The factory's class is AsyncSession, not the default AsyncSession.
+        assert async_session_factory.class_ is AsyncSession
+
+    def test_async_session_factory_expire_on_commit_is_false(self) -> None:
+        """async_session_factory does not expire objects on commit."""
+        from app.database import async_session_factory
+
+        assert async_session_factory.kw["expire_on_commit"] is False
+
+    def test_async_session_factory_autoflush_is_false(self) -> None:
+        """async_session_factory has autoflush disabled."""
+        from app.database import async_session_factory
+
+        assert async_session_factory.kw["autoflush"] is False
+
+
+# lifespan (from app.main – may not be available until the template is rendered)
+
+import sys  # noqa: E402
+
+_main_stub_modules: dict[str, MagicMock] = {
+    "app.core.telemetry": MagicMock(),
+}
+for _m_name, _m_value in _main_stub_modules.items():
+    if _m_name not in sys.modules:
+        sys.modules[_m_name] = _m_value
+
+try:
+    from app.main import lifespan  # noqa: E402
+except ImportError:
+    lifespan = None  # type: ignore[assignment]
+
+
+@pytest.mark.skipif(
+    lifespan is None,
+    reason="app.main module not available (template not rendered)",
+)
+class TestLifespan:
+    """Tests for the lifespan() context manager that handles DB lifecycle."""
+
+    @pytest.mark.anyio
+    async def test_lifespan_initializes_and_closes_db(self) -> None:
+        """lifespan calls init_db on startup and close_db + close_redis on shutdown."""
+        mock_app = MagicMock()
+
+        with patch(
+            "app.main.init_db", new_callable=AsyncMock
+        ) as mock_init, patch(
+            "app.main.close_db", new_callable=AsyncMock
+        ) as mock_close, patch(
+            "app.main.close_redis", new_callable=AsyncMock
+        ) as mock_redis_close, patch(
+            "app.main.setup_logging"
+        ):
+            # setup_tracing is imported lazily inside lifespan and already
+            # wrapped in try/except, so we do not need an explicit patch.
+            async with lifespan(mock_app):
+                pass
+
+        mock_init.assert_awaited_once()
+        mock_close.assert_awaited_once()
+        mock_redis_close.assert_awaited_once()
+
+    @pytest.mark.anyio
+    async def test_lifespan_handles_init_db_failure(self) -> None:
+        """lifespan catches init_db failure and still runs shutdown hooks."""
+        mock_app = MagicMock()
+
+        with patch(
+            "app.main.init_db",
+            new_callable=AsyncMock,
+            side_effect=Exception("DB connection failed"),
+        ) as mock_init, patch(
+            "app.main.close_db", new_callable=AsyncMock
+        ) as mock_close, patch(
+            "app.main.close_redis", new_callable=AsyncMock
+        ) as mock_redis_close, patch(
+            "app.main.setup_logging"
+        ):
+            # lifespan must not propagate the init_db error.
+            async with lifespan(mock_app):
+                pass
+
+        mock_init.assert_awaited_once()
+        # Shutdown hooks must still execute.
+        mock_close.assert_awaited_once()
+        mock_redis_close.assert_awaited_once()
