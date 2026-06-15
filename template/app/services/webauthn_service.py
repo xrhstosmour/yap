@@ -46,9 +46,11 @@ class WebAuthnError(Exception):
     pass
 
 
-def _dataclass_to_dict(obj: Any) -> dict[str, Any]:
+def _dataclass_to_dict(obj: Any) -> dict[str, Any]:  # noqa: ANN401
     """Convert a dataclass to a JSON-safe dict."""
-    result: dict[str, Any] = json.loads(json.dumps(dataclasses.asdict(obj), default=str))
+    result: dict[str, object] = json.loads(
+        json.dumps(dataclasses.asdict(obj), default=str)
+    )
     return result
 
 
