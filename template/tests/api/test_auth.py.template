@@ -90,6 +90,32 @@ class TestAuthLogin:
 
         assert response.status_code == 401
 
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_login_inactive_user_returns_403(
+        self, client: AsyncClient, session
+    ) -> None:
+        """Login should return 403 for inactive users."""
+        auth_service = _auth_service(session)
+        user = await auth_service.register(
+            RegisterRequest(
+                email="inactive@{{ project_slug }}.com", password="password123"
+            )
+        )
+        await auth_service.user_repository.update(
+            user.id, {"is_active": False}
+        )
+
+        response = await client.post(
+            "/api/v1/auth/login",
+            data={
+                "username": "inactive@{{ project_slug }}.com",
+                "password": "password123",
+            },
+        )
+
+        assert response.status_code == 403
+        assert "inactive" in response.json()["detail"].lower()
+
 
 class TestAuthRefresh:
     """Tests for POST /api/v1/auth/refresh."""
@@ -153,6 +179,59 @@ class TestAuthRegister:
         )
 
         assert response.status_code == 400
+
+
+class TestChangePassword:
+    """Tests for POST /api/v1/auth/change-password."""
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_change_password_wrong_current_returns_400(
+        self, client: AsyncClient, session
+    ) -> None:
+        """Change password with wrong current password should return 400."""
+        auth_service = _auth_service(session)
+        user = await auth_service.register(
+            RegisterRequest(
+                email="changepw@{{ project_slug }}.com", password="password123"
+            )
+        )
+        access_token = create_access_token(subject=user.id)
+
+        response = await client.post(
+            "/api/v1/auth/change-password",
+            json={
+                "current_password": "wrongpassword",
+                "new_password": "newpassword123",
+            },
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        assert response.status_code == 400
+        assert "incorrect" in response.json()["detail"].lower()
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_change_password_success(
+        self, client: AsyncClient, session
+    ) -> None:
+        """Change password with correct current password should return 204."""
+        auth_service = _auth_service(session)
+        user = await auth_service.register(
+            RegisterRequest(
+                email="changepw2@{{ project_slug }}.com", password="oldpassword1"
+            )
+        )
+        access_token = create_access_token(subject=user.id)
+
+        response = await client.post(
+            "/api/v1/auth/change-password",
+            json={
+                "current_password": "oldpassword1",
+                "new_password": "newpassword1",
+            },
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        assert response.status_code == 204
 
 
 class TestEmailVerification:
@@ -499,6 +578,33 @@ class TestTwoFactorAuth:
         data = response.json()
         assert "access_token" in data
         assert "refresh_token" in data
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_verify_challenge_invalid_totp(
+        self,
+        client: AsyncClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verifying a 2FA challenge with an invalid TOTP code should return 401."""
+        from app.services.two_factor_service import InvalidTOTPError
+
+        async def _fake_verify_challenge(self, token: str, totp_code: str):
+            raise InvalidTOTPError("Invalid TOTP code")
+
+        monkeypatch.setattr(
+            "app.services.two_factor_service.TwoFactorAuthService.verify_challenge",
+            _fake_verify_challenge,
+        )
+
+        response = await client.post(
+            "/api/v1/auth/2fa/verify",
+            json={
+                "challenge_token": "valid-challenge",
+                "totp_code": "000000",
+            },
+        )
+
+        assert response.status_code == 401
 
 
 class TestMagicLink:
