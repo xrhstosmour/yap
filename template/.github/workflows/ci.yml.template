@@ -1,0 +1,200 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: {% raw %}${{ github.workflow }}-${{ github.ref }}{% endraw %}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --extra dev
+      - run: uv run ruff check app/ tests/
+      - run: uv run ruff format --check app/ tests/
+      - run: uv run mypy app/ --config-file mypy-ci.toml
+
+  test:
+    needs: lint
+    runs-on: ubuntu-latest
+    services:
+      postgresql:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: testdb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Generate secrets
+        run: |
+          echo "SECRET_KEY=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')" >> $GITHUB_ENV
+          echo "CRYPTO_KEY=$(python3 -c 'import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())')" >> $GITHUB_ENV
+          echo "RABBITMQ_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')" >> $GITHUB_ENV
+          echo "FIRST_SUPERUSER_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')" >> $GITHUB_ENV
+{% if include_minio %}
+      - name: Start MinIO
+        run: |
+          docker run -d --rm \
+            -p 9000:9000 -p 9001:9001 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio server /data --console-address ":9001"
+          for i in $(seq 1 10); do
+            if curl -sf http://localhost:9000/minio/health/live; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+{% endif %}
+{% if include_glitchtip %}
+      - name: Start GlitchTip
+        run: |
+          docker run -d --rm -p 8081:8081 glitchtip/glitchtip
+          for i in $(seq 1 10); do
+            if curl -sf http://localhost:8081; then exit 0; fi
+            sleep 2
+          done
+          exit 1
+{% endif %}
+{% if include_metabase %}
+      - name: Start Metabase
+        run: |
+          docker run -d --rm -p 3000:3000 metabase/metabase
+          for i in $(seq 1 10); do
+            if curl -sf http://localhost:3000/api/health; then exit 0; fi
+            sleep 2
+          done
+          exit 1
+{% endif %}
+{% if include_pgadmin4 %}
+      - name: Start pgAdmin4
+        run: |
+          docker run -d --rm -p 5050:80 \
+            -e PGADMIN_DEFAULT_EMAIL=admin@example.com \
+            -e PGADMIN_DEFAULT_PASSWORD=admin \
+            dpage/pgadmin4
+          for i in $(seq 1 10); do
+            if docker ps --filter "ancestor=dpage/pgadmin4" --filter "status=running" | grep -q pgadmin4; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+{% endif %}
+{% if include_mailpit %}
+      - name: Start Mailpit
+        run: |
+          docker run -d --rm -p 8025:8025 -p 1025:1025 axllent/mailpit
+          for i in $(seq 1 10); do
+            if curl -sf http://localhost:8025/api/v1/info; then exit 0; fi
+            sleep 2
+          done
+          exit 1
+{% endif %}
+{% if include_redis_commander %}
+      - name: Start Redis Commander
+        run: |
+          docker run -d --rm -p 8082:8081 \
+            -e REDIS_HOSTS=local:redis:6379 \
+            rediscommander/redis-commander
+          for i in $(seq 1 10); do
+            if docker ps --filter "ancestor=rediscommander/redis-commander" --filter "status=running" | grep -q redis; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+{% endif %}
+{% if include_flower %}
+      - name: Start Flower
+        run: |
+          docker run -d --rm -p 5555:5555 mher/flower
+          for i in $(seq 1 10); do
+            if docker ps --filter "ancestor=mher/flower" --filter "status=running" | grep -q flower; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+{% endif %}
+{% if include_traefik %}
+      - name: Start Traefik
+        run: |
+          docker run -d --rm -p 8080:8080 \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            traefik:latest --api.insecure=true --providers.docker
+          for i in $(seq 1 10); do
+            if docker ps --filter "ancestor=traefik:latest" --filter "status=running" | grep -q traefik; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+{% endif %}
+      - run: uv sync --extra dev
+      - run: uv run pytest tests/ -v --tb=short --cov=app --cov-report=xml
+        env:
+          POSTGRESQL_SERVER: localhost
+          POSTGRESQL_HOST: localhost
+          POSTGRESQL_PORT: 5432
+          POSTGRESQL_USER: app
+          POSTGRESQL_PASSWORD: testpass
+          POSTGRESQL_DATABASE: testdb
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+          ENVIRONMENT: local
+      - name: Run smoke test
+        run: uv run pytest tests/test_startup.py::test_api_smoke -v --tb=short
+        env:
+          POSTGRESQL_SERVER: localhost
+          POSTGRESQL_HOST: localhost
+          POSTGRESQL_PORT: 5432
+          POSTGRESQL_USER: app
+          POSTGRESQL_PASSWORD: testpass
+          POSTGRESQL_DATABASE: testdb
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+          ENVIRONMENT: local
+      - uses: codecov/codecov-action@v5
+        if: github.event_name == 'pull_request'
+        with:
+          files: ./coverage.xml
+
+  security:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL,HIGH
+          exit-code: 1
