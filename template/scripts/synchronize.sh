@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
+warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
+error() { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
+
+PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$PROJECT_DIR"
+
+echo ""
+echo "────────────────────────────────────────────────────────────"
+info "Synchronising with upstream YAP template"
+
+command -v copier >/dev/null 2>&1 || error "copier is required. Install with: uv tool install copier"
+command -v git >/dev/null 2>&1 || error "git is required"
+
+if [ -f .copier/.answers.yml ]; then
+    ANSWERS_FILE=".copier/.answers.yml"
+elif [ -f .copier-answers.yml ]; then
+    ANSWERS_FILE=".copier-answers.yml"
+else
+    # Auto-reconstruct answers from generated project files.
+    warn "No answers file found. Reconstructing from project files..."
+
+    project_name=$(grep '^PROJECT_NAME=' .env.example 2>/dev/null | cut -d= -f2 | tr -d '"')
+    project_slug=$(grep '^POSTGRESQL_USER=' .env.example 2>/dev/null | cut -d= -f2 | tr -d '"')
+    description=$(grep '^description' pyproject.toml 2>/dev/null | sed 's/.*= *"//;s/"$//')
+    author_name=$(grep 'name = "' pyproject.toml 2>/dev/null | head -1 | sed 's/.*name = "//;s/"$//')
+    author_email=$(grep 'email = "' pyproject.toml 2>/dev/null | head -1 | sed 's/.*email = "//;s/"$//')
+    superuser=$(grep '^FIRST_SUPERUSER_FULL_NAME=' .env.example 2>/dev/null | cut -d= -f2 | tr -d '"')
+    traefik_host=$(grep '^TRAEFIK_HOST=' .env.example 2>/dev/null | cut -d= -f2 | tr -d '"')
+    timezone=$(grep '^TIMEZONE=' .env.example 2>/dev/null | cut -d= -f2 | tr -d '"')
+    storage_region=$(grep '^STORAGE_REGION=' .env.example 2>/dev/null | cut -d= -f2 | tr -d '"')
+
+    has_extra() { grep -q "containers/.*/$1/docker-compose.yml" docker-compose.yml 2>/dev/null && echo "true" || echo "false"; }
+    include_traefik=$(has_extra "traefik")
+    include_glitchtip=$(has_extra "glitchtip")
+    include_metabase=$(has_extra "metabase")
+    include_pgadmin4=$(has_extra "pgadmin4")
+    include_mailpit=$(has_extra "mailpit")
+    include_redis_commander=$(has_extra "redis_commander")
+    include_flower=$(has_extra "flower")
+    include_minio=$(has_extra "minio")
+    include_redbeat=$(grep -q "redbeat" pyproject.toml 2>/dev/null && echo "true" || echo "false")
+
+    mkdir -p .copier
+    cat > .copier/.answers.yml << YAML
+_src_path: gh:xrhstosmour/yap
+project_name: $project_name
+project_slug: $project_slug
+description: $description
+author_name: $author_name
+author_email: $author_email
+first_superuser_full_name: $superuser
+include_traefik: $include_traefik
+traefik_host: $traefik_host
+timezone: $timezone
+include_glitchtip: $include_glitchtip
+glitchtip_secret_key: ""
+include_metabase: $include_metabase
+metabase_read_only_password: ""
+include_pgadmin4: $include_pgadmin4
+pgadmin4_password: ""
+include_mailpit: $include_mailpit
+include_redis_commander: $include_redis_commander
+redis_commander_password: ""
+include_flower: $include_flower
+flower_password: ""
+include_redbeat: $include_redbeat
+include_minio: $include_minio
+storage_region: $storage_region
+jwt_secret_key: ""
+postgresql_password: ""
+first_superuser_password: ""
+rabbitmq_password: ""
+redis_password: ""
+crypto_key: ""
+YAML
+
+    ANSWERS_FILE=".copier/.answers.yml"
+    info "Answers file reconstructed from project files."
+fi
+
+if [ -n "$(git status --porcelain)" ]; then
+    warn "Uncommitted changes detected."
+    warn "Commit or stash before running sync to avoid merge conflicts."
+    exit 1
+fi
+
+info "Pulling upstream template changes..."
+copier update --trust --conflict rej --answers-file "$ANSWERS_FILE" 2>&1 || error "copier update failed"
+
+if [ -f scripts/assemble.py ]; then
+    info "Reassembling container configurations..."
+    python3 scripts/assemble.py
+fi
+
+info "Installing dependencies..."
+uv sync --extra dev 2>/dev/null || uv sync
+
+echo ""
+info "Checking for changes..."
+if git diff --stat; then
+    echo ""
+    info "Review changes, resolve any .rej files, then commit."
+    echo "  git diff"
+    echo "  git add -A && git commit -m \"Sync upstream YAP template changes\""
+else
+    info "No changes — project is up to date."
+fi
+
+echo ""
+info "If services need restarting or secrets regenerating run:"
+echo "  ./scripts/setup.sh"
+echo ""
+echo "────────────────────────────────────────────────────────────"
+echo -e "  ${GREEN}Sync complete.${NC}"
