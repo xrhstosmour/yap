@@ -112,6 +112,9 @@ You need:
 # Full automated setup including environment variables, containerization, and initial data.
 ./scripts/setup.sh
 
+# Synchronize with upstream YAP template changes.
+./scripts/synchronize.sh
+
 # Start dev server.
 uv run fastapi dev app/main.py --host 0.0.0.0 --port 8000
 
