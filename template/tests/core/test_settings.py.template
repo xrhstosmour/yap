@@ -59,6 +59,10 @@ class TestSettingsValidation:
             POSTGRESQL_USER="testuser",
             POSTGRESQL_PASSWORD="testpass",
             POSTGRESQL_DATABASE="testdb",
+            SECRET_KEY="test-key",
+            FIRST_SUPERUSER_PASSWORD="test",
+            RABBITMQ_PASSWORD="test",
+            CRYPTO_KEY="dGVzdC1rZXktMzItYnl0ZXMtbG9uZw==",
         )
 
         uri = settings.DATABASE_URI
@@ -76,6 +80,11 @@ class TestSettingsValidation:
             REDIS_PORT=6379,
             REDIS_DATABASE=1,
             REDIS_PASSWORD="",
+            SECRET_KEY="test-key",
+            POSTGRESQL_PASSWORD="test",
+            FIRST_SUPERUSER_PASSWORD="test",
+            RABBITMQ_PASSWORD="test",
+            CRYPTO_KEY="dGVzdC1rZXktMzItYnl0ZXMtbG9uZw==",
         )
 
         assert settings.REDIS_URL == "redis://@localhost:6379/1"
@@ -88,6 +97,11 @@ class TestSettingsValidation:
             _env_file=None,
             BACKEND_CORS_ORIGINS=["http://localhost:3000", "http://localhost:8080"],
             FRONTEND_HOST="http://localhost:5173",
+            SECRET_KEY="test-key",
+            POSTGRESQL_PASSWORD="test",
+            FIRST_SUPERUSER_PASSWORD="test",
+            RABBITMQ_PASSWORD="test",
+            CRYPTO_KEY="dGVzdC1rZXktMzItYnl0ZXMtbG9uZw==",
         )
 
         assert "http://localhost:3000" in settings.all_cors_origins
