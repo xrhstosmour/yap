@@ -94,6 +94,21 @@ def disable_rate_limit_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("app.dependencies.check_api_key_rate_limit", _no_op)
 
 
+@pytest.fixture(name="disable_token_blacklist", autouse=True)
+def disable_token_blacklist_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Disable Redis blacklist checks and writes in tests by default."""
+
+    async def _not_blacklisted(*_args: Any, **_kwargs: Any) -> bool:  # noqa: ANN401
+        return False
+
+    async def _noop_blacklist(*_args: Any, **_kwargs: Any) -> None:  # noqa: ANN401
+        return None
+
+    monkeypatch.setattr("app.dependencies.is_token_blacklisted", _not_blacklisted)
+    monkeypatch.setattr("app.core.security.blacklist_token", _noop_blacklist)
+    monkeypatch.setattr("app.services.auth_service.blacklist_token", _noop_blacklist)
+
+
 @pytest.fixture(name="override_settings")
 def override_settings_fixture() -> Settings:
     """Override settings for testing."""

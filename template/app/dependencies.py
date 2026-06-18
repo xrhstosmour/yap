@@ -23,6 +23,7 @@ from app.core.logging import get_logger
 from app.core.rate_limit import check_api_key_rate_limit
 from app.core.rate_limit import check_user_rate_limit
 from app.core.security import decode_token
+from app.core.security import is_token_blacklisted
 from app.core.tenant import set_current_tenant_id
 from app.database import get_async_session
 from app.models.api_key import APIKey
@@ -40,12 +41,12 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 # Type aliases for dependency injection.
 SessionDep = Annotated[AsyncSession, Depends(get_async_session)]
-TokenDep = Annotated[str, Depends(oauth2_scheme)]
+AccessTokenDependency = Annotated[str, Depends(oauth2_scheme)]
 
 
 async def get_current_user(
     session: SessionDep,
-    token: TokenDep,
+    token: AccessTokenDependency,
     request: Request,
 ) -> User:
     """Get the current authenticated user from JWT token.
@@ -78,6 +79,15 @@ async def get_current_user(
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Invalid token",
+            )
+
+        token_identifier = payload.get("jti")
+        if isinstance(token_identifier, str) and await is_token_blacklisted(
+            token_identifier
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Could not validate credentials",
             )
 
     except (JWTError, ExpiredSignatureError) as e:
@@ -226,6 +236,12 @@ async def get_optional_current_user(
 
         user_id = payload.get("sub")
         if not user_id:
+            return None
+
+        token_identifier = payload.get("jti")
+        if isinstance(token_identifier, str) and await is_token_blacklisted(
+            token_identifier
+        ):
             return None
 
     except (JWTError, ExpiredSignatureError):
