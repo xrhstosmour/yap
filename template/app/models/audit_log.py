@@ -38,6 +38,7 @@ class AuditAction(StrEnum):
     TOKEN_REFRESH = "token_refresh"
     PASSWORD_CHANGE = "password_change"
     PASSWORD_RESET_REQUEST = "password_reset_request"
+    SESSION_REVOKE = "session_revoke"
 
     # User Management.
     USER_CREATE = "user_create"

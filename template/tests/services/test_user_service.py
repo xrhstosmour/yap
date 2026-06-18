@@ -407,6 +407,49 @@ class TestDeleteMe:
         assert call_kwargs["resource_id"] == str(user.id)
 
 
+class TestRevokeAllSessions:
+    """Tests for UserService.revoke_all_sessions()."""
+
+    @pytest.mark.asyncio
+    async def test_revoke_all_sessions_success(
+        self, mock_user_service: UserService
+    ) -> None:
+        """Should increment token version and log audit entry."""
+        target_user = _make_user_mock()
+        revoked_by = _make_user_mock()
+
+        mock_user_service.user_repository.get = AsyncMock(return_value=target_user)
+        mock_user_service.user_repository.increment_token_version = AsyncMock()
+        mock_user_service.audit_repository.log_user_action = AsyncMock()
+
+        result = await mock_user_service.revoke_all_sessions(
+            user_id=target_user.id,
+            revoked_by=revoked_by,
+        )
+
+        assert result is True
+        mock_user_service.user_repository.increment_token_version.assert_awaited_once_with(
+            target_user.id
+        )
+        mock_user_service.audit_repository.log_user_action.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_revoke_all_sessions_user_not_found(
+        self, mock_user_service: UserService
+    ) -> None:
+        """Should return False when target user does not exist."""
+        revoked_by = _make_user_mock()
+        mock_user_service.user_repository.get = AsyncMock(return_value=None)
+
+        result = await mock_user_service.revoke_all_sessions(
+            user_id=uuid4(),
+            revoked_by=revoked_by,
+        )
+
+        assert result is False
+        mock_user_service.user_repository.increment_token_version.assert_not_called()
+
+
 # export_my_data
 
 

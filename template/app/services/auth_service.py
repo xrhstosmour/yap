@@ -7,6 +7,8 @@ user authentication, registration, and token management.
 from __future__ import annotations
 
 import secrets
+from datetime import UTC
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -14,8 +16,10 @@ from jose import ExpiredSignatureError
 from jose import JWTError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import SYSTEM_TENANT_ID
 from app.core.logging import get_logger
 from app.core.security import DUMMY_PASSWORD_HASH
+from app.core.security import blacklist_token
 from app.core.security import create_access_token
 from app.core.security import create_refresh_token
 from app.core.security import decode_token
@@ -93,6 +97,24 @@ class AuthService:
         """
         if len(password) < 8:
             logger.warning("password_too_weak", min_length=8)
+
+    @staticmethod
+    async def _blacklist_payload_token(payload: dict[str, Any]) -> None:
+        """Blacklist token from decoded payload when claims are present.
+
+        Args:
+            payload: Decoded JWT payload.
+        """
+        token_identifier = payload.get("jti")
+        token_expiration = payload.get("exp")
+
+        if not isinstance(token_identifier, str):
+            return
+        if not isinstance(token_expiration, (int, float)):
+            return
+
+        expires_at = datetime.fromtimestamp(token_expiration, tz=UTC)
+        await blacklist_token(token_identifier, expires_at)
 
     async def _update_password_and_invalidate(
         self, user: User, new_password: str
@@ -304,7 +326,13 @@ class AuthService:
             if token_version is not None and token_version != user.token_version:
                 raise AuthenticationError("Token invalidated due to password change")
 
-            return self.create_tokens(user)
+            token_response = self.create_tokens(user)
+            # Only the refresh token is blacklisted.  Access tokens are
+            # short-lived and expire naturally; blacklisting them adds
+            # Redis overhead with minimal security benefit.
+            await self._blacklist_payload_token(payload)
+
+            return token_response
 
         except (
             JWTError,
@@ -315,6 +343,46 @@ class AuthService:
         ) as e:
             logger.warning("token_refresh_failed", error=str(e))
             raise AuthenticationError("Invalid refresh token") from e
+
+    async def logout(
+        self,
+        user: User,
+        access_payload: dict[str, Any],
+        refresh_token: str | None = None,
+    ) -> None:
+        """Invalidate current access token and optional refresh token.
+
+        Args:
+            user: Authenticated user requesting logout.
+            access_payload: Decoded access token payload.
+            refresh_token: Optional refresh token to invalidate.
+
+        Raises:
+            AuthenticationError: If provided refresh token is invalid.
+        """
+        await self._blacklist_payload_token(access_payload)
+
+        if refresh_token:
+            try:
+                refresh_payload = decode_token(refresh_token)
+                if refresh_payload.get("type") != "refresh":
+                    raise AuthenticationError("Invalid token type")
+
+                refresh_subject = refresh_payload.get("sub")
+                if str(refresh_subject) != str(user.id):
+                    raise AuthenticationError("Invalid refresh token")
+
+                await self._blacklist_payload_token(refresh_payload)
+            except (JWTError, ExpiredSignatureError, ValueError) as error:
+                raise AuthenticationError("Invalid refresh token") from error
+
+        tenant_id = user.tenant_id or SYSTEM_TENANT_ID
+        await self.audit_repository.log_user_action(
+            action=AuditAction.LOGOUT,
+            user_id=user.id,
+            tenant_id=tenant_id,
+            email=user.email,
+        )
 
     async def change_password(
         self,

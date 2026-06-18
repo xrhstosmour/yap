@@ -205,6 +205,32 @@ class TestGetCurrentUser:
         assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
 
     @pytest.mark.asyncio
+    async def test_blacklisted_token_raises_403(self) -> None:
+        """Should raise 403 when token jti is blacklisted."""
+        request = _mock_request()
+        session = AsyncMock()
+
+        with patch(
+            "app.dependencies.decode_token",
+            return_value={
+                "sub": str(uuid4()),
+                "type": "access",
+                "jti": "blacklisted-jti",
+            },
+        ), patch(
+            "app.dependencies.is_token_blacklisted",
+            AsyncMock(return_value=True),
+        ):
+            with pytest.raises(HTTPException) as exc_info:
+                await get_current_user(
+                    session=session,
+                    token="blacklisted_token",
+                    request=request,
+                )
+
+        assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
+
+    @pytest.mark.asyncio
     async def test_wrong_token_type_raises_403(self) -> None:
         """Should raise 403 when token type is not 'access'."""
         request = _mock_request()
@@ -412,6 +438,30 @@ class TestGetOptionalCurrentUser:
         with patch(
             "app.dependencies.decode_token",
             return_value={"type": "access"},  # no "sub"
+        ):
+            result = await get_optional_current_user(
+                session=session,
+                request=request,
+            )
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_blacklisted_token_returns_none(self) -> None:
+        """Should return None when token jti is blacklisted."""
+        request = _mock_request(headers={"Authorization": "Bearer token"})
+        session = AsyncMock()
+
+        with patch(
+            "app.dependencies.decode_token",
+            return_value={
+                "sub": str(uuid4()),
+                "type": "access",
+                "jti": "blacklisted-jti",
+            },
+        ), patch(
+            "app.dependencies.is_token_blacklisted",
+            AsyncMock(return_value=True),
         ):
             result = await get_optional_current_user(
                 session=session,
