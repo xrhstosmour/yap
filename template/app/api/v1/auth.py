@@ -23,7 +23,7 @@ from app.core.security import decode_token
 from app.core.security import verify_email_verification_token
 from app.dependencies import AccessTokenDependency
 from app.dependencies import CurrentUser
-from app.dependencies import SessionDep
+from app.dependencies import SessionDependency
 from app.schemas.auth import GoogleAuthUrlResponse
 from app.schemas.auth import GoogleCallbackRequest
 from app.schemas.auth import LoginResponse
@@ -70,7 +70,7 @@ INVALID_VERIFICATION_TOKEN = "Invalid or expired verification token."
 )
 async def register(
     data: RegisterRequest,
-    session: SessionDep,
+    session: SessionDependency,
 ) -> TokenResponse:
     """Register a new user account.
 
@@ -100,7 +100,7 @@ async def register(
 )
 async def login(
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
-    session: SessionDep,
+    session: SessionDependency,
 ) -> LoginResponse:
     """Authenticate user and return tokens or a 2FA challenge."""
     from app.services.two_factor_service import TwoFactorAuthService
@@ -148,7 +148,7 @@ async def login(
 )
 async def enroll_2fa(
     current_user: CurrentUser,
-    session: SessionDep,
+    session: SessionDependency,
 ) -> TwoFactorEnrollResponse:
     """Begin TOTP 2FA enrollment for the current user.
 
@@ -183,7 +183,7 @@ async def enroll_2fa(
 async def confirm_2fa(
     data: TwoFactorConfirmRequest,
     current_user: CurrentUser,
-    session: SessionDep,
+    session: SessionDependency,
 ) -> None:
     """Confirm TOTP enrollment by verifying the first valid code."""
     from app.services.two_factor_service import InvalidTOTPError
@@ -219,7 +219,7 @@ async def confirm_2fa(
 )
 async def verify_2fa(
     data: TwoFactorVerifyRequest,
-    session: SessionDep,
+    session: SessionDependency,
 ) -> TokenResponse:
     """Complete 2FA login by verifying the challenge + TOTP or recovery code."""
     from app.services.two_factor_service import InvalidTOTPError
@@ -268,7 +268,7 @@ async def verify_2fa(
 async def disable_2fa(
     data: TwoFactorDisableRequest,
     current_user: CurrentUser,
-    session: SessionDep,
+    session: SessionDependency,
 ) -> None:
     """Disable TOTP 2FA for the current user."""
     from app.services.two_factor_service import InvalidTOTPError
@@ -307,7 +307,7 @@ async def disable_2fa(
 async def regenerate_recovery_codes(
     data: TwoFactorConfirmRequest,
     current_user: CurrentUser,
-    session: SessionDep,
+    session: SessionDependency,
 ) -> RecoveryCodesResponse:
     """Regenerate all 2FA recovery codes for the current user."""
     from app.services.two_factor_service import InvalidTOTPError
@@ -348,7 +348,7 @@ async def regenerate_recovery_codes(
 )
 async def refresh_token(
     data: RefreshTokenRequest,
-    session: SessionDep,
+    session: SessionDependency,
 ) -> TokenResponse:
     """Refresh access token using refresh token.
 
@@ -376,7 +376,7 @@ async def logout(
     data: LogoutRequest,
     current_user: CurrentUser,
     access_token: AccessTokenDependency,
-    session: SessionDep,
+    session: SessionDependency,
 ) -> None:
     """Logout current user by blacklisting token identifiers."""
     try:
@@ -410,7 +410,7 @@ async def logout(
 async def change_password(
     data: PasswordChangeRequest,
     current_user: CurrentUser,
-    session: SessionDep,
+    session: SessionDependency,
 ) -> None:
     """Change the current user's password.
 
@@ -454,7 +454,7 @@ async def get_me(current_user: CurrentUser) -> UserResponse:
 )
 async def send_verification_email(
     current_user: CurrentUser,
-    session: SessionDep,
+    session: SessionDependency,
 ) -> None:
     """Send an email verification link to the authenticated user.
 
@@ -480,7 +480,7 @@ async def send_verification_email(
     description="Verify email address using the token from the verification email.",
 )
 async def verify_email(
-    session: SessionDep,
+    session: SessionDependency,
     token: Annotated[
         str | None,
         Query(description="Verification token from email"),
@@ -523,7 +523,7 @@ async def verify_email(
 )
 async def forgot_password(
     data: PasswordResetRequest,
-    session: SessionDep,
+    session: SessionDependency,
 ) -> None:
     """Send a password reset email.
 
@@ -542,7 +542,7 @@ async def forgot_password(
 )
 async def reset_password(
     data: PasswordResetConfirmRequest,
-    session: SessionDep,
+    session: SessionDependency,
 ) -> None:
     """Reset a user's password using a valid reset token.
 
@@ -567,7 +567,7 @@ async def reset_password(
     description="Get the Google OAuth 2.0 authorization URL to start the login flow.",
 )
 async def google_auth(
-    session: SessionDep,
+    session: SessionDependency,
     redirect_uri: Annotated[
         str, Query(description="URI Google should redirect to after consent")
     ],
@@ -598,7 +598,7 @@ async def google_auth(
 )
 async def webauthn_register_begin(
     current_user: CurrentUser,
-    session: SessionDep,
+    session: SessionDependency,
 ) -> WebAuthnRegisterBeginResponse:
     """Begin WebAuthn passkey registration.
 
@@ -621,7 +621,7 @@ async def webauthn_register_begin(
 async def webauthn_register_complete(
     data: WebAuthnRegisterCompleteRequest,
     current_user: CurrentUser,
-    session: SessionDep,
+    session: SessionDependency,
 ) -> WebAuthnRegisterCompleteResponse:
     """Complete WebAuthn passkey registration.
 
@@ -655,7 +655,7 @@ async def webauthn_register_complete(
     description="Generate WebAuthn authentication options for passkey login.",
 )
 async def webauthn_login_begin(
-    session: SessionDep,
+    session: SessionDependency,
     data: WebAuthnLoginBeginRequest | None = None,
 ) -> WebAuthnLoginBeginResponse:
     """Begin WebAuthn passkey login.
@@ -679,7 +679,7 @@ async def webauthn_login_begin(
 )
 async def webauthn_login_complete(
     data: WebAuthnLoginCompleteRequest,
-    session: SessionDep,
+    session: SessionDependency,
 ) -> TokenResponse:
     """Complete WebAuthn passkey login.
 
@@ -710,7 +710,7 @@ async def webauthn_login_complete(
 )
 async def request_magic_link(
     data: MagicLinkRequest,
-    session: SessionDep,
+    session: SessionDependency,
 ) -> None:
     """Send a passwordless login link.
 
@@ -729,7 +729,7 @@ async def request_magic_link(
 )
 async def verify_magic_link(
     data: MagicLinkVerifyRequest,
-    session: SessionDep,
+    session: SessionDependency,
 ) -> TokenResponse:
     """Verify a magic link token and return JWT tokens.
 
@@ -754,7 +754,7 @@ async def verify_magic_link(
 )
 async def google_callback(
     data: GoogleCallbackRequest,
-    session: SessionDep,
+    session: SessionDependency,
 ) -> TokenResponse:
     """Complete the Google OAuth login flow.
 
