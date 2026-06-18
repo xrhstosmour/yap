@@ -23,8 +23,13 @@ import pyotp
 import qrcode
 import qrcode.constants
 from jose import jwt
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 
+from app.core.logging import get_logger
 from app.core.settings import settings
+
+logger = get_logger("core.security")
 
 # Password hashing configuration.
 # Using bcrypt directly as it's well-audited and production-proven.
@@ -80,6 +85,7 @@ DUMMY_PASSWORD_HASH: str = generate_password_hash(secrets.token_urlsafe(32))
 # JWT Token Management.
 
 ALGORITHM = settings.ALGORITHM
+_JWT_BLACKLIST_PREFIX = "jwt_blacklist"
 
 
 def create_access_token(
@@ -189,6 +195,56 @@ def decode_token(token: str) -> dict[str, Any]:
         jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM]),
     )
     return payload
+
+
+async def blacklist_token(token_identifier: str, expires_at: datetime) -> None:
+    """Blacklist a JWT token identifier in Redis until it expires.
+
+    Args:
+        token_identifier: JWT ``jti`` claim value.
+        expires_at: UTC expiration time from token ``exp``.
+    """
+    from app.core.cache import get_redis
+
+    now = datetime.now(UTC)
+    remaining_seconds = int((expires_at - now).total_seconds())
+    if remaining_seconds <= 0:
+        return
+
+    try:
+        redis = await get_redis()
+        key = f"{_JWT_BLACKLIST_PREFIX}:{token_identifier}"
+        await redis.setex(key, remaining_seconds, "1")
+    except (RedisConnectionError, RedisTimeoutError) as error:
+        logger.warning(
+            "blacklist_failed",
+            token_identifier=token_identifier,
+            error=str(error),
+        )
+        return
+
+
+async def is_token_blacklisted(token_identifier: str) -> bool:
+    """Check whether a JWT token identifier is blacklisted.
+
+    Fails open on Redis errors: returns ``False`` so that transient
+    outages do not lock out every user.  The ``token_version`` column
+    in the database provides hard revocation guarantees independently.
+
+    Args:
+        token_identifier: JWT ``jti`` claim value.
+
+    Returns:
+        True if blacklisted, False otherwise (including Redis errors).
+    """
+    from app.core.cache import get_redis
+
+    try:
+        redis = await get_redis()
+        key = f"{_JWT_BLACKLIST_PREFIX}:{token_identifier}"
+        return bool(await redis.exists(key) == 1)
+    except RedisConnectionError, RedisTimeoutError:
+        return False
 
 
 # API Key Management.

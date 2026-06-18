@@ -1,5 +1,6 @@
 """Unit tests for `Security` module."""
 
+from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
 from unittest.mock import AsyncMock
@@ -8,10 +9,13 @@ from uuid import uuid4
 
 import pytest
 from jose import JWTError
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from app.core.security import DUMMY_PASSWORD_HASH
 from app.core.security import TokenRateLimitError
 from app.core.security import _check_token_rate_limit
+from app.core.security import blacklist_token
 from app.core.security import create_access_token
 from app.core.security import create_email_verification_token
 from app.core.security import create_magic_link_token
@@ -21,6 +25,7 @@ from app.core.security import decode_token
 from app.core.security import generate_api_key
 from app.core.security import generate_api_key_id
 from app.core.security import generate_password_hash
+from app.core.security import is_token_blacklisted
 from app.core.security import mask_api_key
 from app.core.security import verify_email_verification_token
 from app.core.security import verify_magic_link_token
@@ -229,7 +234,104 @@ def mock_redis() -> AsyncMock:
     redis.set = AsyncMock(return_value="OK")
     redis.setex = AsyncMock()
     redis.getdel = AsyncMock()
+    redis.exists = AsyncMock(return_value=0)
     return redis
+
+
+class TestJWTBlacklist:
+    """Tests for JWT blacklist helper functions."""
+
+    @pytest.mark.asyncio
+    async def test_blacklist_token_stores_identifier_with_ttl(
+        self, mock_redis: AsyncMock, _patch_get_redis: None
+    ) -> None:
+        """blacklist_token should store key with remaining TTL."""
+        expires_at = datetime.now(UTC) + timedelta(minutes=5)
+
+        await blacklist_token("test-jti", expires_at)
+
+        mock_redis.setex.assert_awaited_once()
+        call_arguments = mock_redis.setex.call_args[0]
+        assert call_arguments[0] == "jwt_blacklist:test-jti"
+        assert isinstance(call_arguments[1], int)
+        assert call_arguments[1] > 0
+        assert call_arguments[2] == "1"
+
+    @pytest.mark.asyncio
+    async def test_blacklist_token_skips_expired_token(
+        self, mock_redis: AsyncMock, _patch_get_redis: None
+    ) -> None:
+        """blacklist_token should skip already expired tokens."""
+        expires_at = datetime.now(UTC) - timedelta(seconds=1)
+
+        await blacklist_token("expired-jti", expires_at)
+
+        mock_redis.setex.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_is_token_blacklisted_returns_true(
+        self, mock_redis: AsyncMock, _patch_get_redis: None
+    ) -> None:
+        """is_token_blacklisted should return True when key exists."""
+        mock_redis.exists = AsyncMock(return_value=1)
+
+        result = await is_token_blacklisted("known-jti")
+
+        assert result is True
+        mock_redis.exists.assert_awaited_once_with("jwt_blacklist:known-jti")
+
+    @pytest.mark.asyncio
+    async def test_is_token_blacklisted_returns_false(
+        self, mock_redis: AsyncMock, _patch_get_redis: None
+    ) -> None:
+        """is_token_blacklisted should return False when key does not exist."""
+        mock_redis.exists = AsyncMock(return_value=0)
+
+        result = await is_token_blacklisted("unknown-jti")
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_blacklist_token_swallows_redis_connection_error(
+        self, mock_redis: AsyncMock, _patch_get_redis: None
+    ) -> None:
+        """blacklist_token should not raise when Redis is unreachable."""
+        mock_redis.setex = AsyncMock(side_effect=RedisConnectionError("refused"))
+        expires_at = datetime.now(UTC) + timedelta(minutes=5)
+
+        await blacklist_token("jti-conn-err", expires_at)
+
+    @pytest.mark.asyncio
+    async def test_blacklist_token_swallows_redis_timeout_error(
+        self, mock_redis: AsyncMock, _patch_get_redis: None
+    ) -> None:
+        """blacklist_token should not raise on Redis timeout."""
+        mock_redis.setex = AsyncMock(side_effect=RedisTimeoutError("timed out"))
+        expires_at = datetime.now(UTC) + timedelta(minutes=5)
+
+        await blacklist_token("jti-timeout", expires_at)
+
+    @pytest.mark.asyncio
+    async def test_is_token_blacklisted_returns_false_on_redis_connection_error(
+        self, mock_redis: AsyncMock, _patch_get_redis: None
+    ) -> None:
+        """is_token_blacklisted should fail open when Redis is unreachable."""
+        mock_redis.exists = AsyncMock(side_effect=RedisConnectionError("refused"))
+
+        result = await is_token_blacklisted("jti-conn-err")
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_is_token_blacklisted_returns_false_on_redis_timeout(
+        self, mock_redis: AsyncMock, _patch_get_redis: None
+    ) -> None:
+        """is_token_blacklisted should fail open on Redis timeout."""
+        mock_redis.exists = AsyncMock(side_effect=RedisTimeoutError("timed out"))
+
+        result = await is_token_blacklisted("jti-timeout")
+
+        assert result is False
 
 
 @pytest.fixture
