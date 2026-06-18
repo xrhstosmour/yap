@@ -21,7 +21,7 @@ from app.core.logging import get_logger
 from app.core.pagination import PAGINATION_HEADERS_SPEC
 from app.core.pagination import PaginatedResponse
 from app.dependencies import CurrentUser
-from app.dependencies import SessionDep
+from app.dependencies import SessionDependency
 from app.dependencies import SuperuserUser
 from app.schemas.user import UserCreate
 from app.schemas.user import UserListParams
@@ -45,7 +45,7 @@ logger = get_logger("api.users")
 async def list_users(
     params: Annotated[UserListParams, Depends()],
     current_user: SuperuserUser,
-    session: SessionDep,
+    session: SessionDependency,
     request: Request,
 ) -> PaginatedResponse:
     """List all users (admin only).
@@ -101,7 +101,7 @@ async def get_me(current_user: CurrentUser) -> UserResponse:
 async def update_me(
     data: UserUpdateMe,
     current_user: CurrentUser,
-    session: SessionDep,
+    session: SessionDependency,
 ) -> UserResponse:
     """Update current user's profile."""
     service = UserService(session)
@@ -120,7 +120,7 @@ async def update_me(
 )
 async def delete_me(
     current_user: CurrentUser,
-    session: SessionDep,
+    session: SessionDependency,
 ) -> None:
     """Self-service account deletion (right to erasure).
 
@@ -140,7 +140,7 @@ async def delete_me(
 )
 async def export_my_data(
     current_user: CurrentUser,
-    session: SessionDep,
+    session: SessionDependency,
 ) -> Response:
     """Personal data export (right to data portability).
 
@@ -170,7 +170,7 @@ async def export_my_data(
 async def get_user(
     user_id: UUID,
     current_user: SuperuserUser,
-    session: SessionDep,
+    session: SessionDependency,
 ) -> UserResponse:
     """Get user by ID (admin only)."""
     service = UserService(session)
@@ -195,7 +195,7 @@ async def get_user(
 async def create_user(
     data: UserCreate,
     current_user: SuperuserUser,
-    session: SessionDep,
+    session: SessionDependency,
 ) -> UserResponse:
     """Create a new user (admin only)."""
     service = UserService(session)
@@ -220,7 +220,7 @@ async def update_user(
     user_id: UUID,
     data: UserUpdate,
     current_user: SuperuserUser,
-    session: SessionDep,
+    session: SessionDependency,
 ) -> UserResponse:
     """Update a user (admin only)."""
     service = UserService(session)
@@ -244,7 +244,7 @@ async def update_user(
 async def delete_user(
     user_id: UUID,
     current_user: SuperuserUser,
-    session: SessionDep,
+    session: SessionDependency,
 ) -> None:
     """Delete a user (admin only)."""
     service = UserService(session)
@@ -269,7 +269,7 @@ async def delete_user(
 async def revoke_user_sessions(
     user_id: UUID,
     current_user: SuperuserUser,
-    session: SessionDep,
+    session: SessionDependency,
 ) -> None:
     """Revoke all sessions for a user (admin only)."""
     service = UserService(session)

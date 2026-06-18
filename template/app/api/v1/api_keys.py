@@ -19,7 +19,7 @@ from app.core.logging import get_logger
 from app.core.pagination import PAGINATION_HEADERS_SPEC
 from app.core.pagination import PaginatedResponse
 from app.dependencies import CurrentUser
-from app.dependencies import SessionDep
+from app.dependencies import SessionDependency
 from app.schemas.api_key import APIKeyCreate
 from app.schemas.api_key import APIKeyCreateResponse
 from app.schemas.api_key import APIKeyListParams
@@ -42,7 +42,7 @@ logger = get_logger("api.api_keys")
 async def create_api_key(
     data: APIKeyCreate,
     current_user: CurrentUser,
-    session: SessionDep,
+    session: SessionDependency,
 ) -> APIKeyCreateResponse:
     """Create a new API key.
 
@@ -84,7 +84,7 @@ async def create_api_key(
 async def list_api_keys(
     params: Annotated[APIKeyListParams, Depends()],
     current_user: CurrentUser,
-    session: SessionDep,
+    session: SessionDependency,
     request: Request,
 ) -> PaginatedResponse:
     """List current user's API keys."""
@@ -124,7 +124,7 @@ async def update_api_key(
     key_id: UUID,
     data: APIKeyUpdate,
     current_user: CurrentUser,
-    session: SessionDep,
+    session: SessionDependency,
 ) -> APIKeyResponse:
     """Update an API key."""
     if not current_user.tenant_id:
@@ -160,7 +160,7 @@ async def update_api_key(
 async def delete_api_key(
     key_id: UUID,
     current_user: CurrentUser,
-    session: SessionDep,
+    session: SessionDependency,
 ) -> None:
     """Delete an API key."""
     if not current_user.tenant_id:
@@ -193,7 +193,7 @@ async def delete_api_key(
 async def revoke_api_key(
     key_id: UUID,
     current_user: CurrentUser,
-    session: SessionDep,
+    session: SessionDependency,
 ) -> None:
     """Revoke an API key."""
     if not current_user.tenant_id:

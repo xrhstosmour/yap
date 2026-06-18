@@ -14,7 +14,7 @@ from fastapi.requests import Request
 from app.core.logging import get_logger
 from app.core.pagination import PAGINATION_HEADERS_SPEC
 from app.core.pagination import PaginatedResponse
-from app.dependencies import SessionDep
+from app.dependencies import SessionDependency
 from app.dependencies import SuperuserUser
 from app.repositories.audit_repository import AuditLogRepository
 from app.schemas.tenant import TenantCreate
@@ -30,11 +30,11 @@ router = APIRouter(prefix="/tenants", tags=["Tenants"])
 logger = get_logger("api.tenants")
 
 
-def get_tenant_service(session: SessionDep) -> TenantService:
+def get_tenant_service(session: SessionDependency) -> TenantService:
     return TenantService(session, audit_repository=AuditLogRepository(session))
 
 
-TenantServiceDep = Annotated[TenantService, Depends(get_tenant_service)]
+TenantServiceDependency = Annotated[TenantService, Depends(get_tenant_service)]
 
 
 @router.get(
@@ -47,7 +47,7 @@ TenantServiceDep = Annotated[TenantService, Depends(get_tenant_service)]
 async def list_tenants(
     params: Annotated[TenantListParams, Depends()],
     current_user: SuperuserUser,
-    service: TenantServiceDep,
+    service: TenantServiceDependency,
     request: Request,
 ) -> PaginatedResponse:
     tenants, total = await service.list_tenants(
@@ -86,7 +86,7 @@ async def list_tenants(
 async def get_tenant(
     tenant_id: UUID,
     current_user: SuperuserUser,
-    service: TenantServiceDep,
+    service: TenantServiceDependency,
 ) -> TenantResponse:
     tenant = await service.get_by_id(tenant_id)
     if not tenant:
@@ -106,7 +106,7 @@ async def get_tenant(
 async def create_tenant(
     data: TenantCreate,
     current_user: SuperuserUser,
-    service: TenantServiceDep,
+    service: TenantServiceDependency,
 ) -> TenantResponse:
     try:
         tenant = await service.create(data, created_by=current_user.id)
@@ -127,7 +127,7 @@ async def update_tenant(
     tenant_id: UUID,
     data: TenantUpdate,
     current_user: SuperuserUser,
-    service: TenantServiceDep,
+    service: TenantServiceDependency,
 ) -> TenantResponse:
     try:
         tenant = await service.update(tenant_id, data, updated_by=current_user.id)
@@ -152,7 +152,7 @@ async def update_tenant(
 async def delete_tenant(
     tenant_id: UUID,
     current_user: SuperuserUser,
-    service: TenantServiceDep,
+    service: TenantServiceDependency,
 ) -> None:
     try:
         deleted = await service.delete(tenant_id, deleted_by=current_user.id)

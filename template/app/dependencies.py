@@ -40,12 +40,12 @@ logger = get_logger("deps")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 # Type aliases for dependency injection.
-SessionDep = Annotated[AsyncSession, Depends(get_async_session)]
+SessionDependency = Annotated[AsyncSession, Depends(get_async_session)]
 AccessTokenDependency = Annotated[str, Depends(oauth2_scheme)]
 
 
 async def get_current_user(
-    session: SessionDep,
+    session: SessionDependency,
     token: AccessTokenDependency,
     request: Request,
 ) -> User:
@@ -158,7 +158,7 @@ SuperuserUser = Annotated[User, Depends(get_current_superuser)]
 
 
 async def get_api_key_auth(
-    session: SessionDep,
+    session: SessionDependency,
     request: Request,
 ) -> APIKey | None:
     """Authenticate request using API key.
@@ -206,7 +206,7 @@ APIKeyAuth = Annotated[APIKey | None, Depends(get_api_key_auth)]
 
 
 async def get_optional_current_user(
-    session: SessionDep,
+    session: SessionDependency,
     request: Request,
 ) -> User | None:
     """Try to authenticate via JWT Bearer token, returning None on failure.
