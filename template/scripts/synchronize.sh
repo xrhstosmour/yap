@@ -46,8 +46,14 @@ else
     include_redbeat=$(grep -q "redbeat" pyproject.toml 2>/dev/null && echo "true" || echo "false")
 
     mkdir -p .copier
+
+    # Fetch latest YAP commit for copier version tracking.
+    _commit=$(git ls-remote "https://github.com/xrhstosmour/yap.git" HEAD \
+        | cut -f1) || _commit=""
+
     cat > .copier/.answers.yml << YAML
 _src_path: gh:xrhstosmour/yap
+_commit: $_commit
 project_name: $project_name
 project_slug: $project_slug
 description: $description
@@ -90,7 +96,27 @@ if [ -n "$(git status --porcelain)" ]; then
 fi
 
 info "Pulling upstream template changes..."
-copier update --trust --conflict rej --answers-file "$ANSWERS_FILE" 2>&1 || error "copier update failed"
+
+# Copier requires the destination to be a git repository.  If we are inside
+# a subdirectory of a larger repo (monorepo), initialise a temporary git
+# repo so copier's diff algorithm can work.
+TEMP_GIT=false
+if ! git rev-parse --git-dir >/dev/null 2>&1; then
+    warn "Not inside a git repo — initialising temporary git repo for copier."
+    git init --initial-branch=main . >/dev/null 2>&1
+    git add -A >/dev/null 2>&1
+    git commit --no-verify -m "Temporary baseline for copier update" >/dev/null 2>&1
+    TEMP_GIT=true
+fi
+
+copier update --trust --conflict rej --defaults \
+    --answers-file "$ANSWERS_FILE" 2>&1 || error "copier update failed"
+
+# Clean up temporary git repo if we created one.
+if [ "$TEMP_GIT" = true ]; then
+    rm -rf .git
+    info "Removed temporary git repo."
+fi
 
 if [ -f scripts/assemble.py ]; then
     info "Reassembling container configurations..."
