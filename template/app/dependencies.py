@@ -23,6 +23,7 @@ from app.core.logging import get_logger
 from app.core.rate_limit import check_api_key_rate_limit
 from app.core.rate_limit import check_user_rate_limit
 from app.core.security import decode_token
+from app.core.security import is_token_blacklisted
 from app.core.tenant import set_current_tenant_id
 from app.database import get_async_session
 from app.models.api_key import APIKey
@@ -39,13 +40,13 @@ logger = get_logger("deps")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 # Type aliases for dependency injection.
-SessionDep = Annotated[AsyncSession, Depends(get_async_session)]
-TokenDep = Annotated[str, Depends(oauth2_scheme)]
+SessionDependency = Annotated[AsyncSession, Depends(get_async_session)]
+AccessTokenDependency = Annotated[str, Depends(oauth2_scheme)]
 
 
 async def get_current_user(
-    session: SessionDep,
-    token: TokenDep,
+    session: SessionDependency,
+    token: AccessTokenDependency,
     request: Request,
 ) -> User:
     """Get the current authenticated user from JWT token.
@@ -78,6 +79,15 @@ async def get_current_user(
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Invalid token",
+            )
+
+        token_identifier = payload.get("jti")
+        if isinstance(token_identifier, str) and await is_token_blacklisted(
+            token_identifier
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Could not validate credentials",
             )
 
     except (JWTError, ExpiredSignatureError) as e:
@@ -148,7 +158,7 @@ SuperuserUser = Annotated[User, Depends(get_current_superuser)]
 
 
 async def get_api_key_auth(
-    session: SessionDep,
+    session: SessionDependency,
     request: Request,
 ) -> APIKey | None:
     """Authenticate request using API key.
@@ -196,7 +206,7 @@ APIKeyAuth = Annotated[APIKey | None, Depends(get_api_key_auth)]
 
 
 async def get_optional_current_user(
-    session: SessionDep,
+    session: SessionDependency,
     request: Request,
 ) -> User | None:
     """Try to authenticate via JWT Bearer token, returning None on failure.
@@ -226,6 +236,12 @@ async def get_optional_current_user(
 
         user_id = payload.get("sub")
         if not user_id:
+            return None
+
+        token_identifier = payload.get("jti")
+        if isinstance(token_identifier, str) and await is_token_blacklisted(
+            token_identifier
+        ):
             return None
 
     except (JWTError, ExpiredSignatureError):

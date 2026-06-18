@@ -333,6 +333,45 @@ class UserService:
 
         logger.info("account_self_deleted", user_id=str(user.id))
 
+    async def revoke_all_sessions(
+        self,
+        user_id: UUID,
+        revoked_by: User,
+    ) -> bool:
+        """Revoke all active JWT sessions for target user.
+
+        Args:
+            user_id: User whose sessions are revoked.
+            revoked_by: Superuser performing revocation.
+
+        Returns:
+            True when user exists and revocation succeeded.
+        """
+        user = await self.user_repository.get(user_id)
+        if not user:
+            return False
+
+        await self.user_repository.increment_token_version(user_id)
+
+        tenant_id = user.tenant_id or SYSTEM_TENANT_ID
+        await self.audit_repository.log_user_action(
+            action=AuditAction.SESSION_REVOKE,
+            user_id=revoked_by.id,
+            tenant_id=tenant_id,
+            email=revoked_by.email,
+            resource_type="user",
+            resource_id=str(user_id),
+            metadata={"revoked_for": str(user_id)},
+        )
+
+        logger.info(
+            "user_sessions_revoked",
+            user_id=str(user_id),
+            revoked_by=str(revoked_by.id),
+        )
+
+        return True
+
     async def export_my_data(self, user: User) -> dict[str, Any]:
         """Export all personal data for the user (GDPR Article 20).
 

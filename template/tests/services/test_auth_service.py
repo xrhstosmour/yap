@@ -1,6 +1,7 @@
 """Unit tests for `AuthService`."""
 
 from typing import cast
+from unittest.mock import ANY
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
 from unittest.mock import patch
@@ -9,6 +10,7 @@ from uuid import uuid7
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import decode_token
 from app.core.security import generate_password_hash
 from app.schemas.auth import RegisterRequest
 from app.services.auth_service import AuthenticationError
@@ -177,6 +179,80 @@ class TestAuthService:
         reloaded = await auth_service.user_repository.get(user.id)
         assert reloaded is not None
         assert reloaded.is_verified is True
+
+    @pytest.mark.asyncio
+    async def test_refresh_tokens_blacklists_old_refresh_token(
+        self, session: AsyncSession
+    ) -> None:
+        """Refreshing tokens should blacklist used refresh token jti."""
+        auth_service = _auth_service(session)
+        user = await auth_service.register(
+            RegisterRequest(
+                email="refresh-blacklist@example.com",
+                password="password123",
+            )
+        )
+        tokens = auth_service.create_tokens(user)
+
+        with patch(
+            "app.services.auth_service.blacklist_token",
+            AsyncMock(),
+        ) as mock_blacklist_token:
+            refreshed_tokens = await auth_service.refresh_tokens(tokens.refresh_token)
+
+        assert refreshed_tokens.access_token
+        assert refreshed_tokens.refresh_token
+        assert refreshed_tokens.refresh_token != tokens.refresh_token
+        mock_blacklist_token.assert_awaited_once_with(ANY, ANY)
+
+    @pytest.mark.asyncio
+    async def test_logout_blacklists_access_and_refresh_token(
+        self, session: AsyncSession
+    ) -> None:
+        """Logout should blacklist both provided token identifiers."""
+        auth_service = _auth_service(session)
+        user = await auth_service.register(
+            RegisterRequest(
+                email="logout-service@example.com",
+                password="password123",
+            )
+        )
+        tokens = auth_service.create_tokens(user)
+        access_payload = decode_token(tokens.access_token)
+
+        with patch(
+            "app.services.auth_service.blacklist_token",
+            AsyncMock(),
+        ) as mock_blacklist_token:
+            await auth_service.logout(
+                user=user,
+                access_payload=access_payload,
+                refresh_token=tokens.refresh_token,
+            )
+
+        assert mock_blacklist_token.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_logout_invalid_refresh_token_raises(
+        self, session: AsyncSession
+    ) -> None:
+        """Logout should reject invalid refresh token payload."""
+        auth_service = _auth_service(session)
+        user = await auth_service.register(
+            RegisterRequest(
+                email="logout-invalid-service@example.com",
+                password="password123",
+            )
+        )
+        tokens = auth_service.create_tokens(user)
+        access_payload = decode_token(tokens.access_token)
+
+        with pytest.raises(AuthenticationError):
+            await auth_service.logout(
+                user=user,
+                access_payload=access_payload,
+                refresh_token="bad-refresh-token",
+            )
 
 
 class TestAuthServiceCreateUser:

@@ -17,7 +17,7 @@ from sqlmodel import text
 from app.core.cache import get_redis
 from app.core.logging import get_logger
 from app.database import async_engine
-from app.dependencies import SessionDep
+from app.dependencies import SessionDependency
 from app.schemas.base import HealthResponse
 from app.schemas.base import MessageResponse
 
@@ -65,7 +65,7 @@ class MetricsResponse(BaseModel):
     summary="Health check",
     description="Check the health status of the API and its dependencies.",
 )
-async def health_check(session: SessionDep) -> HealthResponse:
+async def health_check(session: SessionDependency) -> HealthResponse:
     """Check health of API and dependencies.
 
     Returns the status of:
@@ -111,7 +111,7 @@ async def health_check(session: SessionDep) -> HealthResponse:
     summary="Readiness check",
     description="Check if the API is ready to accept requests.",
 )
-async def readiness_check(session: SessionDep) -> MessageResponse:
+async def readiness_check(session: SessionDependency) -> MessageResponse:
     """Check if API is ready.
 
     Used by load balancers and orchestrators to determine
@@ -153,7 +153,7 @@ async def liveness_check() -> MessageResponse:
     summary="System metrics",
     description="Get database pool and cache statistics for monitoring.",
 )
-async def get_metrics(session: SessionDep) -> MetricsResponse:
+async def get_metrics(session: SessionDependency) -> MetricsResponse:
     """Get system performance metrics.
 
     Returns database connection pool stats and cache stats

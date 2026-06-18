@@ -15,7 +15,7 @@ from fastapi import status
 
 from app.core.logging import get_logger
 from app.dependencies import CurrentUser
-from app.dependencies import SessionDep
+from app.dependencies import SessionDependency
 from app.schemas.files import FileMetadataResponse
 from app.schemas.files import FileUploadResponse
 from app.schemas.files import FileUrlResponse
@@ -35,7 +35,7 @@ logger = get_logger("api.files")
 async def upload_file(
     file: UploadFile,
     current_user: CurrentUser,
-    session: SessionDep,
+    session: SessionDependency,
     is_public: bool = False,
     resource_type: str | None = None,
     resource_id: str | None = None,
@@ -72,7 +72,7 @@ async def upload_file(
 async def get_file_url(
     file_id: UUID,
     current_user: CurrentUser,
-    session: SessionDep,
+    session: SessionDependency,
 ) -> FileUrlResponse:
     """Get a presigned download URL for a file.
 
@@ -101,7 +101,7 @@ async def get_file_url(
 async def get_file_metadata(
     file_id: UUID,
     current_user: CurrentUser,
-    session: SessionDep,
+    session: SessionDependency,
 ) -> FileMetadataResponse:
     """Get file metadata including dimensions, content hash, and timestamps."""
     service = FileService(session)
@@ -140,7 +140,7 @@ async def get_file_metadata(
 async def delete_file(
     file_id: UUID,
     current_user: CurrentUser,
-    session: SessionDep,
+    session: SessionDependency,
 ) -> None:
     """Delete a file.
 
