@@ -1,4 +1,4 @@
-# YAP — Yet Another Project
+# YAP: Yet Another Project
 
 Copier template for production-ready FastAPI backends. The root directory
 contains the template configuration; all application code lives under `template/`.
@@ -39,12 +39,12 @@ template/               # Scaffolded application (Jinja2 suffix: .template)
 
 ## CI pipeline (`.github/workflows/ci.yml`)
 
-1. **lint** — Renders the template via Copier, runs `ruff check`, `ruff format`,
+1. **lint**: Renders the template via Copier, runs `ruff check`, `ruff format`,
    `ruff format --check`, and `mypy` (using `mypy-ci.toml`).
-2. **test** — Renders the template (with tasks), sources `.env`, runs
+2. **test**: Renders the template (with tasks), sources `.env`, runs
    `pytest tests/ -v --tb=short --cov=app --cov-report=xml`.
    Minimum coverage: 82%.
-3. **security** — Trivy filesystem scan on `template/` for CRITICAL/HIGH/MEDIUM
+3. **security**: Trivy filesystem scan on `template/` for CRITICAL/HIGH/MEDIUM
    vulnerabilities.
 
 All three jobs run on `ubuntu-latest`. Lint must pass before test and security run.
