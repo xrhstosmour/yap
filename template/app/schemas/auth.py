@@ -76,6 +76,20 @@ class RefreshTokenRequest(BaseSchema):
     refresh_token: str = Field(description="Refresh token")
 
 
+class LogoutRequest(BaseSchema):
+    """Logout request.
+
+    Attributes:
+        refresh_token: Optional refresh token to invalidate together
+            with the current access token.
+    """
+
+    refresh_token: str | None = Field(
+        default=None,
+        description="Optional refresh token to revoke during logout",
+    )
+
+
 class PasswordChangeRequest(BaseSchema):
     """Password change request.
 
