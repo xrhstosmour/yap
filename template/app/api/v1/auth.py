@@ -15,14 +15,19 @@ from fastapi import HTTPException
 from fastapi import Query
 from fastapi import status
 from fastapi.security import OAuth2PasswordRequestForm
+from jose import ExpiredSignatureError
+from jose import JWTError
 
 from app.core.logging import get_logger
+from app.core.security import decode_token
 from app.core.security import verify_email_verification_token
+from app.dependencies import AccessTokenDependency
 from app.dependencies import CurrentUser
 from app.dependencies import SessionDep
 from app.schemas.auth import GoogleAuthUrlResponse
 from app.schemas.auth import GoogleCallbackRequest
 from app.schemas.auth import LoginResponse
+from app.schemas.auth import LogoutRequest
 from app.schemas.auth import MagicLinkRequest
 from app.schemas.auth import MagicLinkVerifyRequest
 from app.schemas.auth import PasswordChangeRequest
@@ -359,6 +364,41 @@ async def refresh_token(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid refresh token",
         ) from exc
+
+
+@router.post(
+    "/logout",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Logout",
+    description="Invalidate current access token and optional refresh token.",
+)
+async def logout(
+    data: LogoutRequest,
+    current_user: CurrentUser,
+    access_token: AccessTokenDependency,
+    session: SessionDep,
+) -> None:
+    """Logout current user by blacklisting token identifiers."""
+    try:
+        payload = decode_token(access_token)
+    except (JWTError, ExpiredSignatureError) as error:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid access token",
+        ) from error
+
+    service = AuthService(session)
+    try:
+        await service.logout(
+            user=current_user,
+            access_payload=payload,
+            refresh_token=data.refresh_token,
+        )
+    except AuthenticationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(error),
+        ) from error
 
 
 @router.post(
