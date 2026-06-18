@@ -255,3 +255,28 @@ async def delete_user(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found",
         )
+
+
+@router.post(
+    "/{user_id}/revoke-sessions",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Revoke all user sessions",
+    description=(
+        "Increment token version for a user, invalidating all active JWT "
+        "sessions immediately. Admin only."
+    ),
+)
+async def revoke_user_sessions(
+    user_id: UUID,
+    current_user: SuperuserUser,
+    session: SessionDep,
+) -> None:
+    """Revoke all sessions for a user (admin only)."""
+    service = UserService(session)
+    revoked = await service.revoke_all_sessions(user_id, current_user)
+
+    if not revoked:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
