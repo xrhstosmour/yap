@@ -67,7 +67,9 @@ class TestAPICreateAPIKey:
 
     @pytest.mark.anyio
     @pytest.mark.usefixtures("override_get_async_session")
-    async def test_create_api_key_returns_201(self, client: AsyncClient, session) -> None:
+    async def test_create_api_key_returns_201(
+        self, client: AsyncClient, session
+    ) -> None:
         """Authenticated user with a tenant should create an API key and get 201."""
         _, _, token = await _create_tenant_user_token(session)
 
@@ -88,7 +90,9 @@ class TestAPIListAPIKeys:
 
     @pytest.mark.anyio
     @pytest.mark.usefixtures("override_get_async_session")
-    async def test_list_api_keys_returns_paginated_response(self, client: AsyncClient, session) -> None:
+    async def test_list_api_keys_returns_paginated_response(
+        self, client: AsyncClient, session
+    ) -> None:
         """Authenticated user should be able to list their API keys."""
         _, _, token = await _create_tenant_user_token(session)
 
@@ -143,7 +147,9 @@ class TestAPIRevokeAPIKey:
 
     @pytest.mark.anyio
     @pytest.mark.usefixtures("override_get_async_session")
-    async def test_revoke_api_key_returns_204(self, client: AsyncClient, session) -> None:
+    async def test_revoke_api_key_returns_204(
+        self, client: AsyncClient, session
+    ) -> None:
         """Authenticated user should be able to revoke their API key."""
         _, _, token = await _create_tenant_user_token(session)
 
@@ -167,7 +173,9 @@ class TestAPIDeleteAPIKey:
 
     @pytest.mark.anyio
     @pytest.mark.usefixtures("override_get_async_session")
-    async def test_delete_api_key_returns_204(self, client: AsyncClient, session) -> None:
+    async def test_delete_api_key_returns_204(
+        self, client: AsyncClient, session
+    ) -> None:
         """Authenticated user should be able to delete their API key."""
         _, _, token = await _create_tenant_user_token(session)
 
@@ -190,7 +198,9 @@ class TestAPIUnauthorized:
     """Tests for unauthorized access to API key endpoints."""
 
     @pytest.mark.anyio
-    async def test_create_api_key_no_token_returns_401(self, client: AsyncClient) -> None:
+    async def test_create_api_key_no_token_returns_401(
+        self, client: AsyncClient
+    ) -> None:
         """POST /api-keys without a token should return 401."""
         response = await client.post(
             "/api/v1/api-keys",
@@ -199,13 +209,17 @@ class TestAPIUnauthorized:
         assert response.status_code == 401
 
     @pytest.mark.anyio
-    async def test_list_api_keys_no_token_returns_401(self, client: AsyncClient) -> None:
+    async def test_list_api_keys_no_token_returns_401(
+        self, client: AsyncClient
+    ) -> None:
         """GET /api-keys without a token should return 401."""
         response = await client.get("/api/v1/api-keys")
         assert response.status_code == 401
 
     @pytest.mark.anyio
-    async def test_update_api_key_no_token_returns_401(self, client: AsyncClient) -> None:
+    async def test_update_api_key_no_token_returns_401(
+        self, client: AsyncClient
+    ) -> None:
         """PATCH /api-keys/{id} without a token should return 401."""
         response = await client.patch(
             "/api/v1/api-keys/00000000-0000-0000-0000-000000000001",
@@ -214,7 +228,9 @@ class TestAPIUnauthorized:
         assert response.status_code == 401
 
     @pytest.mark.anyio
-    async def test_delete_api_key_no_token_returns_401(self, client: AsyncClient) -> None:
+    async def test_delete_api_key_no_token_returns_401(
+        self, client: AsyncClient
+    ) -> None:
         """DELETE /api-keys/{id} without a token should return 401."""
         response = await client.delete(
             "/api/v1/api-keys/00000000-0000-0000-0000-000000000001",

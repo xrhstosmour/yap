@@ -112,9 +112,7 @@ def build_fts_condition(
     )
 
 
-def build_trigram_condition(
-    column_expr, query_str: str, threshold: float = 0.3
-) -> Any:  # noqa: ANN401
+def build_trigram_condition(column_expr, query_str: str, threshold: float = 0.3) -> Any:  # noqa: ANN401
     """Build a trigram similarity threshold expression.
 
     Applies `unaccent()` to both the column and the query so that
@@ -131,16 +129,12 @@ def build_trigram_condition(
     """
     query_str = normalise_query(query_str)
     return (
-        func.similarity(
-            func.unaccent(column_expr), func.unaccent(query_str)
-        )
+        func.similarity(func.unaccent(column_expr), func.unaccent(query_str))
         >= threshold
     )
 
 
-def build_ilike_condition(
-    column_expr, query_str: str
-) -> Any:  # noqa: ANN401
+def build_ilike_condition(column_expr, query_str: str) -> Any:  # noqa: ANN401
     """Build an ILIKE fallback expression for non-PostgreSQL engines.
 
     Args:
@@ -157,9 +151,7 @@ def build_ilike_condition(
     return column_expr.ilike(pattern, escape="\\")
 
 
-def fts_rank_expr(
-    column_expr, query_str: str, language: str | None = None
-) -> Any:  # noqa: ANN401
+def fts_rank_expr(column_expr, query_str: str, language: str | None = None) -> Any:  # noqa: ANN401
     """Build a PostgreSQL FTS relevance ranking expression.
 
     Applies `unaccent()` to the column for consistency with

@@ -134,6 +134,7 @@ def circuit_breaker(name: str, **kwargs: int) -> Callable[[F], F]:
 
     def decorator(func: F) -> F:
         if asyncio.iscoroutinefunction(func):
+
             @functools.wraps(func)
             async def async_wrapper(  # noqa: ANN401
                 *args: Any,  # noqa: ANN401
@@ -146,6 +147,7 @@ def circuit_breaker(name: str, **kwargs: int) -> Callable[[F], F]:
                 except Exception as e:
                     breaker.failure(e)  # type: ignore[attr-defined]
                     raise
+
             return cast(F, async_wrapper)
         else:
             return cast(F, breaker(func))

@@ -245,9 +245,11 @@ def main() -> None:
 
     # Write SSL_CERTIFICATE_PATH so Python's ssl module trusts the self-signed CA.
     certs_env = os.path.join(containers_directory, ".certificates")
-    ca_cert = os.path.abspath(os.path.join(
-        containers_directory, MAP["rabbitmq"], "certificates", "ca_certificate.pem"
-    ))
+    ca_cert = os.path.abspath(
+        os.path.join(
+            containers_directory, MAP["rabbitmq"], "certificates", "ca_certificate.pem"
+        )
+    )
     with open(certs_env, "w") as f:
         f.write(f"SSL_CERTIFICATE_PATH={ca_cert}\n")
     print(f"  Wrote {certs_env}")

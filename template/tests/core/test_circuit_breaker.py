@@ -105,9 +105,7 @@ def test_get_state_returns_open_after_tripping() -> None:
 
 def test_get_state_returns_half_open_after_timeout() -> None:
     """After reset_timeout passes, an OPEN breaker transitions to HALF_OPEN on next call."""
-    breaker = CircuitBreakerService.get_breaker(
-        "test", fail_max=1, reset_timeout=0.01
-    )
+    breaker = CircuitBreakerService.get_breaker("test", fail_max=1, reset_timeout=0.01)
     # Set success_threshold > 1 so the breaker stays in HALF_OPEN after one
     # successful post-timeout call instead of jumping straight to CLOSED.
     breaker.success_threshold = 2
@@ -270,7 +268,9 @@ async def test_circuit_breaker_async_decorator_calls_breaker_failure() -> None:
 
 
 @pytest.mark.asyncio
-async def test_circuit_breaker_async_decorator_does_not_call_success_on_failure() -> None:
+async def test_circuit_breaker_async_decorator_does_not_call_success_on_failure() -> (
+    None
+):
     """breaker.success() must NOT be called when the async function raises."""
 
     @circuit_breaker("test_async_fail2", fail_max=5)

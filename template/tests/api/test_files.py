@@ -1,4 +1,5 @@
 """Integration tests for File API endpoints."""
+
 from __future__ import annotations
 
 from typing import cast
@@ -41,9 +42,7 @@ class TestFileUpload:
 
         auth_service = AuthService(cast(AsyncSession, session))
         user = await auth_service.register(
-            RegisterRequest(
-                email="file-upload@testapp.com", password="password123"
-            )
+            RegisterRequest(email="file-upload@testapp.com", password="password123")
         )
         token = create_access_token(subject=user.id)
 

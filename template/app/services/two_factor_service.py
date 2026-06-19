@@ -162,9 +162,7 @@ class TwoFactorAuthService:
         try:
             secret = decrypt(user.totp_secret_encrypted)
         except Exception as e:
-            raise TwoFactorError(
-                "TOTP secret corrupted, please re-enroll"
-            ) from e
+            raise TwoFactorError("TOTP secret corrupted, please re-enroll") from e
 
         if not verify_totp(secret, totp_code):
             raise InvalidTOTPError("Invalid TOTP code.")
@@ -233,9 +231,7 @@ class TwoFactorAuthService:
         try:
             secret = decrypt(user.totp_secret_encrypted)
         except Exception as e:
-            raise TwoFactorError(
-                "TOTP secret corrupted, please re-enroll"
-            ) from e
+            raise TwoFactorError("TOTP secret corrupted, please re-enroll") from e
 
         if not verify_totp(secret, totp_code):
             raise InvalidTOTPError("Invalid TOTP code.")
@@ -325,9 +321,7 @@ class TwoFactorAuthService:
         try:
             secret = decrypt(user.totp_secret_encrypted)
         except Exception as e:
-            raise TwoFactorError(
-                "TOTP secret corrupted, please re-enroll"
-            ) from e
+            raise TwoFactorError("TOTP secret corrupted, please re-enroll") from e
 
         if not verify_totp(secret, totp_code):
             raise InvalidTOTPError("Invalid TOTP code.")
@@ -375,9 +369,7 @@ class TwoFactorAuthService:
         try:
             secret = decrypt(user.totp_secret_encrypted)
         except Exception as e:
-            raise TwoFactorError(
-                "TOTP secret corrupted, please re-enroll"
-            ) from e
+            raise TwoFactorError("TOTP secret corrupted, please re-enroll") from e
 
         if not verify_totp(secret, totp_code):
             raise InvalidTOTPError("Invalid TOTP code.")

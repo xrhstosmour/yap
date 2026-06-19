@@ -185,5 +185,3 @@ class FileService:
             file_id=str(file_id),
             reference_count=new_count,
         )
-
-

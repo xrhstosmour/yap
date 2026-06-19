@@ -104,9 +104,7 @@ class TestUserServiceGet:
     async def test_get_by_email_not_found(self, session: AsyncSession) -> None:
         """Non-existent email should return None."""
         user_service = _user_service(session)
-        retrieved = await user_service.get_by_email(
-            "nonexistent@example.com"
-        )
+        retrieved = await user_service.get_by_email("nonexistent@example.com")
 
         assert retrieved is None
 
@@ -126,9 +124,7 @@ class TestUserServiceUpdate:
         created = await user_service.create(user_create)
 
         update_data = UserUpdate(full_name="Updated Name")
-        updated = await user_service.update(
-            created.id, update_data, updated_by=uuid7()
-        )
+        updated = await user_service.update(created.id, update_data, updated_by=uuid7())
 
         assert updated is not None
         assert updated.full_name == "Updated Name"
@@ -139,9 +135,7 @@ class TestUserServiceUpdate:
         user_service = _user_service(session)
         update_data = UserUpdate(full_name="Updated Name")
 
-        updated = await user_service.update(
-            uuid7(), update_data, updated_by=uuid7()
-        )
+        updated = await user_service.update(uuid7(), update_data, updated_by=uuid7())
         assert updated is None
 
 
@@ -217,15 +211,11 @@ class TestUpdateProfile:
     """Tests for UserService.update_profile() (update_me)."""
 
     @pytest.mark.asyncio
-    async def test_update_full_name(
-        self, mock_user_service: UserService
-    ) -> None:
+    async def test_update_full_name(self, mock_user_service: UserService) -> None:
         """Should update the user's full_name field."""
         user = _make_user_mock(full_name="Old Name")
         updated = _make_user_mock(full_name="New Name", id=user.id)
-        mock_user_service.user_repository.update = AsyncMock(
-            return_value=updated
-        )
+        mock_user_service.user_repository.update = AsyncMock(return_value=updated)
         mock_user_service.user_repository.get = AsyncMock(return_value=updated)
 
         data = UserUpdateMe.model_construct(full_name="New Name")
@@ -238,15 +228,11 @@ class TestUpdateProfile:
         mock_user_service.user_repository.get.assert_awaited_once_with(user.id)
 
     @pytest.mark.asyncio
-    async def test_update_email(
-        self, mock_user_service: UserService
-    ) -> None:
+    async def test_update_email(self, mock_user_service: UserService) -> None:
         """Should update the user's email field."""
         user = _make_user_mock(email="old@example.com")
         updated = _make_user_mock(email="new@example.com", id=user.id)
-        mock_user_service.user_repository.update = AsyncMock(
-            return_value=updated
-        )
+        mock_user_service.user_repository.update = AsyncMock(return_value=updated)
         mock_user_service.user_repository.get = AsyncMock(return_value=updated)
 
         data = UserUpdateMe.model_construct(email="new@example.com")
@@ -258,22 +244,14 @@ class TestUpdateProfile:
         )
 
     @pytest.mark.asyncio
-    async def test_update_both_fields(
-        self, mock_user_service: UserService
-    ) -> None:
+    async def test_update_both_fields(self, mock_user_service: UserService) -> None:
         """Should update both full_name and email simultaneously."""
         user = _make_user_mock(full_name="Old", email="old@example.com")
-        updated = _make_user_mock(
-            full_name="New", email="new@example.com", id=user.id
-        )
-        mock_user_service.user_repository.update = AsyncMock(
-            return_value=updated
-        )
+        updated = _make_user_mock(full_name="New", email="new@example.com", id=user.id)
+        mock_user_service.user_repository.update = AsyncMock(return_value=updated)
         mock_user_service.user_repository.get = AsyncMock(return_value=updated)
 
-        data = UserUpdateMe.model_construct(
-            full_name="New", email="new@example.com"
-        )
+        data = UserUpdateMe.model_construct(full_name="New", email="new@example.com")
         result = await mock_user_service.update_profile(user, data)
 
         assert result.full_name == "New"
@@ -401,7 +379,9 @@ class TestDeleteMe:
             await mock_user_service.delete_me(user)
 
         mock_user_service.audit_repository.log_user_action.assert_awaited_once()
-        call_kwargs = mock_user_service.audit_repository.log_user_action.call_args.kwargs
+        call_kwargs = (
+            mock_user_service.audit_repository.log_user_action.call_args.kwargs
+        )
         assert call_kwargs["user_id"] == user.id
         assert call_kwargs["resource_type"] == "user"
         assert call_kwargs["resource_id"] == str(user.id)
@@ -517,9 +497,7 @@ class TestExportMyData:
         mock_api_key.expires_at = None
 
         mock_api_key_repo = MagicMock()
-        mock_api_key_repo.list = AsyncMock(
-            return_value=([mock_api_key], 1)
-        )
+        mock_api_key_repo.list = AsyncMock(return_value=([mock_api_key], 1))
 
         mock_user_service.audit_repository.log_user_action = AsyncMock()
 
@@ -618,9 +596,7 @@ class TestListUsers:
         self, mock_user_service: UserService
     ) -> None:
         """When a search term is provided, delegate to repository.search."""
-        mock_user_service.user_repository.search = AsyncMock(
-            return_value=([], 0)
-        )
+        mock_user_service.user_repository.search = AsyncMock(return_value=([], 0))
 
         await mock_user_service.list_users(search="john")
 
@@ -630,13 +606,9 @@ class TestListUsers:
         mock_user_service.user_repository.list.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_is_active_filter(
-        self, mock_user_service: UserService
-    ) -> None:
+    async def test_is_active_filter(self, mock_user_service: UserService) -> None:
         """Should pass is_active filter to repository.list."""
-        mock_user_service.user_repository.list = AsyncMock(
-            return_value=([], 0)
-        )
+        mock_user_service.user_repository.list = AsyncMock(return_value=([], 0))
 
         await mock_user_service.list_users(is_active=True)
 
@@ -645,13 +617,9 @@ class TestListUsers:
         )
 
     @pytest.mark.asyncio
-    async def test_is_superuser_filter(
-        self, mock_user_service: UserService
-    ) -> None:
+    async def test_is_superuser_filter(self, mock_user_service: UserService) -> None:
         """Should pass is_superuser filter to repository.list."""
-        mock_user_service.user_repository.list = AsyncMock(
-            return_value=([], 0)
-        )
+        mock_user_service.user_repository.list = AsyncMock(return_value=([], 0))
 
         await mock_user_service.list_users(is_superuser=True)
 
@@ -660,13 +628,9 @@ class TestListUsers:
         )
 
     @pytest.mark.asyncio
-    async def test_pagination_params(
-        self, mock_user_service: UserService
-    ) -> None:
+    async def test_pagination_params(self, mock_user_service: UserService) -> None:
         """Should forward skip and limit to repository.list."""
-        mock_user_service.user_repository.list = AsyncMock(
-            return_value=([], 100)
-        )
+        mock_user_service.user_repository.list = AsyncMock(return_value=([], 100))
 
         await mock_user_service.list_users(skip=10, limit=5)
 
@@ -675,13 +639,9 @@ class TestListUsers:
         )
 
     @pytest.mark.asyncio
-    async def test_combined_filters(
-        self, mock_user_service: UserService
-    ) -> None:
+    async def test_combined_filters(self, mock_user_service: UserService) -> None:
         """Should pass both is_active and is_superuser when both are set."""
-        mock_user_service.user_repository.list = AsyncMock(
-            return_value=([], 0)
-        )
+        mock_user_service.user_repository.list = AsyncMock(return_value=([], 0))
 
         await mock_user_service.list_users(is_active=True, is_superuser=False)
 
@@ -714,9 +674,7 @@ class TestAdminUpdate:
     """Tests for UserService.update() — admin-specific field updates."""
 
     @pytest.mark.asyncio
-    async def test_update_is_active_field(
-        self, mock_user_service: UserService
-    ) -> None:
+    async def test_update_is_active_field(self, mock_user_service: UserService) -> None:
         """Admin should be able to deactivate a user via is_active=False."""
         user_id = uuid4()
         admin_id = uuid4()

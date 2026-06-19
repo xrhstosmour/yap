@@ -183,9 +183,7 @@ class TestSendEmailFromTemplate:
         """Should render the template and send email via send_email."""
         settings = _make_mock_settings()
 
-        with patch(
-            "app.core.email.send_email", new_callable=AsyncMock
-        ) as mock_send:
+        with patch("app.core.email.send_email", new_callable=AsyncMock) as mock_send:
             await send_email_from_template(
                 to_email="user@test.com",
                 subject="Verify Email",
@@ -258,9 +256,7 @@ class TestSendBatchEmails:
         """Should send to all valid recipients and return sent count."""
         settings = _make_mock_settings()
 
-        with patch(
-            "app.core.email.send_email", new_callable=AsyncMock
-        ) as mock_send:
+        with patch("app.core.email.send_email", new_callable=AsyncMock) as mock_send:
             result = await send_batch_emails(
                 recipients=[
                     {"email": "a@test.com", "name": "Alice"},

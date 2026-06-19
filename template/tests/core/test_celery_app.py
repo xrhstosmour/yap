@@ -37,7 +37,9 @@ except ImportError:
     health_check = None  # type: ignore[assignment]
 
 
-@pytest.mark.skipif(celery_app is None, reason="celery_app module not available (template not rendered)")
+@pytest.mark.skipif(
+    celery_app is None, reason="celery_app module not available (template not rendered)"
+)
 class TestCeleryAppConfig:
     """Tests for the Celery application configuration."""
 
@@ -67,7 +69,9 @@ class TestCeleryAppConfig:
         assert celery_app.conf.enable_utc is True
 
 
-@pytest.mark.skipif(celery_app is None, reason="celery_app module not available (template not rendered)")
+@pytest.mark.skipif(
+    celery_app is None, reason="celery_app module not available (template not rendered)"
+)
 class TestTaskRouting:
     """Tests for Celery task routing configuration."""
 
@@ -102,7 +106,9 @@ class TestTaskRouting:
         assert routes["app.tasks.outbox.*"]["queue"] == "events"
 
 
-@pytest.mark.skipif(celery_app is None, reason="celery_app module not available (template not rendered)")
+@pytest.mark.skipif(
+    celery_app is None, reason="celery_app module not available (template not rendered)"
+)
 class TestBeatSchedule:
     """Tests for the Celery beat schedule."""
 
@@ -146,7 +152,9 @@ class TestBeatSchedule:
         assert "schedule" in entry
 
 
-@pytest.mark.skipif(celery_app is None, reason="celery_app module not available (template not rendered)")
+@pytest.mark.skipif(
+    celery_app is None, reason="celery_app module not available (template not rendered)"
+)
 class TestHealthCheck:
     """Tests for the health_check task."""
 
@@ -162,7 +170,9 @@ class TestHealthCheck:
         assert "task_id" in result
 
 
-@pytest.mark.skipif(celery_app is None, reason="celery_app module not available (template not rendered)")
+@pytest.mark.skipif(
+    celery_app is None, reason="celery_app module not available (template not rendered)"
+)
 class TestSignalHandlers:
     """Smoke tests for Celery signal handler registration."""
 

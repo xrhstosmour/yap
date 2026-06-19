@@ -126,9 +126,7 @@ class TestBaseRepository:
         assert found.name == "find-me"
 
     @pytest.mark.anyio
-    async def test_get_returns_none_for_missing_id(
-        self, session: AsyncSession
-    ) -> None:
+    async def test_get_returns_none_for_missing_id(self, session: AsyncSession) -> None:
         """get() should return None when the ID does not exist.
 
         Args:

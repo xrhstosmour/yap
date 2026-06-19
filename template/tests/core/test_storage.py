@@ -1,4 +1,5 @@
 """Unit tests for StorageService helpers."""
+
 from __future__ import annotations
 
 from unittest.mock import ANY
@@ -22,7 +23,9 @@ def mock_s3_client() -> MagicMock:
         client.head_bucket = MagicMock()
         client.create_bucket = MagicMock()
         client.put_object = MagicMock()
-        client.generate_presigned_url = MagicMock(return_value="https://presigned.url/test")
+        client.generate_presigned_url = MagicMock(
+            return_value="https://presigned.url/test"
+        )
         mock.return_value = client
         yield client
 
@@ -52,9 +55,7 @@ class TestUploadFile:
         )
 
     @pytest.mark.asyncio
-    async def test_creates_bucket_if_missing(
-        self, mock_s3_client: MagicMock
-    ) -> None:
+    async def test_creates_bucket_if_missing(self, mock_s3_client: MagicMock) -> None:
         """Should create bucket on first upload."""
         mock_s3_client.head_bucket.side_effect = Exception("Not found")
 
@@ -159,9 +160,7 @@ class TestUploadFileImage:
         assert mock_s3_client.put_object.call_count == 2
 
     @pytest.mark.asyncio
-    async def test_gif_images_skip_thumbnail(
-        self, mock_s3_client: MagicMock
-    ) -> None:
+    async def test_gif_images_skip_thumbnail(self, mock_s3_client: MagicMock) -> None:
         """Should NOT generate a thumbnail for GIF images."""
         mock_img = MagicMock()
         mock_img.size = (320, 240)
@@ -187,6 +186,7 @@ class TestDeleteObject:
         self, mock_s3_client: MagicMock
     ) -> None:
         """Should not raise when ClientError occurs (already deleted)."""
+
         # Define a local ClientError class (botocore may not be installed directly).
         class ClientError(Exception):
             pass

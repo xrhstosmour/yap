@@ -20,7 +20,9 @@ class TestOAuthAccountRepository:
     def anyio_backend(self) -> str:
         return "asyncio"
 
-    async def _create_tenant(self, session: AsyncSession, slug: str = "test-org") -> Tenant:
+    async def _create_tenant(
+        self, session: AsyncSession, slug: str = "test-org"
+    ) -> Tenant:
         """Create a test tenant for FK constraints."""
         tenant = Tenant(name="Test Org", slug=slug)
         session.add(tenant)
@@ -110,8 +112,12 @@ class TestOAuthAccountRepository:
         user = await self._create_user(session)
         repo = OAuthAccountRepository(session)
 
-        await repo.create_link(user_id=user.id, provider="google", provider_user_id="g-1")
-        await repo.create_link(user_id=user.id, provider="apple", provider_user_id="a-1")
+        await repo.create_link(
+            user_id=user.id, provider="google", provider_user_id="g-1"
+        )
+        await repo.create_link(
+            user_id=user.id, provider="apple", provider_user_id="a-1"
+        )
 
         accounts = await repo.get_user_accounts(user.id)
         assert len(accounts) == 2

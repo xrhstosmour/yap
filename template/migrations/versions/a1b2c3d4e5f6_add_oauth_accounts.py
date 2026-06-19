@@ -94,20 +94,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index(
-        op.f("ix_oauth_accounts_provider"), table_name="oauth_accounts"
-    )
-    op.drop_index(
-        op.f("ix_oauth_accounts_user_id"), table_name="oauth_accounts"
-    )
-    op.drop_index(
-        op.f("ix_oauth_accounts_tenant_id"), table_name="oauth_accounts"
-    )
-    op.drop_index(
-        op.f("ix_oauth_accounts_deleted_at"), table_name="oauth_accounts"
-    )
-    op.drop_index(
-        op.f("ix_oauth_accounts_created_at"), table_name="oauth_accounts"
-    )
+    op.drop_index(op.f("ix_oauth_accounts_provider"), table_name="oauth_accounts")
+    op.drop_index(op.f("ix_oauth_accounts_user_id"), table_name="oauth_accounts")
+    op.drop_index(op.f("ix_oauth_accounts_tenant_id"), table_name="oauth_accounts")
+    op.drop_index(op.f("ix_oauth_accounts_deleted_at"), table_name="oauth_accounts")
+    op.drop_index(op.f("ix_oauth_accounts_created_at"), table_name="oauth_accounts")
     op.drop_index(op.f("ix_oauth_accounts_id"), table_name="oauth_accounts")
     op.drop_table("oauth_accounts")

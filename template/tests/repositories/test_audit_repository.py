@@ -93,9 +93,7 @@ class TestAuditLogRepository:
         assert entry.extra_data == {"ip": "127.0.0.1"}
 
         # Verify persisted.
-        result = await session.execute(
-            select(AuditLog).where(AuditLog.id == entry.id)
-        )
+        result = await session.execute(select(AuditLog).where(AuditLog.id == entry.id))
         persisted = result.scalar_one_or_none()
         assert persisted is not None
         assert persisted.action == "user_create"

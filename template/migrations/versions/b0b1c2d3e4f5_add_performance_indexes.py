@@ -61,12 +61,6 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_index(op.f("ix_tenants_name"), table_name="tenants")
-    op.drop_index(
-        op.f("ix_audit_logs_status_created_at"), table_name="audit_logs"
-    )
-    op.drop_index(
-        op.f("ix_api_keys_expires_at_is_active"), table_name="api_keys"
-    )
-    op.drop_index(
-        op.f("ix_api_keys_user_id_is_active"), table_name="api_keys"
-    )
+    op.drop_index(op.f("ix_audit_logs_status_created_at"), table_name="audit_logs")
+    op.drop_index(op.f("ix_api_keys_expires_at_is_active"), table_name="api_keys")
+    op.drop_index(op.f("ix_api_keys_user_id_is_active"), table_name="api_keys")

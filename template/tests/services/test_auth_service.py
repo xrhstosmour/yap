@@ -89,9 +89,7 @@ class TestAuthService:
                 password="password123",
             )
         )
-        await auth_service.user_repository.update(
-            user.id, {"is_active": False}
-        )
+        await auth_service.user_repository.update(user.id, {"is_active": False})
 
         with pytest.raises(UserInactiveError):
             await auth_service.authenticate(
@@ -120,9 +118,7 @@ class TestAuthService:
                 )
             )
 
-    def test_create_tokens_returns_token_response(
-        self, session: AsyncSession
-    ) -> None:
+    def test_create_tokens_returns_token_response(self, session: AsyncSession) -> None:
         """create_tokens should return TokenResponse with access and refresh tokens."""
         auth_service = _auth_service(session)
         # Create a minimal User-like object to avoid DB round-trip.
@@ -156,14 +152,10 @@ class TestAuthService:
         )
 
         with pytest.raises(InvalidCredentialsError):
-            await auth_service.change_password(
-                user, "wrongcurrent", "newpassword1"
-            )
+            await auth_service.change_password(user, "wrongcurrent", "newpassword1")
 
     @pytest.mark.asyncio
-    async def test_verify_user_marks_as_verified(
-        self, session: AsyncSession
-    ) -> None:
+    async def test_verify_user_marks_as_verified(self, session: AsyncSession) -> None:
         """verify_user should set is_verified to True."""
         auth_service = _auth_service(session)
         user = await auth_service.register(
@@ -393,9 +385,7 @@ class TestGetGoogleAuthUrl:
         self, session: AsyncSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Should raise AuthenticationError when GOOGLE_CLIENT_ID is empty."""
-        monkeypatch.setattr(
-            "app.services.auth_service.settings.GOOGLE_CLIENT_ID", ""
-        )
+        monkeypatch.setattr("app.services.auth_service.settings.GOOGLE_CLIENT_ID", "")
 
         auth_service = _auth_service(session)
 
@@ -415,11 +405,7 @@ class TestGoogleLogin:
     ) -> MagicMock:
         resp = MagicMock()
         resp.status_code = status_code
-        resp.json.return_value = (
-            {"access_token": access_token}
-            if access_token
-            else {}
-        )
+        resp.json.return_value = {"access_token": access_token} if access_token else {}
         return resp
 
     @staticmethod
@@ -502,19 +488,18 @@ class TestGoogleLogin:
             self._make_userinfo_response(),
         )
 
-        with patch(
-            "app.core.security.verify_google_oauth_state",
-            AsyncMock(return_value="http://cb"),
-        ), patch(
-            "httpx.AsyncClient", mock_async_client
+        with (
+            patch(
+                "app.core.security.verify_google_oauth_state",
+                AsyncMock(return_value="http://cb"),
+            ),
+            patch("httpx.AsyncClient", mock_async_client),
         ):
             with pytest.raises(AuthenticationError):
                 await auth_service.google_login("code", "state", "http://cb")
 
     @pytest.mark.asyncio
-    async def test_google_login_no_access_token(
-        self, session: AsyncSession
-    ) -> None:
+    async def test_google_login_no_access_token(self, session: AsyncSession) -> None:
         """Missing access_token in Google response should raise error."""
         auth_service = _auth_service(session)
         no_token = self._make_token_response(access_token=None)
@@ -523,11 +508,12 @@ class TestGoogleLogin:
             self._make_userinfo_response(),
         )
 
-        with patch(
-            "app.core.security.verify_google_oauth_state",
-            AsyncMock(return_value="http://cb"),
-        ), patch(
-            "httpx.AsyncClient", mock_async_client
+        with (
+            patch(
+                "app.core.security.verify_google_oauth_state",
+                AsyncMock(return_value="http://cb"),
+            ),
+            patch("httpx.AsyncClient", mock_async_client),
         ):
             with pytest.raises(AuthenticationError):
                 await auth_service.google_login("code", "state", "http://cb")
@@ -545,19 +531,18 @@ class TestGoogleLogin:
             self._make_userinfo_response(status_code=400),
         )
 
-        with patch(
-            "app.core.security.verify_google_oauth_state",
-            AsyncMock(return_value="http://cb"),
-        ), patch(
-            "httpx.AsyncClient", mock_async_client
+        with (
+            patch(
+                "app.core.security.verify_google_oauth_state",
+                AsyncMock(return_value="http://cb"),
+            ),
+            patch("httpx.AsyncClient", mock_async_client),
         ):
             with pytest.raises(AuthenticationError):
                 await auth_service.google_login("code", "state", "http://cb")
 
     @pytest.mark.asyncio
-    async def test_google_login_unverified_email(
-        self, session: AsyncSession
-    ) -> None:
+    async def test_google_login_unverified_email(self, session: AsyncSession) -> None:
         """Unverified Google email should raise AuthenticationError."""
         auth_service = _auth_service(session)
         mock_async_client = self._setup_httpx_mock(
@@ -565,19 +550,18 @@ class TestGoogleLogin:
             self._make_userinfo_response(verified_email=False),
         )
 
-        with patch(
-            "app.core.security.verify_google_oauth_state",
-            AsyncMock(return_value="http://cb"),
-        ), patch(
-            "httpx.AsyncClient", mock_async_client
+        with (
+            patch(
+                "app.core.security.verify_google_oauth_state",
+                AsyncMock(return_value="http://cb"),
+            ),
+            patch("httpx.AsyncClient", mock_async_client),
         ):
             with pytest.raises(AuthenticationError):
                 await auth_service.google_login("code", "state", "http://cb")
 
     @pytest.mark.asyncio
-    async def test_google_login_missing_google_id(
-        self, session: AsyncSession
-    ) -> None:
+    async def test_google_login_missing_google_id(self, session: AsyncSession) -> None:
         """Missing 'id' in userinfo should raise AuthenticationError."""
         auth_service = _auth_service(session)
         mock_async_client = self._setup_httpx_mock(
@@ -585,19 +569,18 @@ class TestGoogleLogin:
             self._make_userinfo_response(user_id=None),
         )
 
-        with patch(
-            "app.core.security.verify_google_oauth_state",
-            AsyncMock(return_value="http://cb"),
-        ), patch(
-            "httpx.AsyncClient", mock_async_client
+        with (
+            patch(
+                "app.core.security.verify_google_oauth_state",
+                AsyncMock(return_value="http://cb"),
+            ),
+            patch("httpx.AsyncClient", mock_async_client),
         ):
             with pytest.raises(AuthenticationError):
                 await auth_service.google_login("code", "state", "http://cb")
 
     @pytest.mark.asyncio
-    async def test_google_login_missing_email(
-        self, session: AsyncSession
-    ) -> None:
+    async def test_google_login_missing_email(self, session: AsyncSession) -> None:
         """Missing 'email' in userinfo should raise AuthenticationError."""
         auth_service = _auth_service(session)
         mock_async_client = self._setup_httpx_mock(
@@ -605,11 +588,12 @@ class TestGoogleLogin:
             self._make_userinfo_response(email=None),
         )
 
-        with patch(
-            "app.core.security.verify_google_oauth_state",
-            AsyncMock(return_value="http://cb"),
-        ), patch(
-            "httpx.AsyncClient", mock_async_client
+        with (
+            patch(
+                "app.core.security.verify_google_oauth_state",
+                AsyncMock(return_value="http://cb"),
+            ),
+            patch("httpx.AsyncClient", mock_async_client),
         ):
             with pytest.raises(AuthenticationError):
                 await auth_service.google_login("code", "state", "http://cb")
@@ -631,15 +615,14 @@ class TestGoogleLogin:
             ),
         )
 
-        with patch(
-            "app.core.security.verify_google_oauth_state",
-            AsyncMock(return_value="http://cb"),
-        ), patch(
-            "httpx.AsyncClient", mock_async_client
+        with (
+            patch(
+                "app.core.security.verify_google_oauth_state",
+                AsyncMock(return_value="http://cb"),
+            ),
+            patch("httpx.AsyncClient", mock_async_client),
         ):
-            tokens = await auth_service.google_login(
-                "code", "state", "http://cb"
-            )
+            tokens = await auth_service.google_login("code", "state", "http://cb")
 
         assert tokens.access_token
         assert tokens.refresh_token
@@ -677,15 +660,14 @@ class TestGoogleLogin:
             ),
         )
 
-        with patch(
-            "app.core.security.verify_google_oauth_state",
-            AsyncMock(return_value="http://cb"),
-        ), patch(
-            "httpx.AsyncClient", mock_async_client
+        with (
+            patch(
+                "app.core.security.verify_google_oauth_state",
+                AsyncMock(return_value="http://cb"),
+            ),
+            patch("httpx.AsyncClient", mock_async_client),
         ):
-            tokens = await auth_service.google_login(
-                "code", "state", "http://cb"
-            )
+            tokens = await auth_service.google_login("code", "state", "http://cb")
 
         assert tokens.access_token
         assert tokens.token_type == "bearer"
@@ -698,9 +680,7 @@ class TestGoogleLogin:
         assert oauth.provider_email == "existing@example.com"
 
     @pytest.mark.asyncio
-    async def test_google_login_inactive_user(
-        self, session: AsyncSession
-    ) -> None:
+    async def test_google_login_inactive_user(self, session: AsyncSession) -> None:
         """Inactive user should raise UserInactiveError."""
         auth_service = _auth_service(session)
 
@@ -710,9 +690,7 @@ class TestGoogleLogin:
             password_hash=generate_password_hash("doesntmatter"),
             is_verified=True,
         )
-        await auth_service.user_repository.update(
-            inactive.id, {"is_active": False}
-        )
+        await auth_service.user_repository.update(inactive.id, {"is_active": False})
 
         mock_async_client = self._setup_httpx_mock(
             self._make_token_response(),
@@ -722,11 +700,12 @@ class TestGoogleLogin:
             ),
         )
 
-        with patch(
-            "app.core.security.verify_google_oauth_state",
-            AsyncMock(return_value="http://cb"),
-        ), patch(
-            "httpx.AsyncClient", mock_async_client
+        with (
+            patch(
+                "app.core.security.verify_google_oauth_state",
+                AsyncMock(return_value="http://cb"),
+            ),
+            patch("httpx.AsyncClient", mock_async_client),
         ):
             with pytest.raises(UserInactiveError):
                 await auth_service.google_login("code", "state", "http://cb")
@@ -736,9 +715,7 @@ class TestMagicLink:
     """Tests for AuthService.send_magic_link and verify_magic_link."""
 
     @pytest.mark.asyncio
-    async def test_send_magic_link_user_exists(
-        self, session: AsyncSession
-    ) -> None:
+    async def test_send_magic_link_user_exists(self, session: AsyncSession) -> None:
         """Should queue a magic link email for an existing user."""
         auth_service = _auth_service(session)
         user = await auth_service.register(
@@ -748,12 +725,13 @@ class TestMagicLink:
             )
         )
 
-        with patch(
-            "app.core.security.create_magic_link_token",
-            AsyncMock(return_value="magic-test-token"),
-        ), patch.object(
-            auth_service, "_send_token_email", AsyncMock()
-        ) as mock_send:
+        with (
+            patch(
+                "app.core.security.create_magic_link_token",
+                AsyncMock(return_value="magic-test-token"),
+            ),
+            patch.object(auth_service, "_send_token_email", AsyncMock()) as mock_send,
+        ):
             await auth_service.send_magic_link(user.email)
 
         mock_send.assert_awaited_once()
@@ -764,23 +742,17 @@ class TestMagicLink:
         assert call_kwargs["url_field_name"] == "login_url"
 
     @pytest.mark.asyncio
-    async def test_send_magic_link_user_not_found(
-        self, session: AsyncSession
-    ) -> None:
+    async def test_send_magic_link_user_not_found(self, session: AsyncSession) -> None:
         """Should silently do nothing for unknown emails."""
         auth_service = _auth_service(session)
 
-        with patch.object(
-            auth_service, "_send_token_email", AsyncMock()
-        ) as mock_send:
+        with patch.object(auth_service, "_send_token_email", AsyncMock()) as mock_send:
             await auth_service.send_magic_link("nobody@example.com")
 
         mock_send.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_verify_magic_link_valid(
-        self, session: AsyncSession
-    ) -> None:
+    async def test_verify_magic_link_valid(self, session: AsyncSession) -> None:
         """Valid magic link token should return tokens."""
         auth_service = _auth_service(session)
         user = await auth_service.register(
@@ -801,9 +773,7 @@ class TestMagicLink:
         assert tokens.token_type == "bearer"
 
     @pytest.mark.asyncio
-    async def test_verify_magic_link_invalid(
-        self, session: AsyncSession
-    ) -> None:
+    async def test_verify_magic_link_invalid(self, session: AsyncSession) -> None:
         """Invalid or expired token should raise AuthenticationError."""
         auth_service = _auth_service(session)
 
@@ -815,18 +785,14 @@ class TestMagicLink:
                 await auth_service.verify_magic_link("invalid-token")
 
     @pytest.mark.asyncio
-    async def test_verify_magic_link_inactive_user(
-        self, session: AsyncSession
-    ) -> None:
+    async def test_verify_magic_link_inactive_user(self, session: AsyncSession) -> None:
         """Token pointing to inactive user should raise UserInactiveError."""
         auth_service = _auth_service(session)
         user = await auth_service.user_repository.create_user(
             email="inactive@example.com",
             password_hash=generate_password_hash("doesntmatter"),
         )
-        await auth_service.user_repository.update(
-            user.id, {"is_active": False}
-        )
+        await auth_service.user_repository.update(user.id, {"is_active": False})
 
         with patch(
             "app.core.security.verify_magic_link_token",
@@ -840,9 +806,7 @@ class TestEmailTokens:
     """Tests for send_verification_email and send_password_reset_email."""
 
     @pytest.mark.asyncio
-    async def test_send_verification_email(
-        self, session: AsyncSession
-    ) -> None:
+    async def test_send_verification_email(self, session: AsyncSession) -> None:
         """Should queue a verification email for an existing user."""
         auth_service = _auth_service(session)
         user = await auth_service.register(
@@ -852,12 +816,13 @@ class TestEmailTokens:
             )
         )
 
-        with patch(
-            "app.core.security.create_email_verification_token",
-            AsyncMock(return_value="verify-test-token"),
-        ), patch.object(
-            auth_service, "_send_token_email", AsyncMock()
-        ) as mock_send:
+        with (
+            patch(
+                "app.core.security.create_email_verification_token",
+                AsyncMock(return_value="verify-test-token"),
+            ),
+            patch.object(auth_service, "_send_token_email", AsyncMock()) as mock_send,
+        ):
             await auth_service.send_verification_email(user)
 
         mock_send.assert_awaited_once()
@@ -880,12 +845,13 @@ class TestEmailTokens:
             )
         )
 
-        with patch(
-            "app.core.security.create_password_reset_token",
-            AsyncMock(return_value="reset-test-token"),
-        ), patch.object(
-            auth_service, "_send_token_email", AsyncMock()
-        ) as mock_send:
+        with (
+            patch(
+                "app.core.security.create_password_reset_token",
+                AsyncMock(return_value="reset-test-token"),
+            ),
+            patch.object(auth_service, "_send_token_email", AsyncMock()) as mock_send,
+        ):
             await auth_service.send_password_reset_email(user.email)
 
         mock_send.assert_awaited_once()
@@ -902,11 +868,7 @@ class TestEmailTokens:
         """Should silently do nothing when email is unknown."""
         auth_service = _auth_service(session)
 
-        with patch.object(
-            auth_service, "_send_token_email", AsyncMock()
-        ) as mock_send:
-            await auth_service.send_password_reset_email(
-                "unknown@example.com"
-            )
+        with patch.object(auth_service, "_send_token_email", AsyncMock()) as mock_send:
+            await auth_service.send_password_reset_email("unknown@example.com")
 
         mock_send.assert_not_called()

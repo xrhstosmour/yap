@@ -74,9 +74,7 @@ def upgrade() -> None:
         sa.Column("retry_count", sa.Integer(), nullable=False),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index(
-        op.f("ix_outbox_events_id"), "outbox_events", ["id"], unique=False
-    )
+    op.create_index(op.f("ix_outbox_events_id"), "outbox_events", ["id"], unique=False)
     op.create_index(
         op.f("ix_outbox_events_created_at"),
         "outbox_events",
@@ -115,28 +113,16 @@ def downgrade() -> None:
     op.drop_index(
         op.f("ix_outbox_events_status_created_at"), table_name="outbox_events"
     )
-    op.drop_index(
-        op.f("ix_outbox_events_event_type"), table_name="outbox_events"
-    )
-    op.drop_index(
-        op.f("ix_outbox_events_tenant_id"), table_name="outbox_events"
-    )
-    op.drop_index(
-        op.f("ix_outbox_events_deleted_at"), table_name="outbox_events"
-    )
-    op.drop_index(
-        op.f("ix_outbox_events_created_at"), table_name="outbox_events"
-    )
+    op.drop_index(op.f("ix_outbox_events_event_type"), table_name="outbox_events")
+    op.drop_index(op.f("ix_outbox_events_tenant_id"), table_name="outbox_events")
+    op.drop_index(op.f("ix_outbox_events_deleted_at"), table_name="outbox_events")
+    op.drop_index(op.f("ix_outbox_events_created_at"), table_name="outbox_events")
     op.drop_index(op.f("ix_outbox_events_id"), table_name="outbox_events")
     op.drop_table("outbox_events")
 
     # audit_logs: restore single-column indexes
-    op.drop_index(
-        op.f("ix_audit_logs_tenant_id_created_at"), table_name="audit_logs"
-    )
-    op.drop_index(
-        op.f("ix_audit_logs_actor_id_created_at"), table_name="audit_logs"
-    )
+    op.drop_index(op.f("ix_audit_logs_tenant_id_created_at"), table_name="audit_logs")
+    op.drop_index(op.f("ix_audit_logs_actor_id_created_at"), table_name="audit_logs")
     op.create_index(
         op.f("ix_audit_logs_tenant_id"), "audit_logs", ["tenant_id"], unique=False
     )
