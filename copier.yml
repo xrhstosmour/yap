@@ -178,7 +178,7 @@ _exclude:
 _tasks:
   - "python3 scripts/assemble.py"
   - "./scripts/setup.sh"
-  - "{% if nested %}ROOT=$(git rev-parse --show-toplevel) && mkdir -p \"$ROOT/.github/workflows\" && mv .github/workflows/ci.yml \"$ROOT/.github/workflows/{{ _folder_name }}.yml\" && rm -rf .github{% endif %}"
+  - "{% if nested %}ROOT=$(git rev-parse --show-toplevel 2>/dev/null || (cd .. && pwd)) && mkdir -p \"$ROOT/.github/workflows\" && mv .github/workflows/ci.yml \"$ROOT/.github/workflows/{{ _folder_name }}.yml\" && rm -rf .github{% endif %}"
 
 _answers_file: .copier/.answers.yml
 
