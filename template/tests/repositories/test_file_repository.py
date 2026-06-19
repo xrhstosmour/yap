@@ -192,9 +192,7 @@ class TestFileRepository:
         assert found is None
 
     @pytest.mark.anyio
-    async def test_increment_reference_count(
-        self, session: AsyncSession
-    ) -> None:
+    async def test_increment_reference_count(self, session: AsyncSession) -> None:
         """increment_reference_count() should increase the reference count by 1.
 
         Args:
@@ -220,9 +218,7 @@ class TestFileRepository:
         assert updated.reference_count == 2
 
     @pytest.mark.anyio
-    async def test_decrement_reference_count(
-        self, session: AsyncSession
-    ) -> None:
+    async def test_decrement_reference_count(self, session: AsyncSession) -> None:
         """decrement_reference_count() should decrease the reference count by 1.
 
         Args:

@@ -114,8 +114,7 @@ async def update_me(
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete own account",
     description=(
-        "Permanently delete the authenticated user's account "
-        "(GDPR Article 17)."
+        "Permanently delete the authenticated user's account (GDPR Article 17)."
     ),
 )
 async def delete_me(

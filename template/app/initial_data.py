@@ -81,9 +81,7 @@ def _setup_metabase(password: str) -> None:
                 text(f"CREATE USER metabase_readonly WITH PASSWORD '{password}'"),
             )
         except Exception:
-            logger.warning(
-                "metabase_readonly user already exists!"
-            )
+            logger.warning("metabase_readonly user already exists!")
 
         try:
             conn.execute(

@@ -13,13 +13,36 @@ import re
 from typing import Final
 
 GREEKLISH_TO_GREEK: Final[dict[str, str]] = {
-    "a": "\u03b1", "b": "\u03b2", "g": "\u03b3", "d": "\u03b4", "e": "\u03b5",
-    "z": "\u03b6", "h": "\u03b7", "8": "\u03b8", "i": "\u03b9", "k": "\u03ba",
-    "l": "\u03bb", "m": "\u03bc", "n": "\u03bd", "x": "\u03be", "o": "\u03bf",
-    "p": "\u03c0", "r": "\u03c1", "s": "\u03c3", "t": "\u03c4", "y": "\u03c5",
-    "f": "\u03c6", "ch": "\u03c7", "ps": "\u03c8", "w": "\u03c9",
-    "th": "\u03b8", "ei": "\u03b5\u03b9", "oi": "\u03bf\u03b9",
-    "ui": "\u03c5\u03b9", "ou": "\u03bf\u03c5", "au": "\u03b1\u03c5",
+    "a": "\u03b1",
+    "b": "\u03b2",
+    "g": "\u03b3",
+    "d": "\u03b4",
+    "e": "\u03b5",
+    "z": "\u03b6",
+    "h": "\u03b7",
+    "8": "\u03b8",
+    "i": "\u03b9",
+    "k": "\u03ba",
+    "l": "\u03bb",
+    "m": "\u03bc",
+    "n": "\u03bd",
+    "x": "\u03be",
+    "o": "\u03bf",
+    "p": "\u03c0",
+    "r": "\u03c1",
+    "s": "\u03c3",
+    "t": "\u03c4",
+    "y": "\u03c5",
+    "f": "\u03c6",
+    "ch": "\u03c7",
+    "ps": "\u03c8",
+    "w": "\u03c9",
+    "th": "\u03b8",
+    "ei": "\u03b5\u03b9",
+    "oi": "\u03bf\u03b9",
+    "ui": "\u03c5\u03b9",
+    "ou": "\u03bf\u03c5",
+    "au": "\u03b1\u03c5",
     "eu": "\u03b5\u03c5",
 }
 
@@ -72,7 +95,8 @@ GREEK_TO_GREEKLISH: Final[dict[str, list[str]]] = {
 
 GREEK_DIGRAPHS: Final[list[str]] = sorted(
     [k for k in GREEK_TO_GREEKLISH if len(k) > 1],
-    key=len, reverse=True,
+    key=len,
+    reverse=True,
 )
 
 TONOS_MAP: Final = str.maketrans(
@@ -106,6 +130,7 @@ def greeklish_to_greek(text: str) -> str:
         Approximate Greek transliteration. Non-matching characters are
         left unchanged so that mixed text and punctuation are preserved.
     """
+
     def _replace(match: re.Match) -> str:
         return GREEKLISH_TO_GREEK[match.group(0).lower()]
 
@@ -136,9 +161,9 @@ def greek_to_greeklish(text: str, max_expansions: int = 10) -> list[str]:
         for pattern in GREEK_DIGRAPHS:
             if text[i:].startswith(pattern):
                 expansions = GREEK_TO_GREEKLISH[pattern]
-                candidates = [
-                    c + e for c in candidates for e in expansions
-                ][:max_expansions]
+                candidates = [c + e for c in candidates for e in expansions][
+                    :max_expansions
+                ]
                 i += len(pattern)
                 matched = True
                 break
@@ -146,8 +171,6 @@ def greek_to_greeklish(text: str, max_expansions: int = 10) -> list[str]:
             continue
         ch = text[i]
         expansions = GREEK_TO_GREEKLISH.get(ch, [ch])
-        candidates = [
-            c + e for c in candidates for e in expansions
-        ][:max_expansions]
+        candidates = [c + e for c in candidates for e in expansions][:max_expansions]
         i += 1
     return candidates

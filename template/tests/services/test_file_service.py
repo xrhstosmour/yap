@@ -1,4 +1,5 @@
 """Tests for FileService."""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock
@@ -44,9 +45,7 @@ class TestUpload:
     """Tests for upload()."""
 
     @pytest.mark.asyncio
-    async def test_creates_new_record_for_new_file(
-        self, service: FileService
-    ) -> None:
+    async def test_creates_new_record_for_new_file(self, service: FileService) -> None:
         """Should create a new file record when hash is not found."""
         user = make_user()
         mock_file = MagicMock()
@@ -59,9 +58,7 @@ class TestUpload:
         with (
             patch("app.services.file_service.upload_file") as mock_upload,
         ):
-            mock_upload.return_value = (
-                "uploads/abc123", "abc123", None, None, None
-            )
+            mock_upload.return_value = ("uploads/abc123", "abc123", None, None, None)
             record = await service.upload(mock_file, user)
 
         assert record.filename == "test.txt"

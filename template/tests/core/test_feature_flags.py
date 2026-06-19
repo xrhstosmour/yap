@@ -117,8 +117,6 @@ async def test_concurrent_feature_enabled_does_not_corrupt_cache() -> None:
     assert all(name in _in_memory_cache for name in flag_names)
 
 
-
-
 # Redis interaction tests
 
 
@@ -150,9 +148,7 @@ async def test_sync_to_redis_sets_flag_in_redis() -> None:
     with patch("app.core.feature_flags._get_redis", return_value=mock_redis):
         await sync_to_redis("synced_redis_flag", True)
 
-    mock_redis.set.assert_awaited_once_with(
-        "feature_flags:synced_redis_flag", "true"
-    )
+    mock_redis.set.assert_awaited_once_with("feature_flags:synced_redis_flag", "true")
     assert _in_memory_cache["synced_redis_flag"]["state"] is True
 
 
@@ -171,7 +167,6 @@ async def test_remove_from_redis_deletes_from_redis() -> None:
 
     assert "gone_flag" not in _in_memory_cache
     mock_redis.delete.assert_awaited_once_with("feature_flags:gone_flag")
-
 
 
 # Settings default fallback
@@ -208,9 +203,7 @@ async def test_get_redis_returns_none_on_import_failure() -> None:
     # The real function imports get_redis from app.core.cache at call time;
     # we make that import raise to trigger the except path.
     with patch("app.core.feature_flags._get_redis", _real_get_redis):
-        with patch(
-            "app.core.cache.get_redis", side_effect=RuntimeError("Redis down")
-        ):
+        with patch("app.core.cache.get_redis", side_effect=RuntimeError("Redis down")):
             result = await _real_get_redis()
             assert result is None
 
@@ -225,9 +218,7 @@ async def test_feature_enabled_redis_miss_falls_through_to_db() -> None:
     mock_redis.get = AsyncMock(return_value=None)
 
     with patch("app.core.feature_flags._get_redis", return_value=mock_redis):
-        with patch(
-            "app.core.feature_flags._get_settings_default", return_value=True
-        ):
+        with patch("app.core.feature_flags._get_settings_default", return_value=True):
             result = await feature_enabled("redis_miss_flag")
 
     assert result is True

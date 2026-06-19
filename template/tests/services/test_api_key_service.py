@@ -1,4 +1,5 @@
 """Tests for APIKeyService."""
+
 from __future__ import annotations
 
 from datetime import UTC
@@ -282,9 +283,7 @@ class TestList:
     ) -> None:
         """Should forward skip and limit to the repository."""
         user_id = uuid4()
-        service.apikey_repository.list_by_user = AsyncMock(
-            return_value=([], 0)
-        )
+        service.apikey_repository.list_by_user = AsyncMock(return_value=([], 0))
 
         await service.list_for_user(user_id, skip=10, limit=5)
 
@@ -322,9 +321,7 @@ class TestVerify:
 
         assert result is mock_key
         service.apikey_repository.get_by_key_id.assert_awaited_once_with(key_id)
-        service.apikey_repository.update_last_used.assert_awaited_once_with(
-            mock_key.id
-        )
+        service.apikey_repository.update_last_used.assert_awaited_once_with(mock_key.id)
 
     @pytest.mark.asyncio
     async def test_verify_invalid_key_id(

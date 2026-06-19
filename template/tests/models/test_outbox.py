@@ -50,9 +50,7 @@ class TestOutbox:
         assert pending.id in {e.id for e in results}
 
     @pytest.mark.anyio
-    async def test_mark_published_updates_status(
-        self, session: AsyncSession
-    ) -> None:
+    async def test_mark_published_updates_status(self, session: AsyncSession) -> None:
         """mark_published sets status to 'published' and sets published_at."""
         outbox = Outbox(session)
         event = await outbox.publish("user.created", {"user_id": "x"})
