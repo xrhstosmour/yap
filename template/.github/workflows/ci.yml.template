@@ -19,6 +19,9 @@ concurrency:
 jobs:
   lint:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: {% if nested %}{{ _folder_name }}{% else %}.{% endif %}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -30,6 +33,9 @@ jobs:
   test:
     needs: lint
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: {% if nested %}{{ _folder_name }}{% else %}.{% endif %}
     services:
       postgresql:
         image: postgres:16-alpine
@@ -64,6 +70,32 @@ jobs:
           echo "RABBITMQ_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')" >> $GITHUB_ENV
           echo "FIRST_SUPERUSER_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')" >> $GITHUB_ENV
       - run: uv sync --extra dev
+      - run: uv run alembic upgrade head
+        env:
+          POSTGRESQL_SERVER: localhost
+          POSTGRESQL_HOST: localhost
+          POSTGRESQL_PORT: 5432
+          POSTGRESQL_USER: app
+          POSTGRESQL_PASSWORD: testpass
+          POSTGRESQL_DATABASE: testdb
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+          REDIS_PASSWORD: testpass
+          ENVIRONMENT: local
+          POSTGRESQL_AUTHENTICATION_METHOD: password
+      - run: uv run python -m app.initial_data
+        env:
+          POSTGRESQL_SERVER: localhost
+          POSTGRESQL_HOST: localhost
+          POSTGRESQL_PORT: 5432
+          POSTGRESQL_USER: app
+          POSTGRESQL_PASSWORD: testpass
+          POSTGRESQL_DATABASE: testdb
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+          REDIS_PASSWORD: testpass
+          ENVIRONMENT: local
+          POSTGRESQL_AUTHENTICATION_METHOD: password
       - run: uv run pytest tests/ -v --tb=short --cov=app --cov-report=xml
         env:
           POSTGRESQL_SERVER: localhost
@@ -76,6 +108,7 @@ jobs:
           REDIS_PORT: 6379
           REDIS_PASSWORD: testpass
           ENVIRONMENT: local
+          POSTGRESQL_AUTHENTICATION_METHOD: password
       - name: Run smoke test
         run: uv run pytest tests/test_startup.py::test_api_smoke -v --tb=short
         env:
@@ -89,10 +122,11 @@ jobs:
           REDIS_PORT: 6379
           REDIS_PASSWORD: testpass
           ENVIRONMENT: local
+          POSTGRESQL_AUTHENTICATION_METHOD: password
       - uses: codecov/codecov-action@v5
         if: github.event_name == 'pull_request'
         with:
-          files: ./coverage.xml
+          files: {% if nested %}./{{ _folder_name }}/coverage.xml{% else %}./coverage.xml{% endif %}
 
   security:
     needs: lint
@@ -103,6 +137,6 @@ jobs:
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: fs
-          scan-ref: .
+          scan-ref: {% if nested %}{{ _folder_name }}{% else %}.{% endif %}
           severity: CRITICAL,HIGH
           exit-code: 1
