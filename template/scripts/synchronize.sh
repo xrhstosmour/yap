@@ -6,6 +6,13 @@ info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
 
+read_yaml_scalar() {
+    local key="$1"
+    local file="$2"
+    grep "^${key}:" "$file" 2>/dev/null | head -1 | cut -d: -f2- \
+        | sed 's/^ *//; s/^"//; s/"$//'
+}
+
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$PROJECT_DIR"
 
@@ -16,42 +23,58 @@ info "Synchronising with upstream YAP template"
 command -v copier >/dev/null 2>&1 || error "copier is required. Install with: uv tool install copier"
 command -v git >/dev/null 2>&1 || error "git is required"
 
-if [ -f .copier/.answers.yml ]; then
-    ANSWERS_FILE=".copier/.answers.yml"
-elif [ -f .copier-answers.yml ]; then
-    ANSWERS_FILE=".copier-answers.yml"
-else
-    # Auto-reconstruct answers from generated project files.
-    warn "No answers file found. Reconstructing from project files..."
+[ -f .env ] || error ".env not found. Run ./scripts/setup.sh first to create it."
 
-    project_name=$(grep '^PROJECT_NAME=' .env.example 2>/dev/null | cut -d= -f2 | tr -d '"')
-    project_slug=$(grep '^POSTGRESQL_USER=' .env.example 2>/dev/null | cut -d= -f2 | tr -d '"')
-    description=$(grep '^description' pyproject.toml 2>/dev/null | sed 's/.*= *"//;s/"$//')
-    author_name=$(grep 'name = "' pyproject.toml 2>/dev/null | head -1 | sed 's/.*name = "//;s/"$//')
-    author_email=$(grep 'email = "' pyproject.toml 2>/dev/null | head -1 | sed 's/.*email = "//;s/"$//')
-    superuser=$(grep '^FIRST_SUPERUSER_FULL_NAME=' .env.example 2>/dev/null | cut -d= -f2 | tr -d '"')
-    traefik_host=$(grep '^TRAEFIK_HOST=' .env.example 2>/dev/null | cut -d= -f2 | tr -d '"')
-    timezone=$(grep '^TIMEZONE=' .env.example 2>/dev/null | cut -d= -f2 | tr -d '"')
-    storage_region=$(grep '^STORAGE_REGION=' .env.example 2>/dev/null | cut -d= -f2 | tr -d '"')
+set -a
+# shellcheck source=/dev/null
+source .env
+set +a
 
-    has_extra() { grep -q "containers/.*/$1/docker-compose.yml" docker-compose.yml 2>/dev/null && echo "true" || echo "false"; }
-    include_traefik=$(has_extra "traefik")
-    include_glitchtip=$(has_extra "glitchtip")
-    include_metabase=$(has_extra "metabase")
-    include_pgadmin4=$(has_extra "pgadmin4")
-    include_mailpit=$(has_extra "mailpit")
-    include_redis_commander=$(has_extra "redis_commander")
-    include_flower=$(has_extra "flower")
-    include_minio=$(has_extra "minio")
-    include_redbeat=$(grep -q "redbeat" pyproject.toml 2>/dev/null && echo "true" || echo "false")
+# Reconstruct answers at every sync from project files and .env.
+# The answers file is intentionally gitignored to avoid committing secrets.
+warn "Reconstructing copier answers from project files and .env..."
 
-    mkdir -p .copier
+project_name=$(grep '^PROJECT_NAME=' .env.example 2>/dev/null | cut -d= -f2 | tr -d '"')
+project_slug=$(grep '^POSTGRESQL_USER=' .env.example 2>/dev/null | cut -d= -f2 | tr -d '"')
+description=$(grep '^description' pyproject.toml 2>/dev/null | sed 's/.*= *"//;s/"$//')
+author_name=$(grep 'name = "' pyproject.toml 2>/dev/null | head -1 | sed 's/.*name = "//;s/"$//')
+author_email=$(grep 'email = "' pyproject.toml 2>/dev/null | head -1 | sed 's/.*email = "//;s/"$//')
+superuser=$(grep '^FIRST_SUPERUSER_FULL_NAME=' .env.example 2>/dev/null | cut -d= -f2 | tr -d '"')
+traefik_host=$(grep '^TRAEFIK_HOST=' .env.example 2>/dev/null | cut -d= -f2 | tr -d '"')
+timezone=$(grep '^TIMEZONE=' .env.example 2>/dev/null | cut -d= -f2 | tr -d '"')
+storage_region=$(grep '^STORAGE_REGION=' .env.example 2>/dev/null | cut -d= -f2 | tr -d '"')
 
-    # Fetch latest YAP commit for copier version tracking.
-    _commit=$(git ls-remote "https://github.com/xrhstosmour/yap.git" HEAD \
-        | cut -f1) || _commit=""
+has_extra() { grep -q "containers/.*/$1/docker-compose.yml" docker-compose.yml 2>/dev/null && echo "true" || echo "false"; }
+include_traefik=$(has_extra "traefik")
+include_glitchtip=$(has_extra "glitchtip")
+include_metabase=$(has_extra "metabase")
+include_pgadmin4=$(has_extra "pgadmin4")
+include_mailpit=$(has_extra "mailpit")
+include_redis_commander=$(has_extra "redis_commander")
+include_flower=$(has_extra "flower")
+include_minio=$(has_extra "minio")
+include_redbeat=$(grep -q "redbeat" pyproject.toml 2>/dev/null && echo "true" || echo "false")
 
-    cat > .copier/.answers.yml << YAML
+# Resolve nested mode from repository layout.
+nested="false"
+git_root=$(git rev-parse --show-toplevel 2>/dev/null || echo "")
+if [ -n "$git_root" ] && [ "$git_root" != "$PROJECT_DIR" ]; then
+    nested="true"
+fi
+
+mkdir -p .copier
+
+# Resolve template commit from tracked .copier/.version, fall back to remote HEAD.
+_commit=""
+if [ -f .copier/.version ]; then
+    _commit=$(read_yaml_scalar "_commit" ".copier/.version" || true)
+fi
+if [ -z "$_commit" ]; then
+    info "Fetching latest YAP commit for version tracking..."
+    _commit=$(git ls-remote "https://github.com/xrhstosmour/yap.git" HEAD | cut -f1) || _commit=""
+fi
+
+cat > .copier/.answers.yml << YAML
 _src_path: gh:xrhstosmour/yap
 _commit: $_commit
 project_name: $project_name
@@ -64,32 +87,32 @@ include_traefik: $include_traefik
 traefik_host: $traefik_host
 timezone: $timezone
 include_glitchtip: $include_glitchtip
-glitchtip_secret_key: ""
+glitchtip_secret_key: "${GLITCHTIP_SECRET_KEY:-}"
 include_metabase: $include_metabase
-metabase_read_only_password: ""
+metabase_read_only_password: "${METABASE_READ_ONLY_PASSWORD:-}"
 include_pgadmin4: $include_pgadmin4
-pgadmin4_password: ""
+pgadmin4_password: "${PGADMIN4_PASSWORD:-}"
 include_mailpit: $include_mailpit
 include_redis_commander: $include_redis_commander
-redis_commander_password: ""
+redis_commander_password: "${REDIS_COMMANDER_PASSWORD:-}"
 include_flower: $include_flower
-flower_password: ""
+flower_password: "${FLOWER_PASSWORD:-}"
 include_redbeat: $include_redbeat
 include_minio: $include_minio
 storage_region: $storage_region
-jwt_secret_key: ""
-postgresql_password: ""
-first_superuser_password: ""
-rabbitmq_password: ""
-redis_password: ""
-crypto_key: ""
+nested: $nested
+jwt_secret_key: "${SECRET_KEY:-}"
+postgresql_password: "${POSTGRESQL_PASSWORD:-}"
+first_superuser_password: "${FIRST_SUPERUSER_PASSWORD:-}"
+rabbitmq_password: "${RABBITMQ_PASSWORD:-}"
+redis_password: "${REDIS_PASSWORD:-}"
+crypto_key: "${CRYPTO_KEY:-}"
 YAML
 
-    ANSWERS_FILE=".copier/.answers.yml"
-    info "Answers file reconstructed from project files."
-fi
+ANSWERS_FILE=".copier/.answers.yml"
+info "Answers file reconstructed for copier update."
 
-if [ -n "$(git status --porcelain)" ]; then
+if [ -n "$(git status --porcelain -- .)" ]; then
     warn "Uncommitted changes detected."
     warn "Commit or stash before running sync to avoid merge conflicts."
     exit 1
@@ -112,6 +135,17 @@ fi
 copier update --trust --conflict rej --defaults \
     --answers-file "$ANSWERS_FILE" 2>&1 || error "copier update failed"
 
+# Persist only non-secret copier version metadata.
+_new_commit=$(read_yaml_scalar "_commit" ".copier/.answers.yml" || echo "$_commit")
+cat > .copier/.version << YAML
+_src_path: gh:xrhstosmour/yap
+_commit: $_new_commit
+YAML
+
+# Ensure secret-bearing answers file is never left behind.
+rm -f .copier/.answers.yml
+info "Updated .copier/.version to ${_new_commit:-unknown}."
+
 # Clean up temporary git repo if we created one.
 if [ "$TEMP_GIT" = true ]; then
     rm -rf .git
@@ -132,7 +166,7 @@ if git diff --stat; then
     echo ""
     info "Review changes, resolve any .rej files, then commit."
     echo "  git diff"
-    echo "  git add -A && git commit -m \"Sync upstream YAP template changes\""
+    echo "  git add .copier/.version && git add -A && git commit -m \"Sync upstream YAP template changes\""
 else
     info "No changes — project is up to date."
 fi
