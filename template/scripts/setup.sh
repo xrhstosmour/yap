@@ -127,10 +127,11 @@ fi
 # Pre-commit hooks.
 if [ -f .pre-commit-config.yaml ] && command -v uv >/dev/null 2>&1; then
     info "Installing pre-commit hooks..."
-    if [ ! -d .git ]; then
-        git init
+    if [ -d .git ]; then
+        uv run pre-commit install || error "pre-commit hooks installation failed!"
+    else
+        warn "Skipping pre-commit install, no git repository in scaffold directory"
     fi
-    uv run pre-commit install || error "pre-commit hooks installation failed!"
 fi
 
 # Start infrastructure services and run migrations.
