@@ -51,9 +51,7 @@ class TestBackendPreStart:
         mock_session.exec = MagicMock()  # no exception – success
         mock_engine = MagicMock()
 
-        with patch(
-            "app.backend_pre_start.Session", return_value=mock_session
-        ):
+        with patch("app.backend_pre_start.Session", return_value=mock_session):
             # Should not raise.
             init(mock_engine)
 
@@ -73,9 +71,7 @@ class TestBackendPreStart:
         )
         mock_engine = MagicMock()
 
-        with patch(
-            "app.backend_pre_start.Session", return_value=mock_session
-        ):
+        with patch("app.backend_pre_start.Session", return_value=mock_session):
             with pytest.raises(Exception, match="connection failed"):
                 init.__wrapped__(mock_engine)
 
@@ -100,9 +96,10 @@ class TestBackendPreStart:
         )
         mock_engine = MagicMock()
 
-        with patch(
-            "app.backend_pre_start.Session", return_value=mock_session
-        ), patch("time.sleep"):  # skip tenacity wait
+        with (
+            patch("app.backend_pre_start.Session", return_value=mock_session),
+            patch("time.sleep"),
+        ):  # skip tenacity wait
             with pytest.raises(RetryError):
                 init(mock_engine)
 

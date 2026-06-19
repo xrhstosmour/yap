@@ -160,8 +160,8 @@ async def enroll_2fa(
 
     service = TwoFactorAuthService(session)
     try:
-        _secret, qr_data_url, recovery_codes = (
-            await service.begin_enrollment(current_user)
+        _secret, qr_data_url, recovery_codes = await service.begin_enrollment(
+            current_user
         )
     except TwoFactorAlreadyEnabledError as e:
         raise HTTPException(

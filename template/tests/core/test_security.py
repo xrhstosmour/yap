@@ -662,9 +662,7 @@ class TestTOTP:
             assert len(code) == 9  # XXXX-XXXX
             assert code[4] == "-"
             # All chars should be uppercase alphanumeric.
-            assert all(
-                c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-" for c in code
-            )
+            assert all(c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-" for c in code)
 
 
 # DUMMY_PASSWORD_HASH always returns False (already in TestPasswordEdgeCases,
@@ -681,4 +679,6 @@ class TestDummyPasswordHash:
 
         assert verify_password("anything", DUMMY_PASSWORD_HASH) is False
         assert verify_password("", DUMMY_PASSWORD_HASH) is False
-        assert verify_password("correcthorsebatterystaple", DUMMY_PASSWORD_HASH) is False
+        assert (
+            verify_password("correcthorsebatterystaple", DUMMY_PASSWORD_HASH) is False
+        )

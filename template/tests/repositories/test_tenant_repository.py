@@ -167,9 +167,7 @@ class TestTenantRepository:
             None.
         """
         repo = TenantRepository(session)
-        tenant = await repo.create_tenant(
-            name="To Delete", slug="to-delete"
-        )
+        tenant = await repo.create_tenant(name="To Delete", slug="to-delete")
 
         result = await repo.delete(tenant.id, hard=False)
 

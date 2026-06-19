@@ -197,9 +197,7 @@ class UserService:
                 raise UserServiceError("Email already in use")
 
         if update_data:
-            updated_user = await self.user_repository.update(
-                user_id, update_data
-            )
+            updated_user = await self.user_repository.update(user_id, update_data)
             if not updated_user:
                 return None
             user = updated_user

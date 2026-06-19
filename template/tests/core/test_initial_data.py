@@ -90,9 +90,7 @@ class TestInit:
         from app.initial_data import init
         from app.models.tenant import Tenant
 
-        existing_tenant = Tenant(
-            id=SYSTEM_TENANT_ID, name="System", slug="system"
-        )
+        existing_tenant = Tenant(id=SYSTEM_TENANT_ID, name="System", slug="system")
 
         session, ctx, factory = self._make_session_mock(
             tenant_result=existing_tenant,

@@ -78,9 +78,7 @@ def downgrade() -> None:
     op.drop_index(
         op.f("ix_totp_recovery_codes_user_id"), table_name="totp_recovery_codes"
     )
-    op.drop_index(
-        op.f("ix_totp_recovery_codes_id"), table_name="totp_recovery_codes"
-    )
+    op.drop_index(op.f("ix_totp_recovery_codes_id"), table_name="totp_recovery_codes")
     op.drop_table("totp_recovery_codes")
     op.drop_column("users", "totp_confirmed_at")
     op.drop_column("users", "totp_secret_encrypted")

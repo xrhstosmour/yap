@@ -231,9 +231,7 @@ class WebAuthnService:
 
     # --- Helpers ---
 
-    async def _get_user_credentials(
-        self, user_id: UUID
-    ) -> list[WebAuthnCredential]:
+    async def _get_user_credentials(self, user_id: UUID) -> list[WebAuthnCredential]:
         result = await self.session.execute(
             select(WebAuthnCredential).where(
                 WebAuthnCredential.user_id == user_id,  # type: ignore[arg-type]

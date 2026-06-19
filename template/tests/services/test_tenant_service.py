@@ -143,9 +143,7 @@ def test_update_tenant_success_without_slug_change(service: TenantService) -> No
 
     import asyncio
 
-    result = asyncio.run(
-        service.update(tenant_id, TenantUpdate(name="Acme Corp"))
-    )
+    result = asyncio.run(service.update(tenant_id, TenantUpdate(name="Acme Corp")))
     assert result.name == "Acme Corp"
     service.tenant_repository.slug_exists.assert_not_called()
 
@@ -163,9 +161,7 @@ def test_update_tenant_duplicate_slug(service: TenantService) -> None:
 
     with pytest.raises(TenantSlugAlreadyExistsError, match="already exists"):
         asyncio.run(
-            service.update(
-                tenant_id, TenantUpdate(name="Acme", slug="acme-corp")
-            )
+            service.update(tenant_id, TenantUpdate(name="Acme", slug="acme-corp"))
         )
 
 
@@ -201,9 +197,7 @@ def test_create_triggers_audit_log(service: TenantService) -> None:
     import asyncio
 
     result = asyncio.run(
-        service.create(
-            TenantCreate(name="Acme", slug="acme"), created_by=created_by
-        )
+        service.create(TenantCreate(name="Acme", slug="acme"), created_by=created_by)
     )
     assert result is mock_tenant
     service.audit_repository.log_user_action.assert_awaited_once_with(

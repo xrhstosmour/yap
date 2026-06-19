@@ -65,12 +65,8 @@ class FileMetadataResponse(BaseSchema):
     size: int = Field(description="File size in bytes")
     content_hash: str = Field(description="SHA-256 content hash")
     is_public: bool = Field(description="Whether the file is publicly accessible")
-    image_width: int | None = Field(
-        default=None, description="Image width in pixels"
-    )
-    image_height: int | None = Field(
-        default=None, description="Image height in pixels"
-    )
+    image_width: int | None = Field(default=None, description="Image width in pixels")
+    image_height: int | None = Field(default=None, description="Image height in pixels")
     resource_type: str | None = Field(
         default=None, description="Resource type this file is attached to"
     )

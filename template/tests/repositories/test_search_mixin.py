@@ -253,9 +253,7 @@ class TestSearchMixin:
         assert len(records) == 2
 
     @pytest.mark.anyio
-    async def test_search_fts_raises_valueerror_for_empty_fields(
-        self, session
-    ) -> None:
+    async def test_search_fts_raises_valueerror_for_empty_fields(self, session) -> None:
         """Ensure search_fts() raises ValueError when fields list is empty.
 
         Args:

@@ -111,9 +111,7 @@ class TestBuildPaginationHeaders:
     def test_oversized_limit_clamped_to_max_page_size(self) -> None:
         """Limit values greater than MAX_PAGE_SIZE are clamped down."""
         request = mock_request()
-        headers = build_pagination_headers(
-            request, total=200, skip=0, limit=999
-        )
+        headers = build_pagination_headers(request, total=200, skip=0, limit=999)
 
         links = _parse_link_header(headers["Link"])
         # last link should use the clamped limit = MAX_PAGE_SIZE
@@ -138,7 +136,12 @@ class TestBuildPaginationHeaders:
         """Query parameters other than skip/limit are preserved in link URLs."""
         request = mock_request(
             path="/api/v1/items",
-            query_params={"category": "books", "sort": "title", "skip": "10", "limit": "20"},
+            query_params={
+                "category": "books",
+                "sort": "title",
+                "skip": "10",
+                "limit": "20",
+            },
         )
 
         headers = build_pagination_headers(request, total=100, skip=10, limit=20)

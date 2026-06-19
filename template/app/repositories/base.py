@@ -125,9 +125,7 @@ class BaseRepository[T: SQLModel]:
 
         return query
 
-    def _apply_soft_delete_filter(
-        self, query, include_deleted: bool = False
-    ) -> Any:  # noqa: ANN401
+    def _apply_soft_delete_filter(self, query, include_deleted: bool = False) -> Any:  # noqa: ANN401
         """Apply soft delete filter to query.
 
         Args:
