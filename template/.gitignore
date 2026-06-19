@@ -53,3 +53,8 @@ Thumbs.db
 
 # Lock files.
 uv.lock
+
+# Copier.
+# Reconstructed at sync time from .env and project files.
+# Must never be committed because it may contain secrets.
+.copier/.answers.yml
