@@ -85,9 +85,7 @@ class TestUserRepository:
             None.
         """
         repo = UserRepository(session)
-        await repo.create_user(
-            email="bob@example.com", password_hash="hash"
-        )
+        await repo.create_user(email="bob@example.com", password_hash="hash")
 
         found = await repo.get_by_email("bob@example.com")
 
@@ -179,9 +177,7 @@ class TestUserRepository:
             None.
         """
         repo = UserRepository(session)
-        user = await repo.create_user(
-            email="token@example.com", password_hash="hash"
-        )
+        user = await repo.create_user(email="token@example.com", password_hash="hash")
         assert user.token_version == 1
 
         await repo.increment_token_version(user.id)
@@ -285,9 +281,7 @@ class TestUserRepository:
         """
         await self._create_tenant(session)
         repo = UserRepository(session)
-        user = await repo.create_user(
-            email="gone@example.com", password_hash="hash"
-        )
+        user = await repo.create_user(email="gone@example.com", password_hash="hash")
         await repo.delete(user.id, hard=False)
 
         found = await repo.get_by_email("gone@example.com")

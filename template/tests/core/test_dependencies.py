@@ -88,10 +88,14 @@ class TestGetCurrentUser:
         request = _mock_request()
         session = AsyncMock()
 
-        with patch(
-            "app.dependencies.decode_token", return_value=_valid_payload(sub=str(user.id))
-        ), patch.object(
-            UserRepository, "get", new_callable=AsyncMock, return_value=user
+        with (
+            patch(
+                "app.dependencies.decode_token",
+                return_value=_valid_payload(sub=str(user.id)),
+            ),
+            patch.object(
+                UserRepository, "get", new_callable=AsyncMock, return_value=user
+            ),
         ):
             result = await get_current_user(
                 session=session,
@@ -147,10 +151,11 @@ class TestGetCurrentUser:
         request = _mock_request()
         session = AsyncMock()
 
-        with patch(
-            "app.dependencies.decode_token", return_value=_valid_payload()
-        ), patch.object(
-            UserRepository, "get", new_callable=AsyncMock, return_value=None
+        with (
+            patch("app.dependencies.decode_token", return_value=_valid_payload()),
+            patch.object(
+                UserRepository, "get", new_callable=AsyncMock, return_value=None
+            ),
         ):
             with pytest.raises(HTTPException) as exc_info:
                 await get_current_user(
@@ -168,10 +173,14 @@ class TestGetCurrentUser:
         request = _mock_request()
         session = AsyncMock()
 
-        with patch(
-            "app.dependencies.decode_token", return_value=_valid_payload(sub=str(user.id))
-        ), patch.object(
-            UserRepository, "get", new_callable=AsyncMock, return_value=user
+        with (
+            patch(
+                "app.dependencies.decode_token",
+                return_value=_valid_payload(sub=str(user.id)),
+            ),
+            patch.object(
+                UserRepository, "get", new_callable=AsyncMock, return_value=user
+            ),
         ):
             with pytest.raises(HTTPException) as exc_info:
                 await get_current_user(
@@ -189,11 +198,14 @@ class TestGetCurrentUser:
         request = _mock_request()
         session = AsyncMock()
 
-        with patch(
-            "app.dependencies.decode_token",
-            return_value=_valid_payload(sub=str(user.id), token_version=3),
-        ), patch.object(
-            UserRepository, "get", new_callable=AsyncMock, return_value=user
+        with (
+            patch(
+                "app.dependencies.decode_token",
+                return_value=_valid_payload(sub=str(user.id), token_version=3),
+            ),
+            patch.object(
+                UserRepository, "get", new_callable=AsyncMock, return_value=user
+            ),
         ):
             with pytest.raises(HTTPException) as exc_info:
                 await get_current_user(
@@ -210,16 +222,19 @@ class TestGetCurrentUser:
         request = _mock_request()
         session = AsyncMock()
 
-        with patch(
-            "app.dependencies.decode_token",
-            return_value={
-                "sub": str(uuid4()),
-                "type": "access",
-                "jti": "blacklisted-jti",
-            },
-        ), patch(
-            "app.dependencies.is_token_blacklisted",
-            AsyncMock(return_value=True),
+        with (
+            patch(
+                "app.dependencies.decode_token",
+                return_value={
+                    "sub": str(uuid4()),
+                    "type": "access",
+                    "jti": "blacklisted-jti",
+                },
+            ),
+            patch(
+                "app.dependencies.is_token_blacklisted",
+                AsyncMock(return_value=True),
+            ),
         ):
             with pytest.raises(HTTPException) as exc_info:
                 await get_current_user(
@@ -257,11 +272,16 @@ class TestGetCurrentUser:
         request = _mock_request()
         session = AsyncMock()
 
-        with patch(
-            "app.dependencies.decode_token", return_value=_valid_payload(sub=str(user.id))
-        ), patch.object(
-            UserRepository, "get", new_callable=AsyncMock, return_value=user
-        ), patch("app.dependencies.set_current_tenant_id") as mock_set_tenant:
+        with (
+            patch(
+                "app.dependencies.decode_token",
+                return_value=_valid_payload(sub=str(user.id)),
+            ),
+            patch.object(
+                UserRepository, "get", new_callable=AsyncMock, return_value=user
+            ),
+            patch("app.dependencies.set_current_tenant_id") as mock_set_tenant,
+        ):
             await get_current_user(
                 session=session,
                 token="valid_token",
@@ -282,16 +302,17 @@ class TestGetOptionalCurrentUser:
     async def test_valid_token_returns_user(self) -> None:
         """Should return the user when a valid Bearer token is provided."""
         user = _make_user()
-        request = _mock_request(
-            headers={"Authorization": "Bearer valid_token"}
-        )
+        request = _mock_request(headers={"Authorization": "Bearer valid_token"})
         session = AsyncMock()
 
-        with patch(
-            "app.dependencies.decode_token",
-            return_value=_valid_payload(sub=str(user.id)),
-        ), patch.object(
-            UserRepository, "get", new_callable=AsyncMock, return_value=user
+        with (
+            patch(
+                "app.dependencies.decode_token",
+                return_value=_valid_payload(sub=str(user.id)),
+            ),
+            patch.object(
+                UserRepository, "get", new_callable=AsyncMock, return_value=user
+            ),
         ):
             result = await get_optional_current_user(
                 session=session,
@@ -303,9 +324,7 @@ class TestGetOptionalCurrentUser:
     @pytest.mark.asyncio
     async def test_invalid_token_returns_none(self) -> None:
         """Should return None when the Bearer token is invalid."""
-        request = _mock_request(
-            headers={"Authorization": "Bearer bad_token"}
-        )
+        request = _mock_request(headers={"Authorization": "Bearer bad_token"})
         session = AsyncMock()
 
         with patch(
@@ -322,9 +341,7 @@ class TestGetOptionalCurrentUser:
     @pytest.mark.asyncio
     async def test_expired_token_returns_none(self) -> None:
         """Should return None when the Bearer token is expired."""
-        request = _mock_request(
-            headers={"Authorization": "Bearer expired_token"}
-        )
+        request = _mock_request(headers={"Authorization": "Bearer expired_token"})
         session = AsyncMock()
 
         with patch(
@@ -354,9 +371,7 @@ class TestGetOptionalCurrentUser:
     @pytest.mark.asyncio
     async def test_non_bearer_authorization_returns_none(self) -> None:
         """Should return None when Authorization is not Bearer."""
-        request = _mock_request(
-            headers={"Authorization": "Basic dGVzdDp0ZXN0"}
-        )
+        request = _mock_request(headers={"Authorization": "Basic dGVzdDp0ZXN0"})
         session = AsyncMock()
 
         result = await get_optional_current_user(
@@ -370,16 +385,17 @@ class TestGetOptionalCurrentUser:
     async def test_inactive_user_returns_none(self) -> None:
         """Should return None when user exists but is inactive."""
         user = _make_user(is_active=False)
-        request = _mock_request(
-            headers={"Authorization": "Bearer token"}
-        )
+        request = _mock_request(headers={"Authorization": "Bearer token"})
         session = AsyncMock()
 
-        with patch(
-            "app.dependencies.decode_token",
-            return_value=_valid_payload(sub=str(user.id)),
-        ), patch.object(
-            UserRepository, "get", new_callable=AsyncMock, return_value=user
+        with (
+            patch(
+                "app.dependencies.decode_token",
+                return_value=_valid_payload(sub=str(user.id)),
+            ),
+            patch.object(
+                UserRepository, "get", new_callable=AsyncMock, return_value=user
+            ),
         ):
             result = await get_optional_current_user(
                 session=session,
@@ -391,15 +407,14 @@ class TestGetOptionalCurrentUser:
     @pytest.mark.asyncio
     async def test_user_not_found_returns_none(self) -> None:
         """Should return None when user ID from token doesn't exist."""
-        request = _mock_request(
-            headers={"Authorization": "Bearer valid_token"}
-        )
+        request = _mock_request(headers={"Authorization": "Bearer valid_token"})
         session = AsyncMock()
 
-        with patch(
-            "app.dependencies.decode_token", return_value=_valid_payload()
-        ), patch.object(
-            UserRepository, "get", new_callable=AsyncMock, return_value=None
+        with (
+            patch("app.dependencies.decode_token", return_value=_valid_payload()),
+            patch.object(
+                UserRepository, "get", new_callable=AsyncMock, return_value=None
+            ),
         ):
             result = await get_optional_current_user(
                 session=session,
@@ -411,9 +426,7 @@ class TestGetOptionalCurrentUser:
     @pytest.mark.asyncio
     async def test_wrong_token_type_returns_none(self) -> None:
         """Should return None when token type is not 'access'."""
-        request = _mock_request(
-            headers={"Authorization": "Bearer refresh_token"}
-        )
+        request = _mock_request(headers={"Authorization": "Bearer refresh_token"})
         session = AsyncMock()
 
         with patch(
@@ -430,9 +443,7 @@ class TestGetOptionalCurrentUser:
     @pytest.mark.asyncio
     async def test_missing_sub_claim_returns_none(self) -> None:
         """Should return None when token decodes but has no 'sub' claim."""
-        request = _mock_request(
-            headers={"Authorization": "Bearer token_no_sub"}
-        )
+        request = _mock_request(headers={"Authorization": "Bearer token_no_sub"})
         session = AsyncMock()
 
         with patch(
@@ -452,16 +463,19 @@ class TestGetOptionalCurrentUser:
         request = _mock_request(headers={"Authorization": "Bearer token"})
         session = AsyncMock()
 
-        with patch(
-            "app.dependencies.decode_token",
-            return_value={
-                "sub": str(uuid4()),
-                "type": "access",
-                "jti": "blacklisted-jti",
-            },
-        ), patch(
-            "app.dependencies.is_token_blacklisted",
-            AsyncMock(return_value=True),
+        with (
+            patch(
+                "app.dependencies.decode_token",
+                return_value={
+                    "sub": str(uuid4()),
+                    "type": "access",
+                    "jti": "blacklisted-jti",
+                },
+            ),
+            patch(
+                "app.dependencies.is_token_blacklisted",
+                AsyncMock(return_value=True),
+            ),
         ):
             result = await get_optional_current_user(
                 session=session,
@@ -517,9 +531,7 @@ class TestGetApiKeyAuth:
             tenant_id=uuid4(),
             user_id=uuid4(),
         )
-        request = _mock_request(
-            headers={"X-API-Key": "key_test123:test_secret_value"}
-        )
+        request = _mock_request(headers={"X-API-Key": "key_test123:test_secret_value"})
         session = AsyncMock()
 
         with patch.object(
@@ -542,9 +554,7 @@ class TestGetApiKeyAuth:
         it returns None so that downstream auth (e.g., get_any_auth)
         can decide how to handle the missing credential.
         """
-        request = _mock_request(
-            headers={"X-API-Key": "key_bad:bad_secret"}
-        )
+        request = _mock_request(headers={"X-API-Key": "key_bad:bad_secret"})
         session = AsyncMock()
 
         with patch.object(
@@ -573,9 +583,7 @@ class TestGetApiKeyAuth:
     @pytest.mark.asyncio
     async def test_malformed_header_returns_none(self) -> None:
         """Should return None when X-API-Key header lacks colon separator."""
-        request = _mock_request(
-            headers={"X-API-Key": "no_colon_separator"}
-        )
+        request = _mock_request(headers={"X-API-Key": "no_colon_separator"})
         session = AsyncMock()
 
         result = await get_api_key_auth(
@@ -618,16 +626,17 @@ class TestGetCurrentUserUncovered:
         request = _mock_request()
         session = AsyncMock()
 
-        with patch(
-            "app.dependencies.decode_token",
-            return_value=_valid_payload(sub=str(user.id)),
-        ), patch.object(
-            UserRepository, "get", new_callable=AsyncMock, return_value=user
-        ), patch(
-            "app.dependencies.set_current_tenant_id"
-        ), patch(
-            "app.dependencies.check_user_rate_limit"
-        ) as mock_rate_limit:
+        with (
+            patch(
+                "app.dependencies.decode_token",
+                return_value=_valid_payload(sub=str(user.id)),
+            ),
+            patch.object(
+                UserRepository, "get", new_callable=AsyncMock, return_value=user
+            ),
+            patch("app.dependencies.set_current_tenant_id"),
+            patch("app.dependencies.check_user_rate_limit") as mock_rate_limit,
+        ):
             await get_current_user(
                 session=session,
                 token="valid_token",

@@ -91,9 +91,7 @@ class FeatureFlagService:
             FeatureFlagServiceError: If name already exists
         """
         if await self.repository.name_exists(data.name):
-            raise FeatureFlagServiceError(
-                f"Feature flag '{data.name}' already exists"
-            )
+            raise FeatureFlagServiceError(f"Feature flag '{data.name}' already exists")
 
         flag = await self.repository.create(
             {

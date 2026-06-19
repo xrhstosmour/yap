@@ -235,14 +235,11 @@ class TestLifespan:
         """lifespan calls init_db on startup and close_db + close_redis on shutdown."""
         mock_app = MagicMock()
 
-        with patch(
-            "app.main.init_db", new_callable=AsyncMock
-        ) as mock_init, patch(
-            "app.main.close_db", new_callable=AsyncMock
-        ) as mock_close, patch(
-            "app.main.close_redis", new_callable=AsyncMock
-        ) as mock_redis_close, patch(
-            "app.main.setup_logging"
+        with (
+            patch("app.main.init_db", new_callable=AsyncMock) as mock_init,
+            patch("app.main.close_db", new_callable=AsyncMock) as mock_close,
+            patch("app.main.close_redis", new_callable=AsyncMock) as mock_redis_close,
+            patch("app.main.setup_logging"),
         ):
             # setup_tracing is imported lazily inside lifespan and already
             # wrapped in try/except, so we do not need an explicit patch.
@@ -258,16 +255,15 @@ class TestLifespan:
         """lifespan catches init_db failure and still runs shutdown hooks."""
         mock_app = MagicMock()
 
-        with patch(
-            "app.main.init_db",
-            new_callable=AsyncMock,
-            side_effect=Exception("DB connection failed"),
-        ) as mock_init, patch(
-            "app.main.close_db", new_callable=AsyncMock
-        ) as mock_close, patch(
-            "app.main.close_redis", new_callable=AsyncMock
-        ) as mock_redis_close, patch(
-            "app.main.setup_logging"
+        with (
+            patch(
+                "app.main.init_db",
+                new_callable=AsyncMock,
+                side_effect=Exception("DB connection failed"),
+            ) as mock_init,
+            patch("app.main.close_db", new_callable=AsyncMock) as mock_close,
+            patch("app.main.close_redis", new_callable=AsyncMock) as mock_redis_close,
+            patch("app.main.setup_logging"),
         ):
             # lifespan must not propagate the init_db error.
             async with lifespan(mock_app):

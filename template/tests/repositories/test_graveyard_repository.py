@@ -144,9 +144,7 @@ class TestGraveyardRepository:
         assert entry.deleted_by == "system"
 
     @pytest.mark.anyio
-    async def test_bury_defaults_reason_to_none(
-        self, session: AsyncSession
-    ) -> None:
+    async def test_bury_defaults_reason_to_none(self, session: AsyncSession) -> None:
         """bury() should default reason to None when not provided.
 
         Args:
@@ -263,9 +261,7 @@ class TestGraveyardRepository:
 
         tenant = await self._create_tenant(session)
         repo = GraveyardRepository(session)
-        very_old_date = datetime.now(UTC) - timedelta(
-            days=DEFAULT_RETENTION_DAYS + 20
-        )
+        very_old_date = datetime.now(UTC) - timedelta(days=DEFAULT_RETENTION_DAYS + 20)
 
         old_entry = Graveyard(
             model_name="users",
@@ -281,9 +277,7 @@ class TestGraveyardRepository:
         assert count == 1
 
     @pytest.mark.anyio
-    async def test_multiple_buries_and_purge_count(
-        self, session: AsyncSession
-    ) -> None:
+    async def test_multiple_buries_and_purge_count(self, session: AsyncSession) -> None:
         """Bury several records, age some, then purge and verify exact count.
 
         Args:
@@ -310,9 +304,7 @@ class TestGraveyardRepository:
         # Use a naive datetime — SQLite discards timezone info, and the
         # ORM bulk-delete post-synchronize step would fail comparing
         # naive stored values against an aware purge cutoff.
-        old_date = (datetime.now(UTC) - timedelta(days=120)).replace(
-            tzinfo=None
-        )
+        old_date = (datetime.now(UTC) - timedelta(days=120)).replace(tzinfo=None)
         await session.execute(
             update(Graveyard)
             .where(Graveyard.id.in_([entries[0].id, entries[1].id]))

@@ -83,9 +83,7 @@ class TestCreateFlag:
         with pytest.raises(
             FeatureFlagServiceError, match="Feature flag 'test_flag' already exists"
         ):
-            await service.create_flag(
-                FeatureFlagCreate(name="test_flag", state=True)
-            )
+            await service.create_flag(FeatureFlagCreate(name="test_flag", state=True))
 
         service.repository.name_exists.assert_awaited_once_with("test_flag")
         service.repository.create.assert_not_awaited()
@@ -123,8 +121,12 @@ class TestListFlags:
     @pytest.mark.asyncio
     async def test_list_flags_returns_tuple(self, service: FeatureFlagService) -> None:
         """Should return a tuple of (flags, total_count)."""
-        flag1 = _make_flag(name="flag_a", flag_id=UUID("00000000-0000-0000-0000-000000000001"))
-        flag2 = _make_flag(name="flag_b", flag_id=UUID("00000000-0000-0000-0000-000000000002"))
+        flag1 = _make_flag(
+            name="flag_a", flag_id=UUID("00000000-0000-0000-0000-000000000001")
+        )
+        flag2 = _make_flag(
+            name="flag_b", flag_id=UUID("00000000-0000-0000-0000-000000000002")
+        )
         service.repository.list = AsyncMock(return_value=([flag1, flag2], 2))
 
         flags, total = await service.list_flags()
@@ -140,9 +142,7 @@ class TestUpdateFlag:
     """Tests for update_flag()."""
 
     @pytest.mark.asyncio
-    async def test_update_flag_description(
-        self, service: FeatureFlagService
-    ) -> None:
+    async def test_update_flag_description(self, service: FeatureFlagService) -> None:
         """Should update only the description and not sync to Redis."""
         existing = _make_flag(name="test_flag", description="Old desc")
         updated = _make_flag(name="test_flag", description="New desc")
@@ -166,9 +166,7 @@ class TestUpdateFlag:
         mock_sync.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_update_flag_not_found(
-        self, service: FeatureFlagService
-    ) -> None:
+    async def test_update_flag_not_found(self, service: FeatureFlagService) -> None:
         """Should return None when flag does not exist."""
         service.repository.get_by_name = AsyncMock(return_value=None)
 
@@ -184,9 +182,7 @@ class TestToggleFlag:
     """Tests for toggle_flag()."""
 
     @pytest.mark.asyncio
-    async def test_toggle_flag_true_to_false(
-        self, service: FeatureFlagService
-    ) -> None:
+    async def test_toggle_flag_true_to_false(self, service: FeatureFlagService) -> None:
         """Should toggle state from True to False and sync to Redis."""
         existing = _make_flag(name="test_flag", state=True)
         toggled = _make_flag(name="test_flag", state=False)
@@ -226,9 +222,7 @@ class TestDeleteFlag:
         mock_remove.assert_awaited_once_with("test_flag")
 
     @pytest.mark.asyncio
-    async def test_delete_flag_not_found(
-        self, service: FeatureFlagService
-    ) -> None:
+    async def test_delete_flag_not_found(self, service: FeatureFlagService) -> None:
         """Should return False when flag does not exist."""
         service.repository.get_by_name = AsyncMock(return_value=None)
 

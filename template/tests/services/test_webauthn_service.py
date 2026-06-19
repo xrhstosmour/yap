@@ -1,4 +1,5 @@
 """Tests for WebAuthnService."""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock
@@ -146,7 +147,6 @@ class TestBeginAuthentication:
 
         assert isinstance(options, dict)
         assert "challenge" in options
-
 
     @pytest.mark.asyncio
     async def test_anon_when_user_not_found(
@@ -357,7 +357,9 @@ class TestCompleteAuthentication:
         """Should verify credential, update sign_count, return user."""
         user = make_user()
         stored_cred = MagicMock()
-        stored_cred.credential_id = "dGVzdC1jcmVkZW50aWFsLWlk"  # base64url "test-credential-id"
+        stored_cred.credential_id = (
+            "dGVzdC1jcmVkZW50aWFsLWlk"  # base64url "test-credential-id"
+        )
         stored_cred.public_key = "cHViLWtleQ=="  # base64url "pub-key"
         stored_cred.user_id = user.id
         stored_cred.sign_count = 3

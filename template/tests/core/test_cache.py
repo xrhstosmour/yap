@@ -127,9 +127,7 @@ class TestSet:
         result = await cache.set("mykey", value)
 
         assert result is True
-        mock_redis.set.assert_called_once_with(
-            "test:mykey", json.dumps(value)
-        )
+        mock_redis.set.assert_called_once_with("test:mykey", json.dumps(value))
 
     @pytest.mark.asyncio
     async def test_success_with_int_ttl(
@@ -142,9 +140,7 @@ class TestSet:
         result = await cache.set("mykey", value, ttl=60)
 
         assert result is True
-        mock_redis.setex.assert_called_once_with(
-            "test:mykey", 60, json.dumps(value)
-        )
+        mock_redis.setex.assert_called_once_with("test:mykey", 60, json.dumps(value))
 
     @pytest.mark.asyncio
     async def test_success_with_timedelta_ttl(
@@ -157,9 +153,7 @@ class TestSet:
         result = await cache.set("mykey", value, ttl=timedelta(minutes=5))
 
         assert result is True
-        mock_redis.setex.assert_called_once_with(
-            "test:mykey", 300, json.dumps(value)
-        )
+        mock_redis.setex.assert_called_once_with("test:mykey", 300, json.dumps(value))
 
     @pytest.mark.asyncio
     async def test_oversized_value_returns_false(
@@ -273,6 +267,7 @@ class TestDeletePattern:
         self, cache: CacheService, mock_redis: AsyncMock
     ) -> None:
         """When no keys match, delete_pattern should return 0."""
+
         async def _scan_iter_empty(**kwargs):  # noqa: ANN401
             # Yield nothing.
             if False:  # pragma: no cover
@@ -290,6 +285,7 @@ class TestDeletePattern:
         self, cache: CacheService, mock_redis: AsyncMock
     ) -> None:
         """A scan ConnectionError should be caught and 0 returned."""
+
         async def _scan_iter_error(**kwargs):  # noqa: ANN401
             raise ConnectionError("scan failed")
             yield  # pragma: no cover
@@ -454,6 +450,7 @@ class TestGetRedisDoubleCheckedLocking:
         from unittest.mock import patch as _patch
 
         import app.core.cache as cache_module
+
         original = cache_module._redis_client
         try:
             cache_module._redis_client = None
@@ -461,9 +458,7 @@ class TestGetRedisDoubleCheckedLocking:
             mock_client = MagicMock()
             mock_client.ping = AsyncMock()
 
-            with _patch(
-                "redis.asyncio.Redis.from_url", return_value=mock_client
-            ):
+            with _patch("redis.asyncio.Redis.from_url", return_value=mock_client):
                 first = await get_redis()
                 second = await get_redis()
 

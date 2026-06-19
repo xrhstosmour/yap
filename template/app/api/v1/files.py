@@ -133,8 +133,7 @@ async def get_file_metadata(
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete a file",
     description=(
-        "Soft-delete a file. Purges from storage "
-        "when reference count reaches zero."
+        "Soft-delete a file. Purges from storage when reference count reaches zero."
     ),
 )
 async def delete_file(
