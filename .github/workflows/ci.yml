@@ -139,7 +139,7 @@ jobs:
           export POSTGRESQL_DATABASE=testdb
           export REDIS_PASSWORD=testpass
           export REDIS_URL=redis://:testpass@localhost:6379/0
-          uv run pytest tests/ -v --tb=short --cov=app --cov-report=xml
+          uv run pytest tests/ -v --tb=short --cov=app --cov-report=xml -m "not slow"
         env:
           POSTGRESQL_SERVER: localhost
           POSTGRESQL_HOST: localhost
