@@ -162,16 +162,23 @@ class AuthService:
         # Celery tasks are designed to be dispatched synchronously with .delay()
         # or .apply_async() — this is correct even in an async context because
         # the task is serialized and handed off to the broker, not executed inline.
-        send_template_email_task.delay(
-            to_email=user.email,
-            subject=subject,
-            template_name=template_name,
-            context={
-                "name": user.full_name or user.email,
-                url_field_name: url,
-                "project": settings.PROJECT_NAME,
-            },
-        )
+        try:
+            send_template_email_task.delay(
+                to_email=user.email,
+                subject=subject,
+                template_name=template_name,
+                context={
+                    "name": user.full_name or user.email,
+                    url_field_name: url,
+                    "project": settings.PROJECT_NAME,
+                },
+            )
+        except Exception:
+            logger.warning(
+                "email_task_dispatch_failed",
+                to_email=user.email,
+                subject=subject,
+            )
 
     async def register(
         self,
@@ -246,13 +253,12 @@ class AuthService:
             raise UserInactiveError("User account is inactive")
 
         # Log successful login.
-        if user.tenant_id:
-            await self.audit_repository.log_user_action(
-                action=AuditAction.LOGIN,
-                user_id=user.id,
-                tenant_id=user.tenant_id,
-                email=user.email,
-            )
+        await self.audit_repository.log_user_action(
+            action=AuditAction.LOGIN,
+            user_id=user.id,
+            tenant_id=user.tenant_id or SYSTEM_TENANT_ID,
+            email=user.email,
+        )
 
         logger.info("user_authenticated", user_id=str(user.id))
 
@@ -410,13 +416,12 @@ class AuthService:
         await self._update_password_and_invalidate(user, new_password)
 
         # Log password change.
-        if user.tenant_id:
-            await self.audit_repository.log_user_action(
-                action=AuditAction.PASSWORD_CHANGE,
-                user_id=user.id,
-                tenant_id=user.tenant_id,
-                email=user.email,
-            )
+        await self.audit_repository.log_user_action(
+            action=AuditAction.PASSWORD_CHANGE,
+            user_id=user.id,
+            tenant_id=user.tenant_id or SYSTEM_TENANT_ID,
+            email=user.email,
+        )
 
         logger.info("password_changed", user_id=str(user.id))
 
@@ -657,9 +662,7 @@ class AuthService:
                 # NOTE: OAuth users are created without a tenant_id.
                 # Projects requiring multi-tenancy should assign a tenant
                 # during OAuth registration (e.g. via invitation or subdomain).
-                placeholder_hash = generate_password_hash(
-                    secrets.token_urlsafe(32)
-                )
+                placeholder_hash = generate_password_hash(secrets.token_urlsafe(32))
                 user = await self.user_repository.create_user(
                     email=email,
                     password_hash=placeholder_hash,
