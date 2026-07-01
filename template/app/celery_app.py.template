@@ -63,6 +63,7 @@ celery_app.conf.update(
 )
 try:
     import redbeat  # noqa
+
     celery_app.conf.redbeat_redis_url = settings.REDIS_URL
 except ImportError:
     pass
@@ -108,7 +109,7 @@ def _on_task_failure(
     kwargs=None,
     traceback=None,
     einfo=None,
-    **signal_kwargs: Any,  # noqa: ANN401
+    **signal_kwargs: object,
 ) -> None:
     logger.error(
         "task_failed_permanently",
@@ -120,7 +121,7 @@ def _on_task_failure(
 
 # Graceful shutdown.
 @worker_shutdown.connect
-def _on_worker_shutdown(**signal_kwargs: Any) -> None:  # noqa: ANN401
+def _on_worker_shutdown(**signal_kwargs: object) -> None:
     logger.info("celery_worker_shutting_down")
 
 
