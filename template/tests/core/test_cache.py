@@ -546,9 +546,7 @@ class TestGetRedisLifecycle:
 
             mock_cluster = MagicMock()
             with (
-                patch.object(
-                    cache_module.settings, "REDIS_CLUSTER", True
-                ),
+                patch.object(cache_module.settings, "REDIS_CLUSTER", True),
                 patch(
                     "redis.asyncio.cluster.RedisCluster", return_value=mock_cluster
                 ) as mock_cluster_init,
