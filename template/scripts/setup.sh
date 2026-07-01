@@ -52,20 +52,20 @@ if [ -f .env ]; then
 else
     info "Generating environment variables..."
 
-    SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
-    CRYPTO_KEY=$(python3 -c "import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())")
-    POSTGRESQL_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(24))")
-    FIRST_SUPERUSER_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")
-    RABBITMQ_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")
-    REDIS_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")
-    FLOWER_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(12))")
-    PGADMIN4_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(12))")
-    GLITCHTIP_SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
-    REDIS_COMMANDER_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(12))")
-    METABASE_READ_ONLY_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")
-    STORAGE_SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
-    GOOGLE_CLIENT_SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(24))")
-    SMTP_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")
+    SECRET_KEY="${SECRET_KEY:-$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")}"
+    CRYPTO_KEY="${CRYPTO_KEY:-$(python3 -c "import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())")}"
+    POSTGRESQL_PASSWORD="${POSTGRESQL_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(24))")}"
+    FIRST_SUPERUSER_PASSWORD="${FIRST_SUPERUSER_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")}"
+    RABBITMQ_PASSWORD="${RABBITMQ_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")}"
+    REDIS_PASSWORD="${REDIS_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")}"
+    FLOWER_PASSWORD="${FLOWER_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(12))")}"
+    PGADMIN4_PASSWORD="${PGADMIN4_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(12))")}"
+    GLITCHTIP_SECRET_KEY="${GLITCHTIP_SECRET_KEY:-$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")}"
+    REDIS_COMMANDER_PASSWORD="${REDIS_COMMANDER_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(12))")}"
+    METABASE_READ_ONLY_PASSWORD="${METABASE_READ_ONLY_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")}"
+    STORAGE_SECRET_KEY="${STORAGE_SECRET_KEY:-$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")}"
+    GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET:-$(python3 -c "import secrets; print(secrets.token_urlsafe(24))")}"
+    SMTP_PASSWORD="${SMTP_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")}"
 
     cp .env.example .env
 
@@ -135,7 +135,31 @@ if [ -f .pre-commit-config.yaml ] && command -v uv >/dev/null 2>&1; then
 fi
 
 # Start infrastructure services and run migrations.
-if command -v docker >/dev/null 2>&1; then
+if [ "${CI:-}" = "true" ]; then
+    # CI: database is already available via service containers.
+    info "CI detected, using database at ${POSTGRESQL_SERVER:-localhost}:${POSTGRESQL_PORT:-5432}..."
+    if python3 -c "
+import socket
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.settimeout(3)
+try:
+    s.connect(('${POSTGRESQL_SERVER:-localhost}', ${POSTGRESQL_PORT:-5432}))
+    s.close()
+    exit(0)
+except Exception:
+    exit(1)
+" 2>/dev/null; then
+        if command -v uv >/dev/null 2>&1; then
+            info "Running database migrations..."
+            uv run alembic upgrade head || error "Database migrations failed!"
+
+            info "Seeding initial PostgreSQL data..."
+            uv run --env-file .env python app/initial_data.py || warn "Initial PostgreSQL data seeding failed!"
+        fi
+    else
+        warn "Database not reachable, skipping migrations and seeding."
+    fi
+elif command -v docker >/dev/null 2>&1; then
     # Ensure containerization daemon is running.
     if ! docker info >/dev/null 2>&1; then
         info "Starting containerization daemon..."
@@ -183,15 +207,17 @@ if command -v docker >/dev/null 2>&1; then
 
     info "Waiting for database readiness..."
     sleep 5
+    database_ready=false
     for i in $(seq 1 30); do
         if docker compose exec -T postgresql pg_isready 2>/dev/null; then
+            database_ready=true
             break
         fi
         [ "$i" -eq 30 ] && warn "Database did not become ready in time"
         sleep 2
     done
 
-    if docker compose exec -T postgresql pg_isready 2>/dev/null; then
+    if [ "$database_ready" = true ]; then
         if command -v uv >/dev/null 2>&1; then
             info "Running database migrations..."
             uv run alembic upgrade head || error "Database migrations failed!"
@@ -228,7 +254,7 @@ if command -v docker >/dev/null 2>&1; then
         warn "Skipping migrations and seeding..."
     fi
 else
-    warn "Docker not found — skipping services, migrations, and seeding"
+    warn "Docker not found, skipping services, migrations, and seeding"
 fi
 
 echo -e "  ${GREEN}Setup complete!${NC}"
