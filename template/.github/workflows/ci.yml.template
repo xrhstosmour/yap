@@ -69,6 +69,11 @@ jobs:
           echo "CRYPTO_KEY=$(python3 -c 'import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())')" >> $GITHUB_ENV
           echo "RABBITMQ_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')" >> $GITHUB_ENV
           echo "FIRST_SUPERUSER_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')" >> $GITHUB_ENV
+          echo "REDIS_AOF_REWRITE_PERCENTAGE=100" >> $GITHUB_ENV
+          echo "REDIS_AOF_REWRITE_MINIMUM_SIZE=64mb" >> $GITHUB_ENV
+          echo "REDIS_MAXIMUM_MEMORY=128mb" >> $GITHUB_ENV
+          echo "REDIS_MAXIMUM_CLIENTS=100" >> $GITHUB_ENV
+          echo "REDIS_PORT=6379" >> $GITHUB_ENV
       - run: uv sync --extra dev
       - run: uv run alembic upgrade head
         env:
