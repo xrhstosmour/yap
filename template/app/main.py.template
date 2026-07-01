@@ -23,6 +23,7 @@ from app.api.idempotency import IdempotencyMiddleware
 from app.api.request_id import RequestIDMiddleware
 from app.api.v1.router import router as api_v1_router
 from app.core.cache import close_redis
+from app.core.cache import init_redis
 from app.core.logging import get_logger
 from app.core.logging import setup_logging
 from app.core.security import TokenRateLimitError
@@ -68,6 +69,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info("database_initialized")
     except Exception as e:
         logger.error("database_init_failed", error=str(e))
+
+    try:
+        await init_redis()
+        logger.info("redis_initialized")
+    except Exception as e:
+        logger.error("redis_init_failed", error=str(e))
 
     logger.info("application_started")
 
