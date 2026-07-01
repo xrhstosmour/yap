@@ -65,15 +65,25 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - name: Generate secrets
         run: |
+          cp .env.example .env
+          python3 -c "
+          import os
+          with open('.env.example') as f:
+              for line in f:
+                  line = line.strip()
+                  if not line or line.startswith('#'):
+                      continue
+                  if '=' not in line:
+                      continue
+                  key, _, value = line.partition('=')
+                  value = value.strip().strip('\"').strip(\"'\")
+                  with open(os.environ['GITHUB_ENV'], 'a') as out:
+                      out.write(f'{key}={value}\n')
+          "
           echo "SECRET_KEY=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')" >> $GITHUB_ENV
           echo "CRYPTO_KEY=$(python3 -c 'import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())')" >> $GITHUB_ENV
           echo "RABBITMQ_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')" >> $GITHUB_ENV
           echo "FIRST_SUPERUSER_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')" >> $GITHUB_ENV
-          echo "REDIS_AOF_REWRITE_PERCENTAGE=100" >> $GITHUB_ENV
-          echo "REDIS_AOF_REWRITE_MINIMUM_SIZE=64mb" >> $GITHUB_ENV
-          echo "REDIS_MAXIMUM_MEMORY=128mb" >> $GITHUB_ENV
-          echo "REDIS_MAXIMUM_CLIENTS=100" >> $GITHUB_ENV
-          echo "REDIS_PORT=6379" >> $GITHUB_ENV
       - run: uv sync --extra dev
       - run: uv run alembic upgrade head
         env:
