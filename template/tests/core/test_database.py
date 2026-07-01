@@ -232,11 +232,12 @@ class TestLifespan:
 
     @pytest.mark.anyio
     async def test_lifespan_initializes_and_closes_db(self) -> None:
-        """lifespan calls init_db on startup and close_db + close_redis on shutdown."""
+        """lifespan calls init_db and init_redis on startup and close_db + close_redis on shutdown."""
         mock_app = MagicMock()
 
         with (
             patch("app.main.init_db", new_callable=AsyncMock) as mock_init,
+            patch("app.main.init_redis", new_callable=AsyncMock) as mock_redis_init,
             patch("app.main.close_db", new_callable=AsyncMock) as mock_close,
             patch("app.main.close_redis", new_callable=AsyncMock) as mock_redis_close,
             patch("app.main.setup_logging"),
@@ -247,6 +248,7 @@ class TestLifespan:
                 pass
 
         mock_init.assert_awaited_once()
+        mock_redis_init.assert_awaited_once()
         mock_close.assert_awaited_once()
         mock_redis_close.assert_awaited_once()
 
@@ -261,6 +263,7 @@ class TestLifespan:
                 new_callable=AsyncMock,
                 side_effect=Exception("DB connection failed"),
             ) as mock_init,
+            patch("app.main.init_redis", new_callable=AsyncMock) as mock_redis_init,
             patch("app.main.close_db", new_callable=AsyncMock) as mock_close,
             patch("app.main.close_redis", new_callable=AsyncMock) as mock_redis_close,
             patch("app.main.setup_logging"),
@@ -270,6 +273,7 @@ class TestLifespan:
                 pass
 
         mock_init.assert_awaited_once()
+        mock_redis_init.assert_awaited_once()
         # Shutdown hooks must still execute.
         mock_close.assert_awaited_once()
         mock_redis_close.assert_awaited_once()
