@@ -101,9 +101,7 @@ class TestAuthLogin:
                 email="inactive@{{ project_slug }}.com", password="password123"
             )
         )
-        await auth_service.user_repository.update(
-            user.id, {"is_active": False}
-        )
+        await auth_service.user_repository.update(user.id, {"is_active": False})
 
         response = await client.post(
             "/api/v1/auth/login",
@@ -278,9 +276,7 @@ class TestChangePassword:
         assert "incorrect" in response.json()["detail"].lower()
 
     @pytest.mark.usefixtures("override_get_async_session")
-    async def test_change_password_success(
-        self, client: AsyncClient, session
-    ) -> None:
+    async def test_change_password_success(self, client: AsyncClient, session) -> None:
         """Change password with correct current password should return 204."""
         auth_service = _auth_service(session)
         user = await auth_service.register(
