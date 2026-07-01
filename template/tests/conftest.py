@@ -109,6 +109,26 @@ def disable_token_blacklist_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("app.services.auth_service.blacklist_token", _noop_blacklist)
 
 
+@pytest.fixture(name="override_get_redis", autouse=True)
+def override_get_redis_fixture() -> None:
+    """Override FastAPI Redis dependency so route handlers do not need a real Redis."""
+    from unittest.mock import AsyncMock
+
+    from app.core.cache import get_redis
+    from app.main import app
+
+    mock_redis = AsyncMock()
+
+    async def _mock_get_redis() -> AsyncMock:  # noqa: ANN202
+        return mock_redis
+
+    app.dependency_overrides[get_redis] = _mock_get_redis
+    try:
+        yield
+    finally:
+        app.dependency_overrides.pop(get_redis, None)
+
+
 @pytest.fixture(name="override_settings")
 def override_settings_fixture() -> Settings:
     """Override settings for testing."""

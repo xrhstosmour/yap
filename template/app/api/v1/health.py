@@ -14,7 +14,7 @@ from fastapi import status
 from pydantic import BaseModel
 from sqlmodel import text
 
-from app.core.cache import get_redis
+from app.core.cache import RedisDependency
 from app.core.logging import get_logger
 from app.database import async_engine
 from app.dependencies import SessionDependency
@@ -65,7 +65,10 @@ class MetricsResponse(BaseModel):
     summary="Health check",
     description="Check the health status of the API and its dependencies.",
 )
-async def health_check(session: SessionDependency) -> HealthResponse:
+async def health_check(
+    session: SessionDependency,
+    redis: RedisDependency,
+) -> HealthResponse:
     """Check health of API and dependencies.
 
     Returns the status of:
@@ -85,7 +88,6 @@ async def health_check(session: SessionDependency) -> HealthResponse:
 
     # Check Redis.
     try:
-        redis = await get_redis()
         await redis.ping()
     except Exception as e:
         logger.error("redis_health_check_failed", error=str(e))
@@ -153,7 +155,10 @@ async def liveness_check() -> MessageResponse:
     summary="System metrics",
     description="Get database pool and cache statistics for monitoring.",
 )
-async def get_metrics(session: SessionDependency) -> MetricsResponse:
+async def get_metrics(
+    session: SessionDependency,
+    redis_client: RedisDependency,
+) -> MetricsResponse:
     """Get system performance metrics.
 
     Returns database connection pool stats and cache stats
@@ -170,7 +175,6 @@ async def get_metrics(session: SessionDependency) -> MetricsResponse:
 
     cache_connected = False
     try:
-        redis_client = await get_redis()
         await redis_client.ping()
         cache_connected = True
     except Exception:

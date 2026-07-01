@@ -74,6 +74,7 @@ class Settings(BaseSettings):
         REDIS_HOST: Redis server host
         REDIS_PORT: Redis server port
         REDIS_DATABASE: Redis database number
+        REDIS_CLUSTER: Enable Redis Cluster mode (multi-node)
 
     Celery:
         CELERY_BROKER_URL: Celery message broker URL
@@ -173,6 +174,7 @@ class Settings(BaseSettings):
     REDIS_PORT: int = 6379
     REDIS_DATABASE: int = 0
     REDIS_PASSWORD: str = ""
+    REDIS_CLUSTER: bool = False
 
     # WARNING: REDIS_URL contains credentials. Do not log this value.
     # Use REDIS_URL_REDACTED for logging/tracing instead.
