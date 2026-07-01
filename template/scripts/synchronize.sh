@@ -13,6 +13,19 @@ read_yaml_scalar() {
         | sed 's/^ *//; s/^"//; s/"$//'
 }
 
+read_env_scalar() {
+    local key="$1"
+    local file="$2"
+    local fallback="${3:-}"
+    local value
+    value=$(grep "^${key}=" "$file" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' || true)
+    if [ -n "$value" ]; then
+        echo "$value"
+    else
+        echo "$fallback"
+    fi
+}
+
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$PROJECT_DIR"
 
@@ -34,15 +47,56 @@ set +a
 # The answers file is intentionally gitignored to avoid committing secrets.
 warn "Reconstructing copier answers from project files and .env..."
 
-project_name=$(grep '^PROJECT_NAME=' .env.example 2>/dev/null | cut -d= -f2 | tr -d '"')
-project_slug=$(grep '^POSTGRESQL_USER=' .env.example 2>/dev/null | cut -d= -f2 | tr -d '"')
-description=$(grep '^description' pyproject.toml 2>/dev/null | sed 's/.*= *"//;s/"$//')
-author_name=$(grep 'name = "' pyproject.toml 2>/dev/null | head -1 | sed 's/.*name = "//;s/"$//')
-author_email=$(grep 'email = "' pyproject.toml 2>/dev/null | head -1 | sed 's/.*email = "//;s/"$//')
-superuser=$(grep '^FIRST_SUPERUSER_FULL_NAME=' .env.example 2>/dev/null | cut -d= -f2 | tr -d '"')
-traefik_host=$(grep '^TRAEFIK_HOST=' .env.example 2>/dev/null | cut -d= -f2 | tr -d '"')
-timezone=$(grep '^TIMEZONE=' .env.example 2>/dev/null | cut -d= -f2 | tr -d '"')
-storage_region=$(grep '^STORAGE_REGION=' .env.example 2>/dev/null | cut -d= -f2 | tr -d '"')
+project_name=$(read_env_scalar "PROJECT_NAME" ".env.example")
+project_slug=$(read_env_scalar "POSTGRESQL_USER" ".env.example")
+description=$(python3 - <<'PY'
+import tomllib
+from pathlib import Path
+
+path = Path("pyproject.toml")
+if not path.exists():
+    print("")
+    raise SystemExit(0)
+data = tomllib.loads(path.read_text())
+print((data.get("project", {}) or {}).get("description", ""))
+PY
+)
+author_name=$(python3 - <<'PY'
+import tomllib
+from pathlib import Path
+
+path = Path("pyproject.toml")
+if not path.exists():
+    print("")
+    raise SystemExit(0)
+data = tomllib.loads(path.read_text())
+authors = (data.get("project", {}) or {}).get("authors", [])
+if authors and isinstance(authors[0], dict):
+    print(authors[0].get("name", ""))
+else:
+    print("")
+PY
+)
+author_email=$(python3 - <<'PY'
+import tomllib
+from pathlib import Path
+
+path = Path("pyproject.toml")
+if not path.exists():
+    print("")
+    raise SystemExit(0)
+data = tomllib.loads(path.read_text())
+authors = (data.get("project", {}) or {}).get("authors", [])
+if authors and isinstance(authors[0], dict):
+    print(authors[0].get("email", ""))
+else:
+    print("")
+PY
+)
+superuser=$(read_env_scalar "FIRST_SUPERUSER_FULL_NAME" ".env.example")
+traefik_host=$(read_env_scalar "TRAEFIK_HOST" ".env.example")
+timezone=$(read_env_scalar "TIMEZONE" ".env.example" "UTC")
+storage_region=$(read_env_scalar "STORAGE_REGION" ".env.example" "eu-central-1")
 
 has_extra() { grep -q "containers/.*/$1/docker-compose.yml" docker-compose.yml 2>/dev/null && echo "true" || echo "false"; }
 include_traefik=$(has_extra "traefik")
@@ -77,15 +131,15 @@ fi
 cat > .copier/.answers.yml << YAML
 _src_path: gh:xrhstosmour/yap
 _commit: $_commit
-project_name: $project_name
-project_slug: $project_slug
-description: $description
-author_name: $author_name
-author_email: $author_email
-first_superuser_full_name: $superuser
+project_name: "${project_name}"
+project_slug: "${project_slug}"
+description: "${description}"
+author_name: "${author_name}"
+author_email: "${author_email}"
+first_superuser_full_name: "${superuser}"
 include_traefik: $include_traefik
-traefik_host: $traefik_host
-timezone: $timezone
+traefik_host: "${traefik_host}"
+timezone: "${timezone}"
 include_glitchtip: $include_glitchtip
 glitchtip_secret_key: "${GLITCHTIP_SECRET_KEY:-}"
 include_metabase: $include_metabase
@@ -99,7 +153,7 @@ include_flower: $include_flower
 flower_password: "${FLOWER_PASSWORD:-}"
 include_redbeat: $include_redbeat
 include_minio: $include_minio
-storage_region: $storage_region
+storage_region: "${storage_region}"
 nested: $nested
 jwt_secret_key: "${SECRET_KEY:-}"
 postgresql_password: "${POSTGRESQL_PASSWORD:-}"
