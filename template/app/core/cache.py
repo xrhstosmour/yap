@@ -2,16 +2,23 @@
 
 This module provides a centralized Redis client for caching,
 rate limiting, and Celery broker connections.
+
+The Redis client is initialized during application startup via
+``init_redis()`` (called from the FastAPI lifespan). This avoids
+lazy-initialization race conditions and supports both standalone
+and cluster modes.
 """
 
 from __future__ import annotations
 
-import asyncio
 from datetime import timedelta
+from typing import Annotated
 from typing import Any
 from typing import cast
 
 import redis.asyncio as redis
+import redis.asyncio.cluster as redis_cluster
+from fastapi import Depends
 from redis.exceptions import ConnectionError
 from redis.exceptions import TimeoutError
 
@@ -20,39 +27,77 @@ from app.core.settings import settings
 
 logger = get_logger("cache")
 
-# Global Redis client instance with async lock for thread-safe initialization.
-_redis_client: redis.Redis | None = None
-_redis_lock: asyncio.Lock = asyncio.Lock()
+# Type alias covering both standalone and cluster Redis clients.
+AsyncRedisClient = redis.Redis | redis_cluster.RedisCluster  # noqa: UP040
 
-# Global cache instance.
+# Global Redis client and cache instances, initialized during lifespan.
+_redis_client: AsyncRedisClient | None = None
 _cache: CacheService | None = None
 
 
-async def get_redis() -> redis.Redis:
-    """Get or create Redis client connection.
+async def init_redis() -> None:
+    """Initialize the shared Redis client during application startup.
 
-    Returns a shared Redis client instance. Connection is
-    established on first use and reused for subsequent calls.
+    Creates a standalone or cluster client based on
+    ``settings.REDIS_CLUSTER``. Must be called once from the
+    FastAPI lifespan startup before any requests are served.
 
-    Uses an async lock to prevent concurrent clients from
-    creating multiple connections during initialization.
-
-    Returns:
-        Redis client instance
+    Raises:
+        RuntimeError: If already initialized.
     """
     global _redis_client
 
-    if _redis_client is None:
-        async with _redis_lock:
-            if _redis_client is None:
-                _redis_client = redis.from_url(
-                    settings.REDIS_URL,
-                    encoding="utf-8",
-                    decode_responses=True,
-                    max_connections=settings.REDIS_MAX_CONNECTIONS,
-                )
-                logger.info("redis_connected", url=settings.REDIS_HOST)
+    if _redis_client is not None:
+        raise RuntimeError("Redis client is already initialized")
 
+    if settings.REDIS_CLUSTER:
+        logger.info(
+            "redis_cluster_initializing",
+            host=settings.REDIS_HOST,
+            port=settings.REDIS_PORT,
+        )
+        _redis_client = redis_cluster.RedisCluster(
+            host=settings.REDIS_HOST,
+            port=settings.REDIS_PORT,
+            password=settings.REDIS_PASSWORD or None,
+            encoding="utf-8",
+            decode_responses=True,
+            max_connections=settings.REDIS_MAX_CONNECTIONS,
+        )
+    else:
+        _redis_client = redis.from_url(
+            settings.REDIS_URL,
+            encoding="utf-8",
+            decode_responses=True,
+            max_connections=settings.REDIS_MAX_CONNECTIONS,
+        )
+
+    logger.info(
+        "redis_connected",
+        host=settings.REDIS_HOST,
+        port=settings.REDIS_PORT,
+        cluster=settings.REDIS_CLUSTER,
+    )
+
+
+async def get_redis() -> AsyncRedisClient:
+    """Return the shared Redis client.
+
+    The client must have been initialized via ``init_redis()``
+    during the application lifespan. This function is kept
+    async for backward compatibility with existing call sites.
+
+    Returns:
+        Redis client instance (standalone or cluster)
+
+    Raises:
+        RuntimeError: If the client has not been initialized.
+    """
+    if _redis_client is None:
+        raise RuntimeError(
+            "Redis client not initialized. Ensure init_redis() "
+            "is called during the application lifespan."
+        )
     return _redis_client
 
 
@@ -76,11 +121,11 @@ class CacheService:
     Supports TTL, prefix namespacing, and atomic operations.
     """
 
-    def __init__(self, redis_client: redis.Redis, prefix: str = "cache") -> None:
+    def __init__(self, redis_client: AsyncRedisClient, prefix: str = "cache") -> None:
         """Initialize cache service.
 
         Args:
-            redis_client: Redis client instance
+            redis_client: Redis client instance (standalone or cluster)
             prefix: Key prefix for namespacing (default: "cache")
         """
         self.redis = redis_client
@@ -295,3 +340,8 @@ async def get_cache() -> CacheService:
         _cache = CacheService(redis_client)
 
     return _cache
+
+
+# FastAPI dependency for injecting the Redis client into route handlers.
+# Override in tests with app.dependency_overrides[get_redis] = mock.
+RedisDependency = Annotated[AsyncRedisClient, Depends(get_redis)]

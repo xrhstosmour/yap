@@ -6,9 +6,12 @@ Import from here for convenience rather than individual submodules.
 
 from uuid import UUID
 
+from app.core.cache import AsyncRedisClient
 from app.core.cache import CacheService
+from app.core.cache import RedisDependency
 from app.core.cache import get_cache
 from app.core.cache import get_redis
+from app.core.cache import init_redis
 from app.core.circuit_breaker import CircuitBreakerError
 from app.core.circuit_breaker import CircuitBreakerService
 from app.core.circuit_breaker import CircuitState
@@ -69,6 +72,9 @@ __all__ = [
     "CacheService",
     "get_cache",
     "get_redis",
+    "init_redis",
+    "AsyncRedisClient",
+    "RedisDependency",
     "CircuitBreakerError",
     "CircuitBreakerService",
     "CircuitState",

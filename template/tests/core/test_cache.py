@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import timedelta
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
+from unittest.mock import patch
 
 import pytest
 from redis.exceptions import ConnectionError
@@ -438,17 +439,15 @@ class TestGlobalFunctions:
         assert callable(get_cache)
 
 
-# get_redis double-checked locking
+# get_redis lifecycle (lifespan-based initialization)
 
 
-class TestGetRedisDoubleCheckedLocking:
-    """Tests for the double-checked locking pattern in get_redis()."""
+class TestGetRedisLifecycle:
+    """Tests for the lifespan-based Redis client lifecycle."""
 
     @pytest.mark.asyncio
-    async def test_second_call_reuses_existing_client(self) -> None:
-        """A second call to get_redis should return the already-initialized client."""
-        from unittest.mock import patch as _patch
-
+    async def test_init_redis_creates_client(self) -> None:
+        """init_redis should create a client via from_url and store it."""
         import app.core.cache as cache_module
 
         original = cache_module._redis_client
@@ -456,29 +455,108 @@ class TestGetRedisDoubleCheckedLocking:
             cache_module._redis_client = None
 
             mock_client = MagicMock()
-            mock_client.ping = AsyncMock()
+            with patch(
+                "redis.asyncio.Redis.from_url", return_value=mock_client
+            ) as mock_from_url:
+                await cache_module.init_redis()
 
-            with _patch("redis.asyncio.Redis.from_url", return_value=mock_client):
-                first = await get_redis()
-                second = await get_redis()
+            mock_from_url.assert_called_once()
+            assert cache_module._redis_client is mock_client
+        finally:
+            cache_module._redis_client = original
 
+    @pytest.mark.asyncio
+    async def test_get_redis_returns_after_init(self) -> None:
+        """get_redis should return the client after init_redis has been called."""
+        import app.core.cache as cache_module
+
+        original = cache_module._redis_client
+        try:
+            cache_module._redis_client = None
+
+            mock_client = MagicMock()
+            with patch("redis.asyncio.Redis.from_url", return_value=mock_client):
+                await cache_module.init_redis()
+
+            result = await get_redis()
+            assert result is mock_client
+        finally:
+            cache_module._redis_client = original
+
+    @pytest.mark.asyncio
+    async def test_get_redis_raises_before_init(self) -> None:
+        """get_redis should raise RuntimeError if called before init_redis."""
+        import app.core.cache as cache_module
+
+        original = cache_module._redis_client
+        try:
+            cache_module._redis_client = None
+
+            with pytest.raises(RuntimeError, match="not initialized"):
+                await get_redis()
+        finally:
+            cache_module._redis_client = original
+
+    @pytest.mark.asyncio
+    async def test_init_redis_raises_when_already_initialized(self) -> None:
+        """init_redis should raise if the client is already initialized."""
+        import app.core.cache as cache_module
+
+        original = cache_module._redis_client
+        try:
+            cache_module._redis_client = None
+
+            mock_client = MagicMock()
+            with patch("redis.asyncio.Redis.from_url", return_value=mock_client):
+                await cache_module.init_redis()
+
+            with pytest.raises(RuntimeError, match="already initialized"):
+                await cache_module.init_redis()
+        finally:
+            cache_module._redis_client = original
+
+    @pytest.mark.asyncio
+    async def test_second_call_returns_same_instance(self) -> None:
+        """Multiple calls to get_redis should return the same client instance."""
+        import app.core.cache as cache_module
+
+        original = cache_module._redis_client
+        try:
+            cache_module._redis_client = None
+
+            mock_client = MagicMock()
+            with patch("redis.asyncio.Redis.from_url", return_value=mock_client):
+                await cache_module.init_redis()
+
+            first = await get_redis()
+            second = await get_redis()
             assert first is second
             assert first is mock_client
         finally:
             cache_module._redis_client = original
 
     @pytest.mark.asyncio
-    async def test_initialized_client_skips_lock_acquisition(self) -> None:
-        """When _redis_client is already set, get_redis should not enter the lock."""
+    async def test_init_redis_cluster_mode(self) -> None:
+        """When REDIS_CLUSTER is True, init_redis should create a RedisCluster."""
         import app.core.cache as cache_module
 
         original = cache_module._redis_client
         try:
-            mock_client = MagicMock()
-            cache_module._redis_client = mock_client
+            cache_module._redis_client = None
 
-            result = await get_redis()
-            assert result is mock_client
+            mock_cluster = MagicMock()
+            with (
+                patch.object(
+                    cache_module.settings, "REDIS_CLUSTER", True
+                ),
+                patch(
+                    "redis.asyncio.cluster.RedisCluster", return_value=mock_cluster
+                ) as mock_cluster_init,
+            ):
+                await cache_module.init_redis()
+
+            mock_cluster_init.assert_called_once()
+            assert cache_module._redis_client is mock_cluster
         finally:
             cache_module._redis_client = original
 
