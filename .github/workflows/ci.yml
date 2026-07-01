@@ -108,17 +108,6 @@ jobs:
               skip_tasks=False,
           )
           "
-      - name: Run database migrations
-        run: uv run alembic upgrade head
-        env:
-          POSTGRESQL_SERVER: localhost
-          POSTGRESQL_PORT: 5432
-          POSTGRESQL_USER: app
-          POSTGRESQL_PASSWORD: testpass
-          POSTGRESQL_DATABASE: testdb
-          ENVIRONMENT: local
-      - name: Seed system tenant and superuser
-        run: uv run python -m app.initial_data
         env:
           POSTGRESQL_SERVER: localhost
           POSTGRESQL_PORT: 5432
@@ -128,8 +117,11 @@ jobs:
           REDIS_HOST: localhost
           REDIS_PORT: 6379
           REDIS_PASSWORD: testpass
-          REDIS_URL: redis://:testpass@localhost:6379/0
           ENVIRONMENT: local
+          SECRET_KEY: test-secret-key-for-ci-only-32ch
+          CRYPTO_KEY: YesFc0OYzQ1FiRWQDvjrOEuqYf6DkE-b3lT-7Tqng78=
+          RABBITMQ_PASSWORD: testpass
+          FIRST_SUPERUSER_PASSWORD: testpass
       - run: |
           set -a
           source .env 2>/dev/null || true
