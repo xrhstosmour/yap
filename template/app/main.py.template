@@ -8,14 +8,16 @@ from __future__ import annotations
 
 import time
 from collections.abc import AsyncIterator
+from collections.abc import Awaitable
+from collections.abc import Callable
 from contextlib import asynccontextmanager
-from typing import Any
 
 import sentry_sdk
 from fastapi import FastAPI
 from fastapi import Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.responses import Response
 from fastapi.routing import APIRoute
 from starlette.middleware.gzip import GZipMiddleware
 
@@ -141,8 +143,9 @@ def create_app() -> FastAPI:
     # Tenant context middleware.
     @app.middleware("http")
     async def tenant_middleware(
-        request: Request, call_next
-    ) -> Any:  # noqa: ANN401
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
         """Extract and set tenant context from request."""
         tenant_id = getattr(request.state, "tenant_id", None)
 
@@ -154,8 +157,9 @@ def create_app() -> FastAPI:
     # Request logging middleware.
     @app.middleware("http")
     async def logging_middleware(
-        request: Request, call_next
-    ) -> Any:  # noqa: ANN401
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
         """Log all requests with timing."""
         start_time = time.time()
 
