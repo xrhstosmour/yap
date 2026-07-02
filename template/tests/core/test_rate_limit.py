@@ -109,15 +109,14 @@ async def test_allowed_returns_true_and_remaining(
     mock_redis_client: AsyncMock,
     _patch_get_redis: None,
 ) -> None:
-    """When the Lua script returns 0 the request is allowed."""
-    mock_redis_client.eval.return_value = 0
-    mock_redis_client.zcard.return_value = 3
+    """When the Lua script returns allowed the request is permitted."""
+    mock_redis_client.eval.return_value = [0, 7, 0]  # allowed, 7 remaining, 0 retry
 
     limiter = RateLimiter(requests_per_minute=10, window_seconds=60, key_prefix="t")
     allowed, remaining, retry_after = await limiter.check_rate_limit("id-a")
 
     assert allowed is True
-    assert remaining == 7  # limit - count = 10 - 3
+    assert remaining == 7
     assert retry_after == 0
 
 
@@ -126,9 +125,8 @@ async def test_remaining_never_negative(
     mock_redis_client: AsyncMock,
     _patch_get_redis: None,
 ) -> None:
-    """Remaining is clamped to zero when zcard exceeds the limit."""
-    mock_redis_client.eval.return_value = 0
-    mock_redis_client.zcard.return_value = 15  # above limit
+    """Remaining is clamped to zero when the Lua count exceeds the limit."""
+    mock_redis_client.eval.return_value = [0, -6, 0]  # Lua returned negative remaining
 
     limiter = RateLimiter(requests_per_minute=10, window_seconds=60, key_prefix="t")
     _allowed, remaining, _retry = await limiter.check_rate_limit("id-b")
@@ -141,38 +139,33 @@ async def test_denied_returns_false_and_retry_after(
     mock_redis_client: AsyncMock,
     _patch_get_redis: None,
 ) -> None:
-    """When the Lua script returns 1 the request is rate-limited."""
+    """When the Lua script returns denied the request is rate-limited."""
     now = time.time()
     oldest = now - 30  # entry inserted 30 s ago
+    retry_seconds = int(oldest + 60 - now)  # Lua computes oldest + window - now
 
-    mock_redis_client.eval.return_value = 1
-    mock_redis_client.zrange.return_value = [("m:a", oldest)]
+    mock_redis_client.eval.return_value = [1, 0, retry_seconds]
 
     limiter = RateLimiter(requests_per_minute=10, window_seconds=60, key_prefix="t")
     allowed, remaining, retry_after = await limiter.check_rate_limit("id-c")
 
     assert allowed is False
     assert remaining == 0
-    # Retry is calculated as int(oldest + window - now_internal) + 1.
-    # The method uses its own time.time() call, so retry_after may differ
-    # from a test-side calculation by 1.
-    expected_retry = int(oldest + 60 - now) + 1
-    assert retry_after in (expected_retry, expected_retry - 1)
+    assert retry_after == retry_seconds + 1
 
 
 @pytest.mark.asyncio
-async def test_denied_falls_back_to_window_when_zrange_empty(
+async def test_denied_falls_back_to_window_when_no_oldest(
     mock_redis_client: AsyncMock,
     _patch_get_redis: None,
 ) -> None:
-    """When zrange returns nothing, retry_after defaults to the full window."""
-    mock_redis_client.eval.return_value = 1
-    mock_redis_client.zrange.return_value = []
+    """When Lua has no oldest entry it returns the full window as retry."""
+    mock_redis_client.eval.return_value = [1, 0, 60]  # window fallback
 
     limiter = RateLimiter(requests_per_minute=10, window_seconds=60, key_prefix="t")
     _allowed, _remaining, retry_after = await limiter.check_rate_limit("id-d")
 
-    assert retry_after == 60
+    assert retry_after == 61  # int(60) + 1
 
 
 @pytest.mark.asyncio
@@ -180,12 +173,8 @@ async def test_retry_after_minimum_one(
     mock_redis_client: AsyncMock,
     _patch_get_redis: None,
 ) -> None:
-    """retry_after is clamped to 1 even when the computation yields 0."""
-    now = time.time()
-    oldest = now - 60.9  # expires almost immediately
-
-    mock_redis_client.eval.return_value = 1
-    mock_redis_client.zrange.return_value = [("m:x", oldest)]
+    """retry_after is clamped to 1 even when the Lua computation yields 0."""
+    mock_redis_client.eval.return_value = [1, 0, 0]  # retry_after_raw = 0
 
     limiter = RateLimiter(requests_per_minute=10, window_seconds=60, key_prefix="t")
     _allowed, _remaining, retry_after = await limiter.check_rate_limit("id-e")
@@ -199,8 +188,7 @@ async def test_eval_receives_correct_script(
     _patch_get_redis: None,
 ) -> None:
     """The Lua script passed to eval must be the class-level script."""
-    mock_redis_client.eval.return_value = 0
-    mock_redis_client.zcard.return_value = 0
+    mock_redis_client.eval.return_value = [0, 9, 0]
 
     limiter = RateLimiter(requests_per_minute=10, window_seconds=60, key_prefix="t")
     await limiter.check_rate_limit("id-f")
@@ -215,8 +203,7 @@ async def test_eval_receives_one_key(
     _patch_get_redis: None,
 ) -> None:
     """The numkeys argument must be 1."""
-    mock_redis_client.eval.return_value = 0
-    mock_redis_client.zcard.return_value = 0
+    mock_redis_client.eval.return_value = [0, 9, 0]
 
     limiter = RateLimiter(requests_per_minute=10, window_seconds=60, key_prefix="t")
     await limiter.check_rate_limit("id-g")
@@ -231,8 +218,7 @@ async def test_eval_receives_namespaced_key(
     _patch_get_redis: None,
 ) -> None:
     """The Redis key passed to eval must include the configured prefix."""
-    mock_redis_client.eval.return_value = 0
-    mock_redis_client.zcard.return_value = 0
+    mock_redis_client.eval.return_value = [0, 9, 0]
 
     limiter = RateLimiter(requests_per_minute=10, window_seconds=60, key_prefix="app")
     await limiter.check_rate_limit("user-99")
@@ -247,8 +233,7 @@ async def test_eval_receives_window_and_limit(
     _patch_get_redis: None,
 ) -> None:
     """The window and max_requests values must be forwarded to the script."""
-    mock_redis_client.eval.return_value = 0
-    mock_redis_client.zcard.return_value = 0
+    mock_redis_client.eval.return_value = [0, 24, 0]
 
     limiter = RateLimiter(requests_per_minute=25, window_seconds=120, key_prefix="rl")
     await limiter.check_rate_limit("id-h")
