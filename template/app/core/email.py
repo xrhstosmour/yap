@@ -11,12 +11,33 @@ import asyncio
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from app.core.logging import get_logger
 
 if TYPE_CHECKING:
+    import jinja2
+
     from app.core.settings import Settings
+
+_jinja2_env: jinja2.Environment | None = None
+
+
+def _get_jinja2_env() -> jinja2.Environment:
+    """Return a cached Jinja2 environment, creating it on first call."""
+    global _jinja2_env
+    env = _jinja2_env
+    if env is None:
+        import jinja2 as _jinja2
+
+        templates_dir = Path(__file__).parent.parent.parent / "templates" / "email"
+        env = _jinja2.Environment(
+            loader=_jinja2.FileSystemLoader(str(templates_dir)),
+            autoescape=True,
+        )
+        _jinja2_env = env
+    return env
 
 logger = get_logger("email")
 
@@ -98,17 +119,8 @@ async def send_email_from_template(
     Raises:
         jinja2.TemplateNotFound: If template does not exist
     """
-    from pathlib import Path
-
-    import jinja2
-
     ctx = context or {}
-    templates_dir = Path(__file__).parent.parent.parent / "templates" / "email"
-    env = jinja2.Environment(
-        loader=jinja2.FileSystemLoader(str(templates_dir)),
-        autoescape=True,
-    )
-
+    env = _get_jinja2_env()
     template = env.get_template(template_name)
     html_body = template.render(**ctx)
 
