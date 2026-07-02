@@ -186,8 +186,13 @@ if ! git rev-parse --git-dir >/dev/null 2>&1; then
     TEMP_GIT=true
 fi
 
-copier update --trust --conflict rej --defaults \
+copier update --trust --conflict inline --defaults \
     --answers-file "$ANSWERS_FILE" 2>&1 || error "copier update failed"
+
+# Check for unresolved merge conflicts from copier update.
+if grep -rq "^<<<<<<< \|^>>>>>>> " --include="*.py" --include="*.yml" --include="*.yaml" --include="*.sh" --include="*.toml" . 2>/dev/null; then
+    error "Inline merge conflicts found. Search for '<<<<<<<' markers and resolve them before committing."
+fi
 
 # Persist only non-secret copier version metadata.
 _new_commit=$(read_yaml_scalar "_commit" ".copier/.answers.yml" || echo "$_commit")
@@ -218,7 +223,7 @@ echo ""
 info "Checking for changes..."
 if git diff --stat; then
     echo ""
-    info "Review changes, resolve any .rej files, then commit."
+    info "Review changes, resolve any inline conflict markers (<<<<<<<), then commit."
     echo "  git diff"
     echo "  git add .copier/.version && git add -A && git commit -m \"Sync upstream YAP template changes\""
 else
