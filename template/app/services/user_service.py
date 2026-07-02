@@ -235,6 +235,11 @@ class UserService:
         if data.full_name is not None:
             update_data["full_name"] = data.full_name
 
+        if isinstance(update_data.get("email"), str) and update_data["email"] != user.email:
+            existing = await self.user_repository.get_by_email(update_data["email"])
+            if existing:
+                raise UserServiceError("Email already in use")
+
         if update_data:
             updated_user = await self.user_repository.update(user.id, update_data)
             if updated_user is None:
