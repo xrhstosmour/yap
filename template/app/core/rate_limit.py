@@ -65,9 +65,11 @@ class RateLimiter:
     if count < max_requests then
         redis.call("ZADD", key, now, member)
         redis.call("EXPIRE", key, window)
-        return 0
+        return {0, max_requests - count - 1, 0}
     end
-    return 1
+    local oldest = redis.call("ZRANGE", key, 0, 0, "WITHSCORES")
+    local retry_after = oldest[2] and (oldest[2] + window - now) or window
+    return {1, 0, retry_after}
     """
 
     def __init__(
@@ -121,21 +123,11 @@ class RateLimiter:
             member,
         )
 
-        if result == 0:
-            # Allowed. Remaining count requires a separate read.
-            current_count = await redis_client.zcard(key)
-            remaining = max(0, self.limit - current_count)
-            return True, remaining, 0
+        allowed_flag, remaining_raw, retry_after_raw = result[0], result[1], result[2]
+        if allowed_flag == 0:
+            return True, max(0, int(remaining_raw)), 0
         else:
-            # Rate limited. Calculate retry time from oldest entry.
-            oldest_entries = await redis_client.zrange(key, 0, 0, withscores=True)
-            if oldest_entries:
-                oldest_time = oldest_entries[0][1]
-                retry_after = int(oldest_time + self.window - now) + 1
-            else:
-                retry_after = self.window
-
-            return False, 0, max(1, retry_after)
+            return False, 0, max(1, int(retry_after_raw) + 1)
 
 
 # Global rate limiters for different contexts.

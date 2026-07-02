@@ -12,23 +12,30 @@ from typing import Any
 
 from app.core.settings import settings
 
+_cached_s3_client: Any | None = None
+
 
 def _s3_client() -> Any:  # noqa: ANN401
-    """Create a boto3 S3 client configured for MinIO or cloud S3."""
-    import boto3
+    """Return a cached boto3 S3 client, creating it on first call.
 
-    session = boto3.Session(
-        aws_access_key_id=settings.STORAGE_ACCESS_KEY,
-        aws_secret_access_key=settings.STORAGE_SECRET_KEY,
-        region_name=settings.STORAGE_REGION,
-    )
-    kwargs: dict[str, Any] = {}
-    if settings.STORAGE_ENDPOINT:
-        kwargs["endpoint_url"] = settings.STORAGE_ENDPOINT
-        # MinIO uses path-style addressing by default.
-        kwargs["config"] = boto3.session.Config(signature_version="s3v4")
+    boto3 clients are thread-safe and safe to reuse across calls.
+    """
+    global _cached_s3_client
+    if _cached_s3_client is None:
+        import boto3
 
-    return session.client("s3", **kwargs)
+        session = boto3.Session(
+            aws_access_key_id=settings.STORAGE_ACCESS_KEY,
+            aws_secret_access_key=settings.STORAGE_SECRET_KEY,
+            region_name=settings.STORAGE_REGION,
+        )
+        kwargs: dict[str, Any] = {}
+        if settings.STORAGE_ENDPOINT:
+            kwargs["endpoint_url"] = settings.STORAGE_ENDPOINT
+            # MinIO uses path-style addressing by default.
+            kwargs["config"] = boto3.session.Config(signature_version="s3v4")
+        _cached_s3_client = session.client("s3", **kwargs)
+    return _cached_s3_client
 
 
 def _ensure_bucket(bucket: str) -> None:
