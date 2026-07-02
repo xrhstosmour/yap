@@ -73,7 +73,14 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
                 headers=cached.headers,
             )
 
-        locked = await idempotency_service.try_lock(scoped_key)
+        try:
+            locked = await idempotency_service.try_lock(scoped_key)
+        except Exception:
+            logger.exception("idempotency_unavailable", key=scoped_key)
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "Idempotency service temporarily unavailable"},
+            )
         if not locked:
             return JSONResponse(
                 status_code=409,
