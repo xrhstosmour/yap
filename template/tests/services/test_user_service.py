@@ -232,6 +232,7 @@ class TestUpdateProfile:
         """Should update the user's email field."""
         user = _make_user_mock(email="old@example.com")
         updated = _make_user_mock(email="new@example.com", id=user.id)
+        mock_user_service.user_repository.get_by_email = AsyncMock(return_value=None)
         mock_user_service.user_repository.update = AsyncMock(return_value=updated)
         mock_user_service.user_repository.get = AsyncMock(return_value=updated)
 
@@ -248,6 +249,7 @@ class TestUpdateProfile:
         """Should update both full_name and email simultaneously."""
         user = _make_user_mock(full_name="Old", email="old@example.com")
         updated = _make_user_mock(full_name="New", email="new@example.com", id=user.id)
+        mock_user_service.user_repository.get_by_email = AsyncMock(return_value=None)
         mock_user_service.user_repository.update = AsyncMock(return_value=updated)
         mock_user_service.user_repository.get = AsyncMock(return_value=updated)
 

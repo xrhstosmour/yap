@@ -260,38 +260,30 @@ class CacheService:
             Number of keys deleted
         """
         full_pattern = self._make_key(pattern)
-        keys_set: set[str] = set()
+        deleted = 0
+        batch: list[str] = []
 
         try:
             async for key in self.redis.scan_iter(match=full_pattern):
-                keys_set.add(key)
+                batch.append(key)
+                if len(batch) >= 100:
+                    deleted += cast(int, await self.redis.delete(*batch))
+                    batch.clear()
+            if batch:
+                deleted += cast(int, await self.redis.delete(*batch))
         except (
             ConnectionError,
             TimeoutError,
         ) as error:
             logger.error(
                 "cache_operation_failed",
-                operation="scan",
+                operation="delete_pattern",
                 key=full_pattern,
                 error=str(error),
             )
-            return 0
+            return deleted
 
-        if keys_set:
-            try:
-                return cast(int, await self.redis.delete(*keys_set))
-            except (
-                ConnectionError,
-                TimeoutError,
-            ) as error:
-                logger.error(
-                    "cache_operation_failed",
-                    operation="delete_pattern",
-                    key=full_pattern,
-                    error=str(error),
-                )
-                return 0
-        return 0
+        return deleted
 
     async def exists(self, key: str) -> bool:
         """Check if key exists in cache.

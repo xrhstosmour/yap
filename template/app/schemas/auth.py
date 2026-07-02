@@ -336,10 +336,16 @@ class WebAuthnLoginBeginResponse(BaseSchema):
 
     Attributes:
         options: The ``PublicKeyCredentialRequestOptions`` dict.
+        challenge_session_key: Opaque key that must be echoed back in the
+            completion request. Only present for anonymous (no-email) flows.
     """
 
     options: dict = Field(
         description="WebAuthn authentication options for the frontend"
+    )
+    challenge_session_key: str | None = Field(
+        default=None,
+        description="Echo this back in the completion request (anonymous flows only)",
     )
 
 
@@ -348,6 +354,12 @@ class WebAuthnLoginCompleteRequest(BaseSchema):
 
     Attributes:
         credential: The credential object from ``navigator.credentials.get()``.
+        challenge_session_key: Required when the begin response included one
+            (i.e. the flow was started without an email address).
     """
 
     credential: dict = Field(description="Credential from navigator.credentials.get()")
+    challenge_session_key: str | None = Field(
+        default=None,
+        description="Session key from the begin response (anonymous flows only)",
+    )

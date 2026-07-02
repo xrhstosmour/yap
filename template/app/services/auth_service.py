@@ -96,7 +96,7 @@ class AuthService:
             password: Plain-text password to validate.
         """
         if len(password) < 8:
-            logger.warning("password_too_weak", min_length=8)
+            raise ValueError("Password must be at least 8 characters")
 
     @staticmethod
     async def _blacklist_payload_token(payload: dict[str, Any]) -> None:

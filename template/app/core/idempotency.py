@@ -107,7 +107,7 @@ class IdempotencyService:
             )
         except Exception:
             logger.exception("idempotency_lock_failed")
-            return True
+            raise
 
     async def release_lock(self, raw_key: str) -> None:
         """Remove the processing lock for *raw_key*."""
