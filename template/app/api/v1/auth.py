@@ -667,8 +667,8 @@ async def webauthn_login_begin(
 
     service = WebAuthnService(session)
     email = data.email if data else None
-    options = await service.begin_authentication(email=email)
-    return WebAuthnLoginBeginResponse(options=options)
+    options, challenge_session_key = await service.begin_authentication(email=email)
+    return WebAuthnLoginBeginResponse(options=options, challenge_session_key=challenge_session_key)
 
 
 @router.post(
@@ -691,7 +691,9 @@ async def webauthn_login_complete(
 
     service = WebAuthnService(session)
     try:
-        user = await service.complete_authentication(data.credential)
+        user = await service.complete_authentication(
+            data.credential, challenge_session_key=data.challenge_session_key
+        )
     except WebAuthnError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
