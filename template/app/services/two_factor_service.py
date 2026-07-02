@@ -48,6 +48,24 @@ class InvalidTOTPError(TwoFactorError):
     pass
 
 
+def _validate_totp_code(code: str) -> str:
+    """Validate and normalise a raw TOTP code from user input.
+
+    Args:
+        code: Raw input from the caller.
+
+    Returns:
+        Stripped 6-digit code string.
+
+    Raises:
+        InvalidTOTPError: If the code is not exactly 6 numeric digits.
+    """
+    stripped = code.strip() if isinstance(code, str) else ""
+    if not stripped.isdigit() or len(stripped) != 6:
+        raise InvalidTOTPError("TOTP code must be exactly 6 digits.")
+    return stripped
+
+
 class TwoFactorRateLimitError(TwoFactorError):
     """Too many failed TOTP attempts."""
 
@@ -159,6 +177,8 @@ class TwoFactorAuthService:
 
         await self._check_totp_rate_limit(user.id)
 
+        totp_code = _validate_totp_code(totp_code)
+
         try:
             secret = decrypt(user.totp_secret_encrypted)
         except Exception as e:
@@ -224,6 +244,8 @@ class TwoFactorAuthService:
         user = await self._consume_challenge(challenge_token)
 
         await self._check_totp_rate_limit(user.id)
+
+        totp_code = _validate_totp_code(totp_code)
 
         if not user.totp_secret_encrypted:
             raise TwoFactorError("User has no TOTP secret.")
@@ -315,6 +337,8 @@ class TwoFactorAuthService:
 
         await self._check_totp_rate_limit(user.id)
 
+        totp_code = _validate_totp_code(totp_code)
+
         if not user.totp_secret_encrypted:
             raise TwoFactorError("User has no TOTP secret.")
 
@@ -362,6 +386,8 @@ class TwoFactorAuthService:
             raise TwoFactorNotEnabledError("2FA is not enabled for this user.")
 
         await self._check_totp_rate_limit(user.id)
+
+        totp_code = _validate_totp_code(totp_code)
 
         if not user.totp_secret_encrypted:
             raise TwoFactorError("User has no TOTP secret.")
