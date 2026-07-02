@@ -121,10 +121,12 @@ class TestBeginAuthentication:
         mock_redis.setex = AsyncMock()
 
         with patch("app.services.webauthn_service.get_redis", return_value=mock_redis):
-            options = await service.begin_authentication(email=None)
+            options, session_key = await service.begin_authentication(email=None)
 
         assert isinstance(options, dict)
         assert "challenge" in options
+        # Anonymous flow returns a unique nonce as session key.
+        assert isinstance(session_key, str)
         mock_redis.setex.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -132,7 +134,7 @@ class TestBeginAuthentication:
         self,
         service: WebAuthnService,
     ) -> None:
-        """Should return options with allow_credentials when email is provided."""
+        """Should return options with no session key when email resolves to a user."""
         user = make_user()
         service.user_repository.get_by_email = AsyncMock(return_value=user)
 
@@ -143,30 +145,32 @@ class TestBeginAuthentication:
             patch("app.services.webauthn_service.get_redis", return_value=mock_redis),
             patch.object(service, "_get_user_credentials", return_value=[]),
         ):
-            options = await service.begin_authentication(email="user@example.com")
+            options, session_key = await service.begin_authentication(email="user@example.com")
 
         assert isinstance(options, dict)
         assert "challenge" in options
+        assert session_key is None  # email flow stores challenge under user_id
 
     @pytest.mark.asyncio
     async def test_anon_when_user_not_found(
         self,
         service: WebAuthnService,
     ) -> None:
-        """Should use 'anon' challenge key when email not matched."""
+        """Should use a unique nonce as challenge key when email is not matched."""
         service.user_repository.get_by_email = AsyncMock(return_value=None)
 
         mock_redis = AsyncMock()
         mock_redis.setex = AsyncMock()
 
         with patch("app.services.webauthn_service.get_redis", return_value=mock_redis):
-            options = await service.begin_authentication(email="nobody@example.com")
+            options, session_key = await service.begin_authentication(email="nobody@example.com")
 
         assert isinstance(options, dict)
         assert "challenge" in options
-        # Verify we stored with "anon" key.
+        assert isinstance(session_key, str)
+        # The nonce must appear at the end of the Redis key.
         call_args = mock_redis.setex.call_args
-        assert "anon" in call_args[0][0]
+        assert call_args[0][0].endswith(session_key)
 
     @pytest.mark.asyncio
     async def test_with_email_user_has_credentials_populates_allow(
@@ -185,9 +189,10 @@ class TestBeginAuthentication:
         mock_redis.setex = AsyncMock()
 
         with patch("app.services.webauthn_service.get_redis", return_value=mock_redis):
-            options = await service.begin_authentication(email="user@example.com")
+            options, session_key = await service.begin_authentication(email="user@example.com")
 
         assert "allow_credentials" in options
+        assert session_key is None  # known user — challenge stored under user_id
         assert len(options["allow_credentials"]) == 1
 
 

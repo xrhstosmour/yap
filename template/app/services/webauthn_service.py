@@ -141,7 +141,17 @@ class WebAuthnService:
 
     # --- Authentication ---
 
-    async def begin_authentication(self, email: str | None = None) -> dict[str, Any]:
+    async def begin_authentication(
+        self, email: str | None = None
+    ) -> tuple[dict[str, Any], str | None]:
+        """Begin WebAuthn authentication.
+
+        Returns:
+            Tuple of (options_dict, challenge_session_key). challenge_session_key
+            is None when email is known (challenge is stored under user_id);
+            it is a random nonce when email is absent and must be echoed back
+            in complete_authentication() so the challenge can be found.
+        """
         challenge = secrets.token_bytes(32)
 
         allow_credentials: list[PublicKeyCredentialDescriptor] | None = None
@@ -159,7 +169,16 @@ class WebAuthnService:
                     for c in creds
                 ]
 
-        challenge_key = str(user_id) if user_id else "anon"
+        # Use user_id as challenge key when known; otherwise generate a unique
+        # nonce per request so concurrent anonymous flows cannot collide.
+        challenge_session_key: str | None
+        if user_id:
+            challenge_key = str(user_id)
+            challenge_session_key = None
+        else:
+            challenge_key = secrets.token_hex(16)
+            challenge_session_key = challenge_key
+
         redis = await get_redis()
         await redis.setex(
             f"{_WEBAUTHN_CHALLENGE_PREFIX}:auth:{challenge_key}",
@@ -176,9 +195,11 @@ class WebAuthnService:
         )
 
         logger.debug("webauthn_authentication_began", user_id=challenge_key)
-        return _dataclass_to_dict(options)
+        return _dataclass_to_dict(options), challenge_session_key
 
-    async def complete_authentication(self, credential: dict) -> User:
+    async def complete_authentication(
+        self, credential: dict, challenge_session_key: str | None = None
+    ) -> User:
         auth_cred = AuthenticationCredential(**credential)
         cred_id = bytes_to_base64url(auth_cred.raw_id)
 
@@ -192,9 +213,11 @@ class WebAuthnService:
         if not stored_cred:
             raise WebAuthnError("Credential not found.")
 
+        # Use challenge_session_key for anonymous flows, user_id for email flows.
+        lookup_key = challenge_session_key if challenge_session_key else str(stored_cred.user_id)
         redis = await get_redis()
         challenge_b64 = await redis.getdel(
-            f"{_WEBAUTHN_CHALLENGE_PREFIX}:auth:{stored_cred.user_id}"
+            f"{_WEBAUTHN_CHALLENGE_PREFIX}:auth:{lookup_key}"
         )
         if not challenge_b64:
             raise WebAuthnError("Authentication challenge expired or invalid.")
