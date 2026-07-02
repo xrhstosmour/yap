@@ -243,7 +243,7 @@ async def is_token_blacklisted(token_identifier: str) -> bool:
         redis = await get_redis()
         key = f"{_JWT_BLACKLIST_PREFIX}:{token_identifier}"
         return bool(await redis.exists(key) == 1)
-    except RedisConnectionError, RedisTimeoutError:
+    except (RedisConnectionError, RedisTimeoutError):
         return False
 
 
