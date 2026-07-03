@@ -1,45 +1,106 @@
-"""Test fixtures and configuration."""
+"""Test fixtures and configuration.
+
+The whole suite runs against PostgreSQL, not SQLite, so tests exercise the same
+database engine, constraints, and DDL as production. Each xdist worker gets its
+own database created from the current migrations, and every test runs inside a
+transaction that is rolled back afterwards for isolation.
+"""
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
+import psycopg
 import pytest
+from alembic import command
+from alembic.config import Config
 from cryptography.fernet import Fernet
+from sqlalchemy import NullPool
 from sqlalchemy.ext.asyncio import AsyncEngine
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlalchemy.ext.asyncio import create_async_engine
-from sqlmodel import SQLModel
-from sqlmodel.pool import StaticPool
+from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.core import SYSTEM_TENANT_ID
 from app.core.settings import Settings
+from app.core.settings import settings
+
+# Backend root (parent of tests/), where alembic.ini and migrations/ live.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _worker_database_name() -> str:
+    """Unique database name per xdist worker so parallel tests do not collide."""
+    worker = os.getenv("PYTEST_XDIST_WORKER", "main")
+    return f"{settings.POSTGRESQL_DATABASE}_test_{worker}"
+
+
+def _connection_info(database: str) -> str:
+    """libpq connection string to the given database."""
+    return (
+        f"host={settings.POSTGRESQL_SERVER} "
+        f"port={settings.POSTGRESQL_PORT} "
+        f"user={settings.POSTGRESQL_USER} "
+        f"password={settings.POSTGRESQL_PASSWORD} "
+        f"dbname={database}"
+    )
+
+
+def _database_url(database: str) -> str:
+    """Async SQLAlchemy URL (psycopg driver) for the given database."""
+    password = quote(settings.POSTGRESQL_PASSWORD, safe="")
+    return (
+        f"postgresql+psycopg://{settings.POSTGRESQL_USER}:{password}"
+        f"@{settings.POSTGRESQL_SERVER}:{settings.POSTGRESQL_PORT}/{database}"
+    )
+
+
+@pytest.fixture(scope="session")
+def test_database() -> str:
+    """Create a fresh per-worker database, migrate it, and drop it at the end.
+
+    Runs synchronously (no event loop) so it is not tied to a function-scoped
+    loop, and builds the schema via ``alembic upgrade head`` so migration-only
+    DDL (extensions, exclusion constraints) is applied exactly as in production.
+    """
+    database = _worker_database_name()
+
+    with psycopg.connect(_connection_info("postgres"), autocommit=True) as connection:
+        connection.execute(f'DROP DATABASE IF EXISTS "{database}" WITH (FORCE)')
+        connection.execute(f'CREATE DATABASE "{database}"')
+
+    url = _database_url(database)
+    alembic_config = Config(str(PROJECT_ROOT / "alembic.ini"))
+    alembic_config.set_main_option("script_location", str(PROJECT_ROOT / "migrations"))
+    alembic_config.set_main_option("sqlalchemy.url", url)
+    command.upgrade(alembic_config, "head")
+
+    # Seed the system tenant that production provisions via initial_data, so
+    # records written with the fallback tenant satisfy the tenant foreign key.
+    with psycopg.connect(_connection_info(database), autocommit=True) as connection:
+        connection.execute(
+            "INSERT INTO tenants "
+            "(id, created_at, updated_at, name, slug, is_active, settings) "
+            "VALUES (%s::uuid, now(), now(), 'System', 'system', true, '{}'::json) "
+            "ON CONFLICT (id) DO NOTHING",
+            (str(SYSTEM_TENANT_ID),),
+        )
+
+    try:
+        yield url
+    finally:
+        with psycopg.connect(
+            _connection_info("postgres"), autocommit=True
+        ) as connection:
+            connection.execute(f'DROP DATABASE IF EXISTS "{database}" WITH (FORCE)')
 
 
 @pytest.fixture(name="engine")
-async def engine_fixture() -> AsyncEngine:
-    """Create an in-memory async SQLite engine for testing."""
-    engine = create_async_engine(
-        "sqlite+aiosqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-
-    # NOTE: All SQLModel models must be imported here before create_all.
-    # Consider using importlib to auto-discover models if this list grows.
-    # Ensure all models are registered before creating tables.
-    from app.models import api_key  # noqa: F401
-    from app.models import audit_log  # noqa: F401
-    from app.models import feature_flag  # noqa: F401
-    from app.models import graveyard  # noqa: F401
-    from app.models import outbox  # noqa: F401
-    from app.models import tenant  # noqa: F401
-    from app.models import totp_recovery_code  # noqa: F401
-    from app.models import user  # noqa: F401
-
-    async with engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.create_all)
-
+async def engine_fixture(test_database: str) -> AsyncEngine:
+    """Async engine bound to the per-worker test database."""
+    engine = create_async_engine(test_database, poolclass=NullPool)
     try:
         yield engine
     finally:
@@ -47,17 +108,28 @@ async def engine_fixture() -> AsyncEngine:
 
 
 @pytest.fixture(name="session")
-async def session_fixture(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
-    """Create an async database session for testing."""
-    session_factory = async_sessionmaker(
-        engine,
-        class_=AsyncSession,
+async def session_fixture(engine: AsyncEngine) -> AsyncSession:
+    """Async session inside a transaction rolled back after each test.
+
+    The session joins the connection's outer transaction via a savepoint, so
+    application code may ``commit`` freely while every change is discarded on
+    teardown, keeping tests isolated without recreating the schema each time.
+    """
+    connection = await engine.connect()
+    transaction = await connection.begin()
+    session = AsyncSession(
+        bind=connection,
         expire_on_commit=False,
         autoflush=False,
+        join_transaction_mode="create_savepoint",
     )
 
-    async with session_factory() as session:
+    try:
         yield session
+    finally:
+        await session.close()
+        await transaction.rollback()
+        await connection.close()
 
 
 @pytest.fixture(name="override_get_async_session")
