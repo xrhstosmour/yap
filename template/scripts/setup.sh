@@ -43,7 +43,13 @@ if ! command -v docker >/dev/null 2>&1; then
             fi
             ;;
     esac
-    command -v docker >/dev/null 2>&1 || error "Docker is required!"
+    if ! command -v docker >/dev/null 2>&1; then
+        if [ "${YAP_SYNC:-0}" = "1" ]; then
+            warn "Docker not found; continuing in sync mode."
+        else
+            error "Docker is required!"
+        fi
+    fi
 fi
 
 # Environment file setup.
@@ -132,6 +138,13 @@ if [ -f .pre-commit-config.yaml ] && command -v uv >/dev/null 2>&1; then
     else
         warn "Skipping pre-commit install, no git repository in scaffold directory"
     fi
+fi
+
+# In sync mode (copier update via synchronize.sh), only a valid .env is needed;
+# skip services, migrations, and seeding so template updates never require Docker/DB.
+if [ "${YAP_SYNC:-0}" = "1" ]; then
+    info "Sync mode (YAP_SYNC=1): .env ensured, skipping services, migrations, and seeding."
+    exit 0
 fi
 
 # Start infrastructure services and run migrations.
