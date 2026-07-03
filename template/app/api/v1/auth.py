@@ -668,7 +668,9 @@ async def webauthn_login_begin(
     service = WebAuthnService(session)
     email = data.email if data else None
     options, challenge_session_key = await service.begin_authentication(email=email)
-    return WebAuthnLoginBeginResponse(options=options, challenge_session_key=challenge_session_key)
+    return WebAuthnLoginBeginResponse(
+        options=options, challenge_session_key=challenge_session_key
+    )
 
 
 @router.post(
