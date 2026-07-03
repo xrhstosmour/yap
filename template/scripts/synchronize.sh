@@ -186,6 +186,9 @@ if ! git rev-parse --git-dir >/dev/null 2>&1; then
     TEMP_GIT=true
 fi
 
+# Sync mode: the setup.sh task only ensures .env and skips services/migrations,
+# so a template sync never requires Docker or a live database.
+export YAP_SYNC=1
 copier update --trust --conflict inline --defaults \
     --answers-file "$ANSWERS_FILE" 2>&1 || error "copier update failed"
 
