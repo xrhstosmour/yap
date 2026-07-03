@@ -214,7 +214,9 @@ class WebAuthnService:
             raise WebAuthnError("Credential not found.")
 
         # Use challenge_session_key for anonymous flows, user_id for email flows.
-        lookup_key = challenge_session_key if challenge_session_key else str(stored_cred.user_id)
+        lookup_key = (
+            challenge_session_key if challenge_session_key else str(stored_cred.user_id)
+        )
         redis = await get_redis()
         challenge_b64 = await redis.getdel(
             f"{_WEBAUTHN_CHALLENGE_PREFIX}:auth:{lookup_key}"
