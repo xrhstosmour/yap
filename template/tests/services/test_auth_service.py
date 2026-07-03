@@ -282,11 +282,13 @@ class TestAuthServiceCreateUser:
     @pytest.mark.asyncio
     async def test_create_superuser(self, session: AsyncSession) -> None:
         """Superuser should have is_superuser set to True."""
+        from app.core import SYSTEM_TENANT_ID
+
         auth_service = _auth_service(session)
         user = await auth_service.user_repository.create_user(
             email="admin@example.com",
             password_hash=generate_password_hash("adminpass"),
-            tenant_id=uuid7(),
+            tenant_id=SYSTEM_TENANT_ID,
             is_superuser=True,
         )
 

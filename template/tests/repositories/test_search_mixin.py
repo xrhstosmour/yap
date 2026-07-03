@@ -133,6 +133,12 @@ class TestSearchMixin:
         tenant_a = UUID("00000000-0000-0000-0000-00000000000a")
         tenant_b = UUID("00000000-0000-0000-0000-00000000000b")
 
+        from app.models.tenant import Tenant
+
+        session.add(Tenant(id=tenant_a, name="Tenant A", slug="tenant-a"))
+        session.add(Tenant(id=tenant_b, name="Tenant B", slug="tenant-b"))
+        await session.flush()
+
         user_a = User(
             email="tenant-a@example.com",
             hashed_password="hash",
