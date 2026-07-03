@@ -145,7 +145,9 @@ class TestBeginAuthentication:
             patch("app.services.webauthn_service.get_redis", return_value=mock_redis),
             patch.object(service, "_get_user_credentials", return_value=[]),
         ):
-            options, session_key = await service.begin_authentication(email="user@example.com")
+            options, session_key = await service.begin_authentication(
+                email="user@example.com"
+            )
 
         assert isinstance(options, dict)
         assert "challenge" in options
@@ -163,7 +165,9 @@ class TestBeginAuthentication:
         mock_redis.setex = AsyncMock()
 
         with patch("app.services.webauthn_service.get_redis", return_value=mock_redis):
-            options, session_key = await service.begin_authentication(email="nobody@example.com")
+            options, session_key = await service.begin_authentication(
+                email="nobody@example.com"
+            )
 
         assert isinstance(options, dict)
         assert "challenge" in options
@@ -189,7 +193,9 @@ class TestBeginAuthentication:
         mock_redis.setex = AsyncMock()
 
         with patch("app.services.webauthn_service.get_redis", return_value=mock_redis):
-            options, session_key = await service.begin_authentication(email="user@example.com")
+            options, session_key = await service.begin_authentication(
+                email="user@example.com"
+            )
 
         assert "allow_credentials" in options
         assert session_key is None  # known user — challenge stored under user_id

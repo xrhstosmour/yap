@@ -39,6 +39,7 @@ def _get_jinja2_env() -> jinja2.Environment:
         _jinja2_env = env
     return env
 
+
 logger = get_logger("email")
 
 
