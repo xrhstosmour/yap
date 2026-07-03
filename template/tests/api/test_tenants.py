@@ -136,15 +136,11 @@ async def test_crud_tenant_as_admin(client: AsyncClient, session) -> None:
 @pytest.mark.usefixtures("override_get_async_session")
 async def test_cannot_delete_system_tenant(client: AsyncClient, session) -> None:
     from app.core import SYSTEM_TENANT_ID
-    from app.models.tenant import Tenant
     from app.services.auth_service import AuthService
 
     service = AuthService(session)
 
-    tenant = Tenant(id=SYSTEM_TENANT_ID, name="System", slug="system")
-    session.add(tenant)
-    await session.flush()
-
+    # The system tenant is seeded by the test harness.
     admin = User(
         email="admin-sys@example.com",
         hashed_password="hash",
