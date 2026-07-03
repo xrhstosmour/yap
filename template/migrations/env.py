@@ -14,7 +14,10 @@ if config.config_file_name is not None:
 
 target_metadata = SQLModel.metadata
 
-config.set_main_option("sqlalchemy.url", str(settings.DATABASE_URI))
+# Respect an externally injected URL such as the test harness targeting a
+# per-worker database. Otherwise fall back to the application settings.
+if not config.get_main_option("sqlalchemy.url"):
+    config.set_main_option("sqlalchemy.url", str(settings.DATABASE_URI))
 
 
 def run_migrations_offline() -> None:

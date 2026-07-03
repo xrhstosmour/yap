@@ -173,9 +173,9 @@ class TestTenantRepository:
 
         assert result is True
 
-        # Should not appear in list().
-        tenants, total = await repo.list()
-        assert total == 0
+        # Should not appear in list(); the seeded system tenant may remain.
+        tenants, _ = await repo.list()
+        assert all(listed.id != tenant.id for listed in tenants)
 
         # Should still exist with deleted_at set.
         found = await repo.get(tenant.id, include_deleted=True)
