@@ -124,6 +124,8 @@ jobs:
           REDIS_PASSWORD: testpass
           ENVIRONMENT: local
           POSTGRESQL_AUTHENTICATION_METHOD: password
+      - name: Enforce coverage threshold
+        run: uv run coverage report
       - name: Run smoke test
         run: uv run pytest tests/test_startup.py::test_api_smoke -v --tb=short
         env:
