@@ -19,7 +19,7 @@ from app.core.pagination import PAGINATION_HEADERS_SPEC
 from app.core.pagination import PaginatedResponse
 from app.dependencies import SessionDependency
 from app.dependencies import SuperuserUser
-from app.schemas.base import PaginationParams
+from app.schemas.base import PaginationParameters
 from app.schemas.feature_flag import FeatureFlagCreate
 from app.schemas.feature_flag import FeatureFlagListResponse
 from app.schemas.feature_flag import FeatureFlagResponse
@@ -40,7 +40,7 @@ _FLAG_NOT_FOUND = "Feature flag not found"
     description="List all feature flags with pagination. Admin only.",
 )
 async def list_feature_flags(
-    params: Annotated[PaginationParams, Depends()],
+    parameters: Annotated[PaginationParameters, Depends()],
     current_user: SuperuserUser,
     session: SessionDependency,
     request: Request,
@@ -51,24 +51,24 @@ async def list_feature_flags(
     """
     service = FeatureFlagService(session)
     flags, total = await service.list_flags(
-        skip=params.skip,
-        limit=params.limit,
+        skip=parameters.skip,
+        limit=parameters.limit,
     )
 
-    page = (params.skip // params.limit) + 1 if params.limit > 0 else 1
-    pages = (total + params.limit - 1) // params.limit if params.limit > 0 else 1
+    page = (parameters.skip // parameters.limit) + 1 if parameters.limit > 0 else 1
+    pages = (total + parameters.limit - 1) // parameters.limit if parameters.limit > 0 else 1
 
     return PaginatedResponse(
         content=FeatureFlagListResponse(
             data=[FeatureFlagResponse.model_validate(f) for f in flags],
             total=total,
             page=page,
-            page_size=params.limit,
+            page_size=parameters.limit,
             pages=pages,
         ).model_dump(),
         total=total,
-        skip=params.skip,
-        limit=params.limit,
+        skip=parameters.skip,
+        limit=parameters.limit,
         request=request,
     )
 

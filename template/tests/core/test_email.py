@@ -57,8 +57,8 @@ class TestSendEmail:
             )
 
         mock_server.send_message.assert_called_once()
-        msg = mock_server.send_message.call_args[0][0]
-        assert msg["To"] == "a@test.com, b@test.com"
+        message = mock_server.send_message.call_args[0][0]
+        assert message["To"] == "a@test.com, b@test.com"
 
     @pytest.mark.asyncio
     async def test_send_email_with_html_body(self) -> None:
@@ -78,10 +78,10 @@ class TestSendEmail:
             )
 
         mock_server.send_message.assert_called_once()
-        msg = mock_server.send_message.call_args[0][0]
-        assert isinstance(msg, MIMEMultipart)
+        message = mock_server.send_message.call_args[0][0]
+        assert isinstance(message, MIMEMultipart)
         # Should have exactly 2 parts: text/plain and text/html
-        payload = msg.get_payload()
+        payload = message.get_payload()
         assert len(payload) == 2
 
     @pytest.mark.asyncio
@@ -171,8 +171,8 @@ class TestSendEmail:
             )
 
         mock_smtp_class.assert_called_once_with("custom.host", 25)
-        msg = mock_server.send_message.call_args[0][0]
-        assert msg["From"] == "custom@test.local"
+        message = mock_server.send_message.call_args[0][0]
+        assert message["From"] == "custom@test.local"
 
 
 class TestSendEmailFromTemplate:

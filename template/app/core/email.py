@@ -73,26 +73,26 @@ async def send_email(
     recipients = [to_email] if isinstance(to_email, str) else to_email
 
     def _send_sync() -> None:
-        msg = MIMEMultipart("alternative")
-        msg["From"] = settings.SMTP_FROM_EMAIL
-        msg["To"] = ", ".join(recipients)
-        msg["Subject"] = subject
-        msg.attach(MIMEText(body, "plain", "utf-8"))
+        message = MIMEMultipart("alternative")
+        message["From"] = settings.SMTP_FROM_EMAIL
+        message["To"] = ", ".join(recipients)
+        message["Subject"] = subject
+        message.attach(MIMEText(body, "plain", "utf-8"))
 
         if html:
-            msg.attach(MIMEText(html, "html", "utf-8"))
+            message.attach(MIMEText(html, "html", "utf-8"))
 
         if settings.SMTP_USE_TLS:
             with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
                 server.starttls()
                 if settings.SMTP_USER and settings.SMTP_PASSWORD:
                     server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-                server.send_message(msg)
+                server.send_message(message)
         else:
             with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
                 if settings.SMTP_USER and settings.SMTP_PASSWORD:
                     server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-                server.send_message(msg)
+                server.send_message(message)
 
     await asyncio.to_thread(_send_sync)
     logger.info("email_sent", to_count=len(recipients), subject=subject)
@@ -120,10 +120,10 @@ async def send_email_from_template(
     Raises:
         jinja2.TemplateNotFound: If template does not exist
     """
-    ctx = context or {}
+    context = context or {}
     env = _get_jinja2_env()
     template = env.get_template(template_name)
-    html_body = template.render(**ctx)
+    html_body = template.render(**context)
 
     import re
 

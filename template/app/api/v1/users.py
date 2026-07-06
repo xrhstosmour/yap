@@ -24,7 +24,7 @@ from app.dependencies import CurrentUser
 from app.dependencies import SessionDependency
 from app.dependencies import SuperuserUser
 from app.schemas.user import UserCreate
-from app.schemas.user import UserListParams
+from app.schemas.user import UserListParameters
 from app.schemas.user import UserListResponse
 from app.schemas.user import UserResponse
 from app.schemas.user import UserUpdate
@@ -43,7 +43,7 @@ logger = get_logger("api.users")
     description="List all users with pagination and filtering. Admin only.",
 )
 async def list_users(
-    params: Annotated[UserListParams, Depends()],
+    parameters: Annotated[UserListParameters, Depends()],
     current_user: SuperuserUser,
     session: SessionDependency,
     request: Request,
@@ -56,27 +56,27 @@ async def list_users(
     service = UserService(session)
 
     users, total = await service.list_users(
-        skip=params.skip,
-        limit=params.limit,
-        is_active=params.is_active,
-        is_superuser=params.is_superuser,
-        search=params.search,
+        skip=parameters.skip,
+        limit=parameters.limit,
+        is_active=parameters.is_active,
+        is_superuser=parameters.is_superuser,
+        search=parameters.search,
     )
 
-    page = (params.skip // params.limit) + 1 if params.limit > 0 else 1
-    pages = (total + params.limit - 1) // params.limit if params.limit > 0 else 1
+    page = (parameters.skip // parameters.limit) + 1 if parameters.limit > 0 else 1
+    pages = (total + parameters.limit - 1) // parameters.limit if parameters.limit > 0 else 1
 
     return PaginatedResponse(
         content=UserListResponse(
             data=[UserResponse.model_validate(u) for u in users],
             total=total,
             page=page,
-            page_size=params.limit,
+            page_size=parameters.limit,
             pages=pages,
         ).model_dump(),
         total=total,
-        skip=params.skip,
-        limit=params.limit,
+        skip=parameters.skip,
+        limit=parameters.limit,
         request=request,
     )
 

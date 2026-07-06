@@ -27,7 +27,7 @@ class BaseSchema(BaseModel):
     )
 
 
-class PaginationParams(BaseModel):
+class PaginationParameters(BaseModel):
     """Pagination parameters for list endpoints.
 
     Standard pagination parameters that can be used
@@ -85,7 +85,7 @@ class ErrorDetail(BaseSchema):
     """
 
     loc: list[str | int] = Field(description="Location of the error")
-    msg: str = Field(description="Error message")
+    message: str = Field(description="Error message")
     type: str = Field(description="Error type")
 
 

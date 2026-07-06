@@ -14,7 +14,7 @@ from pydantic import Field
 
 from app.schemas.base import BaseSchema
 from app.schemas.base import PaginatedResponse
-from app.schemas.base import PaginationParams
+from app.schemas.base import PaginationParameters
 
 
 class UserBase(BaseSchema):
@@ -73,7 +73,7 @@ class UserListResponse(PaginatedResponse[UserResponse]):
     pass
 
 
-class UserListParams(PaginationParams):
+class UserListParameters(PaginationParameters):
     """Query parameters for listing users."""
 
     is_active: bool | None = Field(default=None, description="Filter by active status")
