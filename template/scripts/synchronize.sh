@@ -188,8 +188,11 @@ fi
 
 # Sync mode: the setup.sh task only ensures .env and skips services/migrations,
 # so a template sync never requires Docker or a live database.
+# --vcs-ref HEAD targets the template's default-branch HEAD. Without it copier
+# updates to the latest git tag, and this template is untagged, so the recorded
+# _commit would never advance.
 export YAP_SYNC=1
-copier update --trust --conflict inline --defaults \
+copier update --trust --conflict inline --defaults --vcs-ref HEAD \
     --answers-file "$ANSWERS_FILE" 2>&1 || error "copier update failed"
 
 # Check for unresolved merge conflicts from copier update.
