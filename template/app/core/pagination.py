@@ -50,7 +50,7 @@ def build_pagination_headers(
     # Use path-only URLs to prevent Host-header injection in the Link header.
     base_path = request.url.path
 
-    # Preserve all existing query params including multi-value ones;
+    # Preserve all existing query parameters including multi-value ones;
     # override skip/limit.
     base_params = [
         (k, v)
@@ -59,8 +59,8 @@ def build_pagination_headers(
     ]
 
     def _url(page_skip: int) -> str:
-        params = base_params + [("skip", str(page_skip)), ("limit", str(limit))]
-        return f"{base_path}?{urlencode(params)}"
+        parameters = base_params + [("skip", str(page_skip)), ("limit", str(limit))]
+        return f"{base_path}?{urlencode(parameters)}"
 
     last_skip = max(0, ((total - 1) // limit) * limit) if total > 0 else 0
 
@@ -95,8 +95,8 @@ class PaginatedResponse(JSONResponse):
         return PaginatedResponse(
             content=UserListResponse(...).model_dump(),
             total=total,
-            skip=params.skip,
-            limit=params.limit,
+            skip=parameters.skip,
+            limit=parameters.limit,
             request=request,
         )
     """

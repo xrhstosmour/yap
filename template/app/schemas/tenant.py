@@ -10,7 +10,7 @@ from pydantic import Field
 
 from app.schemas.base import BaseSchema
 from app.schemas.base import PaginatedResponse
-from app.schemas.base import PaginationParams
+from app.schemas.base import PaginationParameters
 
 
 class TenantCreate(BaseSchema):
@@ -55,7 +55,7 @@ class TenantResponse(BaseSchema):
     updated_at: datetime = Field(description="Last update timestamp")
 
 
-class TenantListParams(PaginationParams):
+class TenantListParameters(PaginationParameters):
     """Query parameters for listing tenants."""
 
     is_active: bool | None = Field(default=None, description="Filter by active status")

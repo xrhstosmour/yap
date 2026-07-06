@@ -22,7 +22,7 @@ from app.dependencies import CurrentUser
 from app.dependencies import SessionDependency
 from app.schemas.api_key import APIKeyCreate
 from app.schemas.api_key import APIKeyCreateResponse
-from app.schemas.api_key import APIKeyListParams
+from app.schemas.api_key import APIKeyListParameters
 from app.schemas.api_key import APIKeyListResponse
 from app.schemas.api_key import APIKeyResponse
 from app.schemas.api_key import APIKeyUpdate
@@ -82,7 +82,7 @@ async def create_api_key(
     description="List all API keys for the current user.",
 )
 async def list_api_keys(
-    params: Annotated[APIKeyListParams, Depends()],
+    parameters: Annotated[APIKeyListParameters, Depends()],
     current_user: CurrentUser,
     session: SessionDependency,
     request: Request,
@@ -92,24 +92,24 @@ async def list_api_keys(
 
     keys, total = await service.list_for_user(
         user_id=current_user.id,
-        skip=params.skip,
-        limit=params.limit,
+        skip=parameters.skip,
+        limit=parameters.limit,
     )
 
-    page = (params.skip // params.limit) + 1 if params.limit > 0 else 1
-    pages = (total + params.limit - 1) // params.limit if params.limit > 0 else 1
+    page = (parameters.skip // parameters.limit) + 1 if parameters.limit > 0 else 1
+    pages = (total + parameters.limit - 1) // parameters.limit if parameters.limit > 0 else 1
 
     return PaginatedResponse(
         content=APIKeyListResponse(
             data=[APIKeyResponse.model_validate(k) for k in keys],
             total=total,
             page=page,
-            page_size=params.limit,
+            page_size=parameters.limit,
             pages=pages,
         ).model_dump(),
         total=total,
-        skip=params.skip,
-        limit=params.limit,
+        skip=parameters.skip,
+        limit=parameters.limit,
         request=request,
     )
 

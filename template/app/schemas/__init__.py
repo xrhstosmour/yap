@@ -8,7 +8,7 @@ from app.schemas.api_key import API_KEY_SCOPES
 from app.schemas.api_key import APIKeyBase
 from app.schemas.api_key import APIKeyCreate
 from app.schemas.api_key import APIKeyCreateResponse
-from app.schemas.api_key import APIKeyListParams
+from app.schemas.api_key import APIKeyListParameters
 from app.schemas.api_key import APIKeyListResponse
 from app.schemas.api_key import APIKeyResponse
 from app.schemas.api_key import APIKeyUpdate
@@ -25,7 +25,7 @@ from app.schemas.base import ErrorResponse
 from app.schemas.base import HealthResponse
 from app.schemas.base import MessageResponse
 from app.schemas.base import PaginatedResponse
-from app.schemas.base import PaginationParams
+from app.schemas.base import PaginationParameters
 from app.schemas.feature_flag import FeatureFlagCreate
 from app.schemas.feature_flag import FeatureFlagListResponse
 from app.schemas.feature_flag import FeatureFlagResponse
@@ -33,7 +33,7 @@ from app.schemas.feature_flag import FeatureFlagToggle
 from app.schemas.feature_flag import FeatureFlagUpdate
 from app.schemas.user import UserBase
 from app.schemas.user import UserCreate
-from app.schemas.user import UserListParams
+from app.schemas.user import UserListParameters
 from app.schemas.user import UserListResponse
 from app.schemas.user import UserResponse
 from app.schemas.user import UserUpdate
@@ -42,7 +42,7 @@ from app.schemas.user import UserUpdateMe
 __all__ = [
     # Base.
     "BaseSchema",
-    "PaginationParams",
+    "PaginationParameters",
     "PaginatedResponse",
     "MessageResponse",
     "ErrorDetail",
@@ -63,7 +63,7 @@ __all__ = [
     "UserUpdateMe",
     "UserResponse",
     "UserListResponse",
-    "UserListParams",
+    "UserListParameters",
     # API Key.
     "API_KEY_SCOPES",
     "APIKeyBase",
@@ -72,7 +72,7 @@ __all__ = [
     "APIKeyResponse",
     "APIKeyCreateResponse",
     "APIKeyListResponse",
-    "APIKeyListParams",
+    "APIKeyListParameters",
     # Feature Flags.
     "FeatureFlagCreate",
     "FeatureFlagUpdate",

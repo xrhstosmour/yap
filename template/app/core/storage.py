@@ -139,7 +139,7 @@ async def get_download_url(
         str,
         client.generate_presigned_url(
             "get_object",
-            Params={"Bucket": bucket, "Key": object_key},
+            Parameters={"Bucket": bucket, "Key": object_key},
             ExpiresIn=expires_in,
         ),
     )
