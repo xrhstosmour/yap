@@ -10,6 +10,7 @@ import base64
 from datetime import UTC
 from datetime import date as date_type
 from datetime import datetime
+from datetime import time as time_type
 from decimal import Decimal
 from enum import Enum
 from typing import TYPE_CHECKING
@@ -47,7 +48,7 @@ def _jsonable(value: Any, _depth: int = 0) -> Any:  # noqa: ANN401
         return str(value)
     if isinstance(value, UUID):
         return str(value)
-    if isinstance(value, datetime) or isinstance(value, date_type):
+    if isinstance(value, (datetime, date_type, time_type)):
         return value.isoformat()
     if isinstance(value, Enum):
         return value.value
