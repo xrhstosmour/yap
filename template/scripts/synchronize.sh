@@ -128,6 +128,15 @@ if [ -z "$_commit" ]; then
     _commit=$(git ls-remote "https://github.com/xrhstosmour/yap.git" HEAD | cut -f1) || _commit=""
 fi
 
+# Resolve the template's current default-branch HEAD. We update to and record
+# this exact commit: copier defaults to the latest git tag, this template is
+# untagged, and copier does not reliably write the new commit back to a custom
+# answers file, so relying on either leaves the recorded version stale.
+_target=$(git ls-remote "https://github.com/xrhstosmour/yap.git" HEAD | cut -f1) || _target=""
+if [ -z "$_target" ]; then
+    error "Could not resolve the latest YAP commit to sync to"
+fi
+
 cat > .copier/.answers.yml << YAML
 _src_path: gh:xrhstosmour/yap
 _commit: $_commit
@@ -188,11 +197,8 @@ fi
 
 # Sync mode: the setup.sh task only ensures .env and skips services/migrations,
 # so a template sync never requires Docker or a live database.
-# --vcs-ref HEAD targets the template's default-branch HEAD. Without it copier
-# updates to the latest git tag, and this template is untagged, so the recorded
-# _commit would never advance.
 export YAP_SYNC=1
-copier update --trust --conflict inline --defaults --vcs-ref HEAD \
+copier update --trust --conflict inline --defaults --vcs-ref "$_target" \
     --answers-file "$ANSWERS_FILE" 2>&1 || error "copier update failed"
 
 # Check for unresolved merge conflicts from copier update.
@@ -200,16 +206,16 @@ if grep -rq "^<<<<<<< \|^>>>>>>> " --include="*.py" --include="*.yml" --include=
     error "Inline merge conflicts found. Search for '<<<<<<<' markers and resolve them before committing."
 fi
 
-# Persist only non-secret copier version metadata.
-_new_commit=$(read_yaml_scalar "_commit" ".copier/.answers.yml" || echo "$_commit")
+# Persist only non-secret copier version metadata, recording the exact commit
+# we updated to.
 cat > .copier/.version << YAML
 _src_path: gh:xrhstosmour/yap
-_commit: $_new_commit
+_commit: $_target
 YAML
 
 # Ensure secret-bearing answers file is never left behind.
 rm -f .copier/.answers.yml
-info "Updated .copier/.version to ${_new_commit:-unknown}."
+info "Updated .copier/.version to ${_target:-unknown}."
 
 # Clean up temporary git repo if we created one.
 if [ "$TEMP_GIT" = true ]; then
