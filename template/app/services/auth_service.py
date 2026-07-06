@@ -547,7 +547,7 @@ class AuthService:
             raise AuthenticationError("Google OAuth is not configured.")
 
         state = await create_google_oauth_state(redirect_uri)
-        params = {
+        parameters = {
             "client_id": settings.GOOGLE_CLIENT_ID,
             "redirect_uri": redirect_uri,
             "response_type": "code",
@@ -555,7 +555,7 @@ class AuthService:
             "state": state,
             "access_type": "online",
         }
-        return f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}"
+        return f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(parameters)}"
 
     async def google_login(
         self, code: str, state: str, redirect_uri: str

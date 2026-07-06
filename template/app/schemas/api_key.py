@@ -13,7 +13,7 @@ from pydantic import Field
 
 from app.schemas.base import BaseSchema
 from app.schemas.base import PaginatedResponse
-from app.schemas.base import PaginationParams
+from app.schemas.base import PaginationParameters
 
 # Available scopes for API keys.
 API_KEY_SCOPES = [
@@ -96,7 +96,7 @@ class APIKeyListResponse(PaginatedResponse[APIKeyResponse]):
     pass
 
 
-class APIKeyListParams(PaginationParams):
+class APIKeyListParameters(PaginationParameters):
     """Query parameters for listing API keys."""
 
     is_active: bool | None = Field(default=None, description="Filter by active status")

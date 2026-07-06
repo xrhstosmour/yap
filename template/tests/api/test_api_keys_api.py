@@ -130,7 +130,7 @@ class TestAPIUpdateAPIKey:
             headers={"Authorization": f"Bearer {token}"},
         )
         assert create_resp.status_code == 201
-        key_id = create_resp.json()["id"]  # UUID used in path params
+        key_id = create_resp.json()["id"]  # UUID used in path parameters
 
         # Update its name.
         update_resp = await client.patch(
@@ -159,7 +159,7 @@ class TestAPIRevokeAPIKey:
             headers={"Authorization": f"Bearer {token}"},
         )
         assert create_resp.status_code == 201
-        key_id = create_resp.json()["id"]  # UUID used in path params
+        key_id = create_resp.json()["id"]  # UUID used in path parameters
 
         revoke_resp = await client.post(
             f"/api/v1/api-keys/{key_id}/revoke",
@@ -185,7 +185,7 @@ class TestAPIDeleteAPIKey:
             headers={"Authorization": f"Bearer {token}"},
         )
         assert create_resp.status_code == 201
-        key_id = create_resp.json()["id"]  # UUID used in path params
+        key_id = create_resp.json()["id"]  # UUID used in path parameters
 
         delete_resp = await client.delete(
             f"/api/v1/api-keys/{key_id}",
