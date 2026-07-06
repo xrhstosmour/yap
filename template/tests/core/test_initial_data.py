@@ -23,9 +23,9 @@ class TestInit:
     ) -> tuple[MagicMock, MagicMock, MagicMock]:
         """Build a mock session factory + session with controlled query results.
 
-        Returns (session, ctx, factory) where:
-          - factory() returns ctx
-          - ctx.__aenter__ returns session
+        Returns (session, context, factory) where:
+          - factory() returns context
+          - context.__aenter__ returns session
           - session.execute returns a result whose scalar_one_or_none
             returns tenant_result then user_result.
         """
@@ -37,12 +37,12 @@ class TestInit:
         session.execute = AsyncMock(return_value=mock_result)
         session.commit = AsyncMock()
 
-        ctx = MagicMock()
-        ctx.__aenter__ = AsyncMock(return_value=session)
-        ctx.__aexit__ = AsyncMock(return_value=None)
-        factory = MagicMock(return_value=ctx)
+        context = MagicMock()
+        context.__aenter__ = AsyncMock(return_value=session)
+        context.__aexit__ = AsyncMock(return_value=None)
+        factory = MagicMock(return_value=context)
 
-        return session, ctx, factory
+        return session, context, factory
 
     @staticmethod
     def _patch_deps(session_factory: MagicMock) -> tuple:
@@ -63,7 +63,7 @@ class TestInit:
         """init() creates a tenant with SYSTEM_TENANT_ID when none exists."""
         from app.initial_data import init
 
-        session, ctx, factory = self._make_session_mock(
+        session, context, factory = self._make_session_mock(
             tenant_result=None,  # no tenant yet
             user_result=None,  # no user yet
         )
@@ -92,7 +92,7 @@ class TestInit:
 
         existing_tenant = Tenant(id=SYSTEM_TENANT_ID, name="System", slug="system")
 
-        session, ctx, factory = self._make_session_mock(
+        session, context, factory = self._make_session_mock(
             tenant_result=existing_tenant,
             user_result=None,
         )
@@ -117,7 +117,7 @@ class TestInit:
         """init() creates a superuser with is_superuser=True when none exists."""
         from app.initial_data import init
 
-        session, ctx, factory = self._make_session_mock(
+        session, context, factory = self._make_session_mock(
             tenant_result=None,
             user_result=None,
         )
@@ -148,7 +148,7 @@ class TestInit:
 
         existing_user = User(email="admin@test.com")
 
-        session, ctx, factory = self._make_session_mock(
+        session, context, factory = self._make_session_mock(
             tenant_result=None,
             user_result=existing_user,
         )
@@ -173,7 +173,7 @@ class TestInit:
         """The init() function completes without error when both are missing."""
         from app.initial_data import init
 
-        session, ctx, factory = self._make_session_mock(
+        session, context, factory = self._make_session_mock(
             tenant_result=None,
             user_result=None,
         )

@@ -18,7 +18,7 @@ from app.dependencies import SessionDependency
 from app.dependencies import SuperuserUser
 from app.repositories.audit_repository import AuditLogRepository
 from app.schemas.tenant import TenantCreate
-from app.schemas.tenant import TenantListParams
+from app.schemas.tenant import TenantListParameters
 from app.schemas.tenant import TenantListResponse
 from app.schemas.tenant import TenantResponse
 from app.schemas.tenant import TenantUpdate
@@ -45,34 +45,34 @@ TenantServiceDependency = Annotated[TenantService, Depends(get_tenant_service)]
     description="List all tenants with pagination and filtering. Admin only.",
 )
 async def list_tenants(
-    params: Annotated[TenantListParams, Depends()],
+    parameters: Annotated[TenantListParameters, Depends()],
     current_user: SuperuserUser,
     service: TenantServiceDependency,
     request: Request,
 ) -> PaginatedResponse:
     tenants, total = await service.list_tenants(
-        skip=params.skip,
-        limit=params.limit,
-        is_active=params.is_active,
-        search=params.search,
-        sort_by=params.sort_by or "name",
-        sort_order=params.sort_order,
+        skip=parameters.skip,
+        limit=parameters.limit,
+        is_active=parameters.is_active,
+        search=parameters.search,
+        sort_by=parameters.sort_by or "name",
+        sort_order=parameters.sort_order,
     )
 
-    page = (params.skip // params.limit) + 1 if params.limit > 0 else 1
-    pages = (total + params.limit - 1) // params.limit if params.limit > 0 else 1
+    page = (parameters.skip // parameters.limit) + 1 if parameters.limit > 0 else 1
+    pages = (total + parameters.limit - 1) // parameters.limit if parameters.limit > 0 else 1
 
     return PaginatedResponse(
         content=TenantListResponse(
             data=[TenantResponse.model_validate(t) for t in tenants],
             total=total,
             page=page,
-            page_size=params.limit,
+            page_size=parameters.limit,
             pages=pages,
         ).model_dump(),
         total=total,
-        skip=params.skip,
-        limit=params.limit,
+        skip=parameters.skip,
+        limit=parameters.limit,
         request=request,
     )
 

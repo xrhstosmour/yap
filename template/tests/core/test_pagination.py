@@ -22,7 +22,7 @@ def mock_request(
     path: str = "/api/v1/items",
     query_params: dict[str, str] | None = None,
 ) -> MagicMock:
-    """Create a mock Starlette Request with a known path and query params."""
+    """Create a mock Starlette Request with a known path and query parameters."""
     mock = MagicMock(spec=Request)
     mock.url.path = path
     mock.query_params.multi_items.return_value = [
