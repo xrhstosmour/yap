@@ -51,6 +51,12 @@ Thumbs.db
 *.pem
 *.key
 
+# Generated dev TLS certificates and basic-auth secrets (recreated by setup.sh).
+*.crt
+*.csr
+.htpasswd
+.certificates
+
 # Lock files.
 uv.lock
 
