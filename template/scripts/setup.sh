@@ -52,53 +52,36 @@ if ! command -v docker >/dev/null 2>&1; then
     fi
 fi
 
-# Environment file setup.
-if [ -f .env ]; then
-    warn ".env already exists. Skipping generation."
+# Environment file setup. Creates .env if missing, and backfills any secret
+# that is still empty or a placeholder. This self-heals a placeholder .env
+# seeded by the sync path (a copy of .env.example), whose values would
+# otherwise crash migrations (for example an invalid CRYPTO_KEY).
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    SED_INPLACE=("sed" "-i" "")
 else
+    SED_INPLACE=("sed" "-i")
+fi
+
+SECRET_KEY="${SECRET_KEY:-$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")}"
+CRYPTO_KEY="${CRYPTO_KEY:-$(python3 -c "import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())")}"
+POSTGRESQL_PASSWORD="${POSTGRESQL_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(24))")}"
+FIRST_SUPERUSER_PASSWORD="${FIRST_SUPERUSER_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")}"
+RABBITMQ_PASSWORD="${RABBITMQ_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")}"
+REDIS_PASSWORD="${REDIS_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")}"
+FLOWER_PASSWORD="${FLOWER_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(12))")}"
+PGADMIN4_PASSWORD="${PGADMIN4_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(12))")}"
+GLITCHTIP_SECRET_KEY="${GLITCHTIP_SECRET_KEY:-$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")}"
+REDIS_COMMANDER_PASSWORD="${REDIS_COMMANDER_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(12))")}"
+METABASE_READ_ONLY_PASSWORD="${METABASE_READ_ONLY_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")}"
+STORAGE_SECRET_KEY="${STORAGE_SECRET_KEY:-$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")}"
+GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET:-$(python3 -c "import secrets; print(secrets.token_urlsafe(24))")}"
+SMTP_PASSWORD="${SMTP_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")}"
+
+if [ ! -f .env ]; then
     info "Generating environment variables..."
-
-    SECRET_KEY="${SECRET_KEY:-$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")}"
-    CRYPTO_KEY="${CRYPTO_KEY:-$(python3 -c "import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())")}"
-    POSTGRESQL_PASSWORD="${POSTGRESQL_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(24))")}"
-    FIRST_SUPERUSER_PASSWORD="${FIRST_SUPERUSER_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")}"
-    RABBITMQ_PASSWORD="${RABBITMQ_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")}"
-    REDIS_PASSWORD="${REDIS_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")}"
-    FLOWER_PASSWORD="${FLOWER_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(12))")}"
-    PGADMIN4_PASSWORD="${PGADMIN4_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(12))")}"
-    GLITCHTIP_SECRET_KEY="${GLITCHTIP_SECRET_KEY:-$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")}"
-    REDIS_COMMANDER_PASSWORD="${REDIS_COMMANDER_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(12))")}"
-    METABASE_READ_ONLY_PASSWORD="${METABASE_READ_ONLY_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")}"
-    STORAGE_SECRET_KEY="${STORAGE_SECRET_KEY:-$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")}"
-    GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET:-$(python3 -c "import secrets; print(secrets.token_urlsafe(24))")}"
-    SMTP_PASSWORD="${SMTP_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")}"
-
     cp .env.example .env
 
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        SED_INPLACE=("sed" "-i" "")
-    else
-        SED_INPLACE=("sed" "-i")
-    fi
-
-    "${SED_INPLACE[@]}" "s/SECRET_KEY=.*/SECRET_KEY=${SECRET_KEY}/" .env
-    "${SED_INPLACE[@]}" "s/CRYPTO_KEY=.*/CRYPTO_KEY=${CRYPTO_KEY}/" .env
-    "${SED_INPLACE[@]}" "s/POSTGRESQL_PASSWORD=.*/POSTGRESQL_PASSWORD=${POSTGRESQL_PASSWORD}/" .env
-    "${SED_INPLACE[@]}" "s|\(DATABASE_URL=postgres://[^:]*:\)[^@]*@|\1${POSTGRESQL_PASSWORD}@|" .env
-    "${SED_INPLACE[@]}" "s/METABASE_DATABASE_PASSWORD=.*/METABASE_DATABASE_PASSWORD=${POSTGRESQL_PASSWORD}/" .env
-    "${SED_INPLACE[@]}" "s/FIRST_SUPERUSER_PASSWORD=.*/FIRST_SUPERUSER_PASSWORD=${FIRST_SUPERUSER_PASSWORD}/" .env
-    "${SED_INPLACE[@]}" "s/RABBITMQ_PASSWORD=.*/RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD}/" .env
-    "${SED_INPLACE[@]}" "s/REDIS_PASSWORD=.*/REDIS_PASSWORD=${REDIS_PASSWORD}/" .env
-    "${SED_INPLACE[@]}" "s|REDIS_URL=redis://:.*@redis|REDIS_URL=redis://:${REDIS_PASSWORD}@redis|" .env
-    "${SED_INPLACE[@]}" "s/FLOWER_PASSWORD=.*/FLOWER_PASSWORD=${FLOWER_PASSWORD}/" .env
-    "${SED_INPLACE[@]}" "s/PGADMIN4_PASSWORD=.*/PGADMIN4_PASSWORD=${PGADMIN4_PASSWORD}/" .env
-    "${SED_INPLACE[@]}" "s/GLITCHTIP_SECRET_KEY=.*/GLITCHTIP_SECRET_KEY=${GLITCHTIP_SECRET_KEY}/" .env
-    "${SED_INPLACE[@]}" "s/REDIS_COMMANDER_PASSWORD=.*/REDIS_COMMANDER_PASSWORD=${REDIS_COMMANDER_PASSWORD}/" .env
-    "${SED_INPLACE[@]}" "s/METABASE_READ_ONLY_PASSWORD=.*/METABASE_READ_ONLY_PASSWORD=${METABASE_READ_ONLY_PASSWORD}/" .env
-    "${SED_INPLACE[@]}" "s/STORAGE_SECRET_KEY=.*/STORAGE_SECRET_KEY=${STORAGE_SECRET_KEY}/" .env
-    "${SED_INPLACE[@]}" "s/GOOGLE_CLIENT_SECRET=.*/GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}/" .env
-    "${SED_INPLACE[@]}" "s/SMTP_PASSWORD=.*/SMTP_PASSWORD=${SMTP_PASSWORD}/" .env
-
+    # Reset .env.example back to placeholders so real secrets never leak into it.
     "${SED_INPLACE[@]}" "s/SECRET_KEY=.*/SECRET_KEY=your-secret-key/" .env.example
     "${SED_INPLACE[@]}" "s/CRYPTO_KEY=.*/CRYPTO_KEY=your-32-bit-fernet-key==/" .env.example
     "${SED_INPLACE[@]}" "s/POSTGRESQL_PASSWORD=.*/POSTGRESQL_PASSWORD=your-postgresql-password/" .env.example
@@ -111,14 +94,51 @@ else
     "${SED_INPLACE[@]}" "s/REDIS_COMMANDER_PASSWORD=.*/REDIS_COMMANDER_PASSWORD=your-redis-commander-password/" .env.example
     "${SED_INPLACE[@]}" "s/METABASE_READ_ONLY_PASSWORD=.*/METABASE_READ_ONLY_PASSWORD=your-metabase-read-only-password/" .env.example
     "${SED_INPLACE[@]}" "s/SENTRY_DSN=.*/SENTRY_DSN=https:\/\/public:secret@sentry.com\/1/" .env.example
+else
+    info "Backfilling any placeholder secrets in existing .env..."
+fi
 
-    # Merge certificate paths written by assemble.py into .env.
-    # Replaces the placeholder SSL_CERTIFICATE_PATH with the absolute path from assemble.py.
-    if [ -f containers/.certificates ]; then
-        cert_path=$(cut -d= -f2- < containers/.certificates)
-        "${SED_INPLACE[@]}" "s|SSL_CERTIFICATE_PATH=.*|SSL_CERTIFICATE_PATH=${cert_path}|" .env
-        rm containers/.certificates
-    fi
+# Replace KEY's value only when it is empty or a placeholder ("your-...").
+backfill_secret() {
+    key="$1"
+    value="$2"
+    current="$(sed -n "s/^${key}=//p" .env | head -1)"
+    case "$current" in
+        "" | your-*)
+            "${SED_INPLACE[@]}" "s|^${key}=.*|${key}=${value}|" .env
+            ;;
+    esac
+}
+
+backfill_secret SECRET_KEY "${SECRET_KEY}"
+backfill_secret CRYPTO_KEY "${CRYPTO_KEY}"
+backfill_secret POSTGRESQL_PASSWORD "${POSTGRESQL_PASSWORD}"
+backfill_secret FIRST_SUPERUSER_PASSWORD "${FIRST_SUPERUSER_PASSWORD}"
+backfill_secret RABBITMQ_PASSWORD "${RABBITMQ_PASSWORD}"
+backfill_secret REDIS_PASSWORD "${REDIS_PASSWORD}"
+backfill_secret FLOWER_PASSWORD "${FLOWER_PASSWORD}"
+backfill_secret PGADMIN4_PASSWORD "${PGADMIN4_PASSWORD}"
+backfill_secret GLITCHTIP_SECRET_KEY "${GLITCHTIP_SECRET_KEY}"
+backfill_secret REDIS_COMMANDER_PASSWORD "${REDIS_COMMANDER_PASSWORD}"
+backfill_secret METABASE_READ_ONLY_PASSWORD "${METABASE_READ_ONLY_PASSWORD}"
+backfill_secret STORAGE_SECRET_KEY "${STORAGE_SECRET_KEY}"
+backfill_secret GOOGLE_CLIENT_SECRET "${GOOGLE_CLIENT_SECRET}"
+backfill_secret SMTP_PASSWORD "${SMTP_PASSWORD}"
+
+# Derive the connection URLs and Metabase password from the current, possibly
+# just-backfilled, database and Redis passwords. Idempotent.
+CURRENT_POSTGRESQL_PASSWORD="$(sed -n "s/^POSTGRESQL_PASSWORD=//p" .env | head -1)"
+"${SED_INPLACE[@]}" "s|\(DATABASE_URL=postgres://[^:]*:\)[^@]*@|\1${CURRENT_POSTGRESQL_PASSWORD}@|" .env
+"${SED_INPLACE[@]}" "s/METABASE_DATABASE_PASSWORD=.*/METABASE_DATABASE_PASSWORD=${CURRENT_POSTGRESQL_PASSWORD}/" .env
+CURRENT_REDIS_PASSWORD="$(sed -n "s/^REDIS_PASSWORD=//p" .env | head -1)"
+"${SED_INPLACE[@]}" "s|REDIS_URL=redis://:.*@redis|REDIS_URL=redis://:${CURRENT_REDIS_PASSWORD}@redis|" .env
+
+# Merge certificate paths written by assemble.py into .env.
+# Replaces the placeholder SSL_CERTIFICATE_PATH with the absolute path from assemble.py.
+if [ -f containers/.certificates ]; then
+    cert_path=$(cut -d= -f2- < containers/.certificates)
+    "${SED_INPLACE[@]}" "s|SSL_CERTIFICATE_PATH=.*|SSL_CERTIFICATE_PATH=${cert_path}|" .env
+    rm containers/.certificates
 fi
 
 # Dependencies installation.
