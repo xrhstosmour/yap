@@ -126,8 +126,13 @@ class AuthService:
             new_password: New plain-text password.
         """
         hashed = generate_password_hash(new_password)
-        await self.user_repository.update(user.id, {"hashed_password": hashed})
-        await self.user_repository.increment_token_version(user.id)
+        await self.user_repository.update(
+            user.id,
+            {
+                "hashed_password": hashed,
+                "token_version": User.token_version + 1,
+            },
+        )
 
     async def _send_token_email(
         self,
