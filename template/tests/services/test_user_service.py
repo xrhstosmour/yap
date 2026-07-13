@@ -328,20 +328,21 @@ class TestDeleteMe:
             await mock_user_service.delete_me(user)
 
         expected_email = f"deleted_{user.id}@deleted.invalid"
-        mock_user_service.user_repository.update.assert_awaited_once_with(
-            user.id,
-            {
-                "email": expected_email,
-                "full_name": None,
-                "hashed_password": "$2b$12$placeholder_hash...",
-            },
-        )
+        mock_user_service.user_repository.update.assert_awaited_once()
+        call = mock_user_service.user_repository.update.await_args
+        assert call is not None
+        assert call.args[0] == user.id
+        data = call.args[1]
+        assert data["email"] == expected_email
+        assert data["full_name"] is None
+        assert data["hashed_password"] == "$2b$12$placeholder_hash..."
+        assert "token_version" in data
 
     @pytest.mark.asyncio
     async def test_delete_me_invalidates_tokens_and_soft_deletes(
         self, mock_user_service: UserService, mock_session: MagicMock
     ) -> None:
-        """Should increment token_version and soft-delete the user record."""
+        """Should invalidate tokens atomically with anonymisation and soft-delete."""
         user = _make_user_mock()
 
         mock_session.execute = AsyncMock()
@@ -356,9 +357,7 @@ class TestDeleteMe:
         ):
             await mock_user_service.delete_me(user)
 
-        mock_user_service.user_repository.increment_token_version.assert_awaited_once_with(
-            user.id
-        )
+        mock_user_service.user_repository.increment_token_version.assert_not_called()
         mock_user_service.user_repository.delete.assert_awaited_once_with(user.id)
 
     @pytest.mark.asyncio
