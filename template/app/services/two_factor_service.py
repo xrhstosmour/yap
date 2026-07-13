@@ -187,16 +187,15 @@ class TwoFactorAuthService:
         if not verify_totp(secret, totp_code):
             raise InvalidTOTPError("Invalid TOTP code.")
 
-        # Activate 2FA.
+        # Activate 2FA and invalidate all existing sessions.
         await self.user_repository.update(
             user.id,
             {
                 "is_2fa_enabled": True,
                 "totp_confirmed_at": datetime.now(UTC),
+                "token_version": User.token_version + 1,
             },
         )
-        # Invalidate all existing sessions.
-        await self.user_repository.increment_token_version(user.id)
 
         logger.info("totp_enrollment_confirmed", user_id=str(user.id))
 
@@ -356,9 +355,9 @@ class TwoFactorAuthService:
                 "is_2fa_enabled": False,
                 "totp_secret_encrypted": None,
                 "totp_confirmed_at": None,
+                "token_version": User.token_version + 1,
             },
         )
-        await self.user_repository.increment_token_version(user.id)
         await self._delete_all_recovery_codes(user.id)
 
         logger.info("totp_disabled", user_id=str(user.id))
