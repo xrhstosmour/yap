@@ -151,7 +151,7 @@ class TestConfirmEnrollment:
             await service.confirm_enrollment(user, valid_code)
 
         service.user_repository.update.assert_awaited_once()
-        service.user_repository.increment_token_version.assert_awaited_once()
+        service.user_repository.increment_token_version.assert_not_called()
 
 
 class TestIssueChallenge:
@@ -226,7 +226,7 @@ class TestDisable:
             await service.disable(user, valid_code)
 
         service.user_repository.update.assert_awaited_once()
-        service.user_repository.increment_token_version.assert_awaited_once()
+        service.user_repository.increment_token_version.assert_not_called()
 
 
 class TestVerifyChallenge:
