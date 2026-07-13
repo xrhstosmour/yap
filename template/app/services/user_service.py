@@ -321,11 +321,11 @@ class UserService:
                     "email": anonymized_email,
                     "full_name": None,
                     "hashed_password": placeholder_hash,
+                    "token_version": User.token_version + 1,
                 },
             )
 
-            # Invalidate all outstanding JWTs and soft-delete the record.
-            await self.user_repository.increment_token_version(user.id)
+            # Soft-delete the record (token already bumped above).
             await self.user_repository.delete(user.id)
 
         await self.audit_repository.log_user_action(
