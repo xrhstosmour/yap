@@ -137,6 +137,8 @@ class TestAuthService:
         assert tokens.refresh_token
         assert tokens.token_type == "bearer"
         assert tokens.expires_in > 0
+        assert tokens.refresh_expires_in > 0
+
 
     @pytest.mark.asyncio
     async def test_change_password_wrong_current_raises_error(

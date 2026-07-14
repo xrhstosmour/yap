@@ -56,12 +56,16 @@ class TokenResponse(BaseSchema):
         refresh_token: JWT refresh token (long-lived)
         token_type: Token type (always "bearer")
         expires_in: Access token lifetime in seconds
+        refresh_expires_in: Refresh token lifetime in seconds
     """
 
     access_token: str = Field(description="JWT access token")
     refresh_token: str = Field(description="JWT refresh token")
     token_type: str = Field(default="bearer", description="Token type")
     expires_in: int = Field(description="Access token lifetime in seconds")
+    refresh_expires_in: int = Field(
+        default=604800, description="Refresh token lifetime in seconds"
+    )
 
 
 class RefreshTokenRequest(BaseSchema):
@@ -176,6 +180,7 @@ class LoginResponse(BaseSchema):
         refresh_token: JWT refresh token (present when 2FA not required).
         token_type: Token type (always "bearer").
         expires_in: Access token lifetime in seconds (present when 2FA not required).
+        refresh_expires_in: Refresh token lifetime in seconds.
         requires_2fa: True if the user must complete a 2FA challenge.
         challenge_token: Opaque challenge token to pass to POST /auth/2fa/verify.
     """
@@ -185,6 +190,9 @@ class LoginResponse(BaseSchema):
     token_type: str = Field(default="bearer", description="Token type")
     expires_in: int | None = Field(
         default=None, description="Access token lifetime in seconds"
+    )
+    refresh_expires_in: int | None = Field(
+        default=None, description="Refresh token lifetime in seconds"
     )
     requires_2fa: bool = Field(
         default=False, description="Whether a 2FA challenge is required"

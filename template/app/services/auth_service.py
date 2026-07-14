@@ -9,6 +9,7 @@ from __future__ import annotations
 import secrets
 from datetime import UTC
 from datetime import datetime
+from datetime import timedelta
 from typing import Any
 from uuid import UUID
 
@@ -269,11 +270,12 @@ class AuthService:
 
         return user
 
-    def create_tokens(self, user: User) -> TokenResponse:
+    def create_tokens(self, user: User, remember_me: bool = False) -> TokenResponse:
         """Create access and refresh tokens for user.
 
         Args:
             user: Authenticated user
+            remember_me: If True, use a longer refresh token lifetime
 
         Returns:
             TokenResponse with access and refresh tokens
@@ -289,9 +291,13 @@ class AuthService:
             },
         )
 
-        # Refresh token.
+        # Refresh token, longer lifetime when remember_me is True.
+        refresh_expires_delta = timedelta(
+            days=settings.REFRESH_TOKEN_EXPIRE_DAYS if remember_me else settings.REFRESH_TOKEN_SESSION_EXPIRE_DAYS,
+        )
         refresh_token = create_refresh_token(
             subject=str(user.id),
+            expires_delta=refresh_expires_delta,
             additional_claims={"token_version": user.token_version},
         )
 
@@ -300,6 +306,7 @@ class AuthService:
             refresh_token=refresh_token,
             token_type="bearer",
             expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            refresh_expires_in=int(refresh_expires_delta.total_seconds()),
         )
 
     async def refresh_tokens(self, refresh_token: str) -> TokenResponse:

@@ -59,7 +59,8 @@ class Settings(BaseSettings):
         ENVIRONMENT: Deployment environment (local/staging/production)
         SECRET_KEY: Cryptographic key for JWT signing
         ACCESS_TOKEN_EXPIRE_MINUTES: JWT access token lifetime
-        REFRESH_TOKEN_EXPIRE_DAYS: Refresh token lifetime
+        REFRESH_TOKEN_EXPIRE_DAYS: Refresh token lifetime (remember me)
+        REFRESH_TOKEN_SESSION_EXPIRE_DAYS: Refresh token lifetime (session only)
         FRONTEND_HOST: Frontend application URL for CORS
         BACKEND_CORS_ORIGINS: Allowed CORS origins
 
@@ -104,6 +105,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str = ""
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    REFRESH_TOKEN_SESSION_EXPIRE_DAYS: int = 1
     ALGORITHM: Literal[
         "HS256", "HS384", "HS512", "RS256", "RS384", "RS512", "ES256", "ES384", "ES512"
     ] = "HS256"

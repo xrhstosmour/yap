@@ -11,6 +11,7 @@ from typing import Annotated
 
 from fastapi import APIRouter
 from fastapi import Depends
+from fastapi import Form
 from fastapi import HTTPException
 from fastapi import Query
 from fastapi import status
@@ -101,6 +102,7 @@ async def register(
 async def login(
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
     session: SessionDependency,
+    remember_me: Annotated[bool, Form()] = False,
 ) -> LoginResponse:
     """Authenticate user and return tokens or a 2FA challenge."""
     from app.services.two_factor_service import TwoFactorAuthService
@@ -127,12 +129,13 @@ async def login(
         challenge_token = await totp_service.issue_challenge(user)
         return LoginResponse(requires_2fa=True, challenge_token=challenge_token)
 
-    tokens = service.create_tokens(user)
+    tokens = service.create_tokens(user, remember_me=remember_me)
     return LoginResponse(
         access_token=tokens.access_token,
         refresh_token=tokens.refresh_token,
         token_type=tokens.token_type,
         expires_in=tokens.expires_in,
+        refresh_expires_in=tokens.refresh_expires_in,
     )
 
 
