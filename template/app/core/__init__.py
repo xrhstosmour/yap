@@ -31,6 +31,7 @@ from app.core.greeklish import greek_to_greeklish
 from app.core.greeklish import greeklish_to_greek
 from app.core.logging import get_logger
 from app.core.logging import setup_logging
+from app.core.phone_number import PhoneNumberString
 from app.core.rate_limit import RateLimiter
 from app.core.rate_limit import RateLimitExceeded
 from app.core.rate_limit import check_api_key_rate_limit
@@ -92,5 +93,6 @@ __all__ = [
     "generate_key",
     "greeklish_to_greek",
     "greek_to_greeklish",
+    "PhoneNumberString",
     "SYSTEM_TENANT_ID",
 ]
