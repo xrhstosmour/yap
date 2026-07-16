@@ -5,7 +5,7 @@ by SQLModel metadata in SQLite tests and never provisioned by migrations. This
 adds it so alembic upgrade head builds the full schema.
 
 Revision ID: b7c8d9e0f1a2
-Revises: d2f4a6b8c0e1
+Revises: f1e2d3c4b5a6
 Create Date: 2026-07-03 18:30:00.000000
 
 """
@@ -20,7 +20,7 @@ from sqlmodel.sql.sqltypes import AutoString
 
 # revision identifiers, used by Alembic.
 revision: str = "b7c8d9e0f1a2"
-down_revision: Union[str, None] = "d2f4a6b8c0e1"
+down_revision: Union[str, None] = "f1e2d3c4b5a6"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
