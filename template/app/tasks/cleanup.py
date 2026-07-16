@@ -92,7 +92,7 @@ def cleanup_expired_api_keys(self) -> dict:
 
 
 @celery_app.task(bind=True, name="app.tasks.cleanup.purge_graveyard")
-def purge_graveyard(self, retention_days: int = 90) -> dict:
+def purge_graveyard(self, retention_days: int = 30) -> dict:
     """Purge old graveyard entries.
 
     Args:

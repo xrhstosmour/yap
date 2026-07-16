@@ -19,7 +19,7 @@ from sqlmodel import Field
 
 from app.models.base import BaseModel
 
-DEFAULT_RETENTION_DAYS = 90
+DEFAULT_RETENTION_DAYS = 30
 
 
 class Graveyard(BaseModel, table=True):
