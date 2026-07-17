@@ -6,7 +6,7 @@ for get_recent_failures, and a single-column index on tenants.name
 for ORDER BY and ILIKE searches.
 
 Revision ID: b0b1c2d3e4f5
-Revises: c9d1e3f5a7b2
+Revises: d2f4a6b8c0e1
 Create Date: 2026-06-12 14:00:00.000000
 
 """
@@ -18,7 +18,7 @@ from alembic import op
 
 # Revision identifiers, used by Alembic.
 revision: str = "b0b1c2d3e4f5"
-down_revision: Union[str, None] = "c9d1e3f5a7b2"
+down_revision: Union[str, None] = "d2f4a6b8c0e1"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

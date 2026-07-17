@@ -16,7 +16,7 @@ from sqlmodel.sql.sqltypes import AutoString
 
 # Revision identifiers, used by Alembic.
 revision: str = "d2f4a6b8c0e1"
-down_revision: Union[str, None] = "f1e2d3c4b5a6"
+down_revision: Union[str, None] = "c9d1e3f5a7b2"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
