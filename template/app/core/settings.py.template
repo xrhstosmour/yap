@@ -140,6 +140,37 @@ class Settings(BaseSettings):
     POSTGRESQL_SSL_CERT: str = ""
     POSTGRESQL_SSL_KEY: str = ""
 
+    # Additional database for preview/demo/staging content.
+    # When set, the X-Database-Mode header can route requests to this database
+    # via the `database_mode_variable` contextvar and `additional_async_engine`.
+    POSTGRESQL_ADDITIONAL_DATABASE: str = "{{ project_slug }}_additional"
+
+    @computed_field  # type: ignore[prop-decorator]  # pyright: ignore[reportDecoratorUsage]
+    @property
+    def ADDITIONAL_DATABASE_URI(self) -> PostgresDsn:
+        """Build the additional database connection string from components."""
+        query_params: dict[str, str] = {}
+        if self.POSTGRESQL_SSL_MODE:
+            query_params["sslmode"] = self.POSTGRESQL_SSL_MODE
+        if self.POSTGRESQL_SSL_CA:
+            query_params["sslrootcert"] = self.POSTGRESQL_SSL_CA
+        if self.POSTGRESQL_SSL_CERT:
+            query_params["sslcert"] = self.POSTGRESQL_SSL_CERT
+        if self.POSTGRESQL_SSL_KEY:
+            query_params["sslkey"] = self.POSTGRESQL_SSL_KEY
+        query = None
+        if query_params:
+            query = "&".join(f"{k}={v}" for k, v in query_params.items())
+        return PostgresDsn.build(
+            scheme="postgresql+psycopg",
+            username=self.POSTGRESQL_USER,
+            password=self.POSTGRESQL_PASSWORD,
+            host=self.POSTGRESQL_SERVER,
+            port=self.POSTGRESQL_PORT,
+            path=self.POSTGRESQL_ADDITIONAL_DATABASE,
+            query=query,
+        )
+
     @computed_field  # type: ignore[prop-decorator]  # pyright: ignore[reportDecoratorUsage]
     @property
     def DATABASE_URI(self) -> PostgresDsn:
