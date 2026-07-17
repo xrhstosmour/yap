@@ -56,7 +56,11 @@ async def list_feature_flags(
     )
 
     page = (parameters.skip // parameters.limit) + 1 if parameters.limit > 0 else 1
-    pages = (total + parameters.limit - 1) // parameters.limit if parameters.limit > 0 else 1
+    pages = (
+        (total + parameters.limit - 1) // parameters.limit
+        if parameters.limit > 0
+        else 1
+    )
 
     return PaginatedResponse(
         content=FeatureFlagListResponse(
