@@ -237,12 +237,12 @@ class UserService:
         Raises:
             UserServiceError: On validation failure or email conflict.
         """
-        update_data: dict[str, str | int] = {}
+        update_data: dict[str, object] = {}
         if data.email is not None:
             update_data["email"] = data.email
         if data.full_name is not None:
             update_data["full_name"] = data.full_name
-        if data.phone is not None:
+        if "phone" in data.model_fields_set:
             update_data["phone"] = data.phone
 
         email_changing = isinstance(data.email, str) and data.email != user.email
@@ -254,12 +254,6 @@ class UserService:
                 raise UserServiceError("Current password is required for this change")
             if not verify_password(data.current_password, user.hashed_password):
                 raise UserServiceError("Current password is incorrect")
-
-        # Verify password provided with no sensitive change.
-        if data.current_password and not email_changing and not password_changing:
-            raise UserServiceError(
-                "Current password provided with no sensitive change"
-            )
 
         # Check email uniqueness before updating.
         if email_changing:
