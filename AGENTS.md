@@ -40,7 +40,8 @@ template/               # Scaffolded application (Jinja2 suffix: .template)
 ## CI pipeline (`.github/workflows/ci.yml`)
 
 1. **lint**: Renders the template via Copier, runs `ruff check`, `ruff format`,
-   `ruff format --check`, and `mypy` (using `mypy-ci.toml`).
+   `ruff format --check`, `mypy` (using `mypy-ci.toml`), and an Alembic
+   single-head check that asserts exactly one migration head exists.
 2. **test**: Renders the template (with tasks), sources `.env`, runs
    `pytest tests/ -v --tb=short --cov=app --cov-report=xml`.
    Minimum coverage: 82%.
