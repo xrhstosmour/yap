@@ -1,4 +1,4 @@
-"""Tests for database module: init, close, session factory, and URI."""
+"""Tests for database module: init, close, session factory, URI, and routing."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 from unittest.mock import patch
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # init_db
 
@@ -277,3 +278,327 @@ class TestLifespan:
         # Shutdown hooks must still execute.
         mock_close.assert_awaited_once()
         mock_redis_close.assert_awaited_once()
+
+
+# Multi-database engine routing
+# -----------------------------
+
+
+class TestAdditionalDatabaseURI:
+    """Tests for ADDITIONAL_DATABASE_URI construction from settings."""
+
+    def test_additional_database_uri_is_built_from_settings(self) -> None:
+        """ADDITIONAL_DATABASE_URI includes host, database, port, and user."""
+        from app.core.settings import Settings
+
+        s = Settings(
+            SECRET_KEY="test-secret-key-for-testing-only",
+            POSTGRESQL_PASSWORD="test-password",
+            FIRST_SUPERUSER_PASSWORD="test-password",
+            RABBITMQ_PASSWORD="test-password",
+            CRYPTO_KEY="test-crypto-key",
+            GOOGLE_CLIENT_SECRET="test-secret",
+            SMTP_PASSWORD="test-smtp-pass",
+            STORAGE_SECRET_KEY="test-storage-key",
+            POSTGRESQL_USER="myuser",
+            POSTGRESQL_ADDITIONAL_DATABASE="my_additional_db",
+            POSTGRESQL_SERVER="myhost",
+            POSTGRESQL_PORT=5433,
+        )
+
+        uri = str(s.ADDITIONAL_DATABASE_URI)
+        assert "myhost" in uri
+        assert "5433" in uri
+        assert "my_additional_db" in uri
+        assert "myuser" in uri
+        assert "+psycopg" in uri
+
+    def test_additional_database_uri_default_suffix(self) -> None:
+        """ADDITIONAL_DATABASE_URI defaults to {project_slug}_additional."""
+        from app.core.settings import Settings
+
+        s = Settings(
+            SECRET_KEY="test-secret-key-for-testing-only",
+            POSTGRESQL_PASSWORD="test-password",
+            FIRST_SUPERUSER_PASSWORD="test-password",
+            RABBITMQ_PASSWORD="test-password",
+            CRYPTO_KEY="test-crypto-key",
+            GOOGLE_CLIENT_SECRET="test-secret",
+            SMTP_PASSWORD="test-smtp-pass",
+            STORAGE_SECRET_KEY="test-storage-key",
+        )
+
+        uri = str(s.ADDITIONAL_DATABASE_URI)
+        assert "additional" in uri
+
+
+class TestDatabaseModeVariable:
+    """Tests for database_mode_variable contextvar."""
+
+    @pytest.mark.anyio
+    async def test_default_routes_to_main_factory(self) -> None:
+        """get_async_session uses the main factory when mode is empty."""
+        from app.database import get_async_session
+
+        mock_session = AsyncMock()
+        mock_main_ctx = MagicMock()
+        mock_main_ctx.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_main_ctx.__aexit__ = AsyncMock(return_value=None)
+        mock_main_factory = MagicMock(return_value=mock_main_ctx)
+
+        with (
+            patch("app.database.async_session_factory", mock_main_factory),
+            patch("app.database.additional_async_session_factory", MagicMock()),
+        ):
+            async for session in get_async_session():
+                assert session is mock_session
+
+        mock_main_factory.assert_called_once()
+
+    @pytest.mark.anyio
+    async def test_additional_mode_routes_to_additional_factory(self) -> None:
+        """get_async_session uses the additional factory when mode is set."""
+        from app.database import ADDITIONAL_DATABASE_MODE
+        from app.database import database_mode_variable
+        from app.database import get_async_session
+
+        mock_session = AsyncMock(spec=AsyncSession)
+        mock_additional_ctx = MagicMock()
+        mock_additional_ctx.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_additional_ctx.__aexit__ = AsyncMock(return_value=None)
+        mock_additional_factory = MagicMock(return_value=mock_additional_ctx)
+
+        token = database_mode_variable.set(ADDITIONAL_DATABASE_MODE)
+        try:
+            with (
+                patch("app.database.async_session_factory", MagicMock()),
+                patch(
+                    "app.database.additional_async_session_factory",
+                    mock_additional_factory,
+                ),
+            ):
+                async for session in get_async_session():
+                    assert session is mock_session
+
+            mock_additional_factory.assert_called_once()
+        finally:
+            database_mode_variable.reset(token)
+
+
+class TestInitDatabaseMultiEngine:
+    """Tests for init_db with both engines."""
+
+    @pytest.mark.anyio
+    async def test_init_db_connects_to_both_engines(self) -> None:
+        """init_db connects and pings both main and additional engines."""
+        from app.database import init_db
+
+        main_conn = AsyncMock()
+        main_ctx = MagicMock()
+        main_ctx.__aenter__ = AsyncMock(return_value=main_conn)
+        main_ctx.__aexit__ = AsyncMock(return_value=None)
+
+        additional_conn = AsyncMock()
+        additional_ctx = MagicMock()
+        additional_ctx.__aenter__ = AsyncMock(return_value=additional_conn)
+        additional_ctx.__aexit__ = AsyncMock(return_value=None)
+
+        mock_main = MagicMock()
+        mock_main.connect.return_value = main_ctx
+        mock_additional = MagicMock()
+        mock_additional.connect.return_value = additional_ctx
+
+        with (
+            patch("app.database.async_engine", mock_main),
+            patch("app.database.additional_async_engine", mock_additional),
+        ):
+            await init_db()
+
+        mock_main.connect.assert_called_once()
+        mock_additional.connect.assert_called_once()
+        main_conn.execute.assert_awaited_once()
+        additional_conn.execute.assert_awaited_once()
+
+    @pytest.mark.anyio
+    async def test_init_db_additional_failure_non_fatal(self) -> None:
+        """init_db does not raise when the additional engine fails to connect."""
+        from app.database import init_db
+
+        main_conn = AsyncMock()
+        main_ctx = MagicMock()
+        main_ctx.__aenter__ = AsyncMock(return_value=main_conn)
+        main_ctx.__aexit__ = AsyncMock(return_value=None)
+
+        mock_main = MagicMock()
+        mock_main.connect.return_value = main_ctx
+        mock_additional = MagicMock()
+        mock_additional.connect.side_effect = Exception("additional DB down")
+
+        with (
+            patch("app.database.async_engine", mock_main),
+            patch("app.database.additional_async_engine", mock_additional),
+        ):
+            await init_db()
+
+        mock_main.connect.assert_called_once()
+        mock_additional.connect.assert_called_once()
+
+    @pytest.mark.anyio
+    async def test_init_db_main_failure_is_fatal(self) -> None:
+        """init_db raises when the main engine fails to connect."""
+        from app.database import init_db
+
+        mock_main = MagicMock()
+        mock_main.connect.side_effect = Exception("main DB down")
+        mock_additional = MagicMock()
+
+        with (
+            patch("app.database.async_engine", mock_main),
+            patch("app.database.additional_async_engine", mock_additional),
+        ):
+            with pytest.raises(Exception, match="main DB down"):
+                await init_db()
+
+        mock_main.connect.assert_called_once()
+
+
+class TestCloseDatabaseMultiEngine:
+    """Tests for close_db with both engines."""
+
+    @pytest.mark.anyio
+    async def test_close_db_disposes_both_async_engines(self) -> None:
+        """close_db disposes both main and additional async engines."""
+        from app.database import close_db
+
+        mock_main = MagicMock()
+        mock_main.dispose = AsyncMock()
+        mock_additional = MagicMock()
+        mock_additional.dispose = AsyncMock()
+        mock_sync_main = MagicMock()
+        mock_sync_additional = MagicMock()
+
+        with (
+            patch("app.database.async_engine", mock_main),
+            patch("app.database.additional_async_engine", mock_additional),
+            patch("app.database.sync_engine", mock_sync_main),
+            patch("app.database.additional_sync_engine", mock_sync_additional),
+        ):
+            await close_db()
+
+        mock_main.dispose.assert_awaited_once()
+        mock_additional.dispose.assert_awaited_once()
+        mock_sync_main.dispose.assert_called_once()
+        mock_sync_additional.dispose.assert_called_once()
+
+
+class TestCreateTablesMultiEngine:
+    """Tests for create_tables with both engines."""
+
+    @pytest.mark.anyio
+    async def test_create_tables_runs_on_both_engines(self) -> None:
+        """create_tables creates tables on both main and additional engines."""
+        from app.database import create_tables
+
+        mock_conn = MagicMock()
+        mock_conn.run_sync = AsyncMock()
+        mock_begin_ctx = MagicMock()
+        mock_begin_ctx.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_begin_ctx.__aexit__ = AsyncMock(return_value=None)
+
+        mock_main = MagicMock()
+        mock_main.begin.return_value = mock_begin_ctx
+        mock_additional = MagicMock()
+        mock_additional.begin.return_value = mock_begin_ctx
+
+        with (
+            patch("app.database.async_engine", mock_main),
+            patch("app.database.additional_async_engine", mock_additional),
+        ):
+            await create_tables()
+
+        mock_main.begin.assert_called_once()
+        mock_additional.begin.assert_called_once()
+        mock_conn.run_sync.assert_called()
+
+    @pytest.mark.anyio
+    async def test_create_tables_additional_failure_non_fatal(self) -> None:
+        """create_tables does not raise when the additional engine fails."""
+        from app.database import create_tables
+
+        main_conn = MagicMock()
+        main_conn.run_sync = AsyncMock()
+        main_ctx = MagicMock()
+        main_ctx.__aenter__ = AsyncMock(return_value=main_conn)
+        main_ctx.__aexit__ = AsyncMock(return_value=None)
+
+        mock_main = MagicMock()
+        mock_main.begin.return_value = main_ctx
+        mock_additional = MagicMock()
+        mock_additional.begin.side_effect = Exception("additional tables failed")
+
+        with (
+            patch("app.database.async_engine", mock_main),
+            patch("app.database.additional_async_engine", mock_additional),
+        ):
+            await create_tables()
+
+        mock_main.begin.assert_called_once()
+        mock_additional.begin.assert_called_once()
+
+
+class TestGetAdditionalSyncSession:
+    """Tests for get_additional_sync_session."""
+
+    def test_get_additional_sync_session_yields_and_commits(self) -> None:
+        """get_additional_sync_session yields a session, commits, and closes."""
+        from app.database import get_additional_sync_session
+
+        mock_session = MagicMock()
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__ = MagicMock(return_value=mock_session)
+        mock_ctx.__exit__ = MagicMock(return_value=None)
+        mock_factory = MagicMock(return_value=mock_ctx)
+
+        with patch(
+            "app.database.additional_sync_session_factory", mock_factory
+        ):
+            for session in get_additional_sync_session():
+                assert session is mock_session
+
+        mock_session.commit.assert_called_once()
+
+    def test_get_additional_sync_session_rolls_back_on_exception(self) -> None:
+        """get_additional_sync_session rolls back on exception."""
+        from app.database import get_additional_sync_session
+
+        mock_session = MagicMock()
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__ = MagicMock(return_value=mock_session)
+        mock_ctx.__exit__ = MagicMock(return_value=None)
+        mock_factory = MagicMock(return_value=mock_ctx)
+
+        with patch(
+            "app.database.additional_sync_session_factory", mock_factory
+        ):
+            gen = get_additional_sync_session()
+            next(gen)
+            with pytest.raises(ValueError, match="boom"):
+                gen.throw(ValueError("boom"))
+
+        mock_session.rollback.assert_called_once()
+
+
+class TestAdditionalDatabaseModeConstant:
+    """Tests for the ADDITIONAL_DATABASE_MODE constant."""
+
+    def test_constant_value(self) -> None:
+        """ADDITIONAL_DATABASE_MODE has the expected string value."""
+        from app.database import ADDITIONAL_DATABASE_MODE
+
+        assert ADDITIONAL_DATABASE_MODE == "additional"
+
+    def test_database_mode_variable_default(self) -> None:
+        """database_mode_variable defaults to empty string."""
+        from app.database import database_mode_variable
+
+        assert database_mode_variable.get() == ""

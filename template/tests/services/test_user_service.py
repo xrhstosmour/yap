@@ -306,7 +306,7 @@ class TestUpdateProfile:
 
     @pytest.mark.asyncio
     async def test_update_phone_clears_phone(self, mock_user_service: UserService) -> None:
-        """Should clear the phone field when None is not sent."""
+        """Should clear the phone field when phone is explicitly set to None."""
         user = _make_user_mock(phone="+306912345678")
         updated = _make_user_mock(phone=None, id=user.id)
         mock_user_service.user_repository.update = AsyncMock(return_value=updated)
@@ -316,8 +316,10 @@ class TestUpdateProfile:
         result = await mock_user_service.update_profile(user, data)
 
         assert result.phone is None
-        # phone is None, so it should not be in update_data.
-        mock_user_service.user_repository.update.assert_not_called()
+        # phone=None in model_fields_set means the user wants to clear it.
+        mock_user_service.user_repository.update.assert_awaited_once_with(
+            user.id, {"phone": None}
+        )
 
     @pytest.mark.asyncio
     async def test_update_phone_called(self, mock_user_service: UserService) -> None:
