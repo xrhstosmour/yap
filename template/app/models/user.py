@@ -70,6 +70,8 @@ class User(BaseModel, table=True):
         max_length=255,
     )
 
+    phone: str | None = Field(default=None, max_length=16, nullable=True)
+
     hashed_password: str = Field(
         nullable=False,
         max_length=255,

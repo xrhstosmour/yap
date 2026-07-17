@@ -12,6 +12,7 @@ from uuid import UUID
 from pydantic import EmailStr
 from pydantic import Field
 
+from app.core.phone_number import PhoneNumberString
 from app.schemas.base import BaseSchema
 from app.schemas.base import PaginatedResponse
 from app.schemas.base import PaginationParameters
@@ -56,6 +57,23 @@ class UserUpdateMe(BaseSchema):
         default=None, max_length=255, description="Display name"
     )
     email: EmailStr | None = Field(default=None, description="Email address")
+    phone: PhoneNumberString = Field(
+        default=None,
+        max_length=16,
+        description="Phone number in E.164 format",
+    )
+    current_password: str | None = Field(
+        default=None,
+        min_length=8,
+        max_length=128,
+        description="Current password for verification",
+    )
+    new_password: str | None = Field(
+        default=None,
+        min_length=8,
+        max_length=128,
+        description="New password (optional)",
+    )
 
 
 class UserResponse(UserBase):
@@ -63,6 +81,11 @@ class UserResponse(UserBase):
 
     id: UUID = Field(description="User ID")
     tenant_id: UUID | None = Field(description="Tenant ID")
+    phone: PhoneNumberString = Field(
+        default=None,
+        max_length=16,
+        description="Phone number in E.164 format",
+    )
     created_at: datetime = Field(description="Creation timestamp")
     updated_at: datetime = Field(description="Last update timestamp")
 

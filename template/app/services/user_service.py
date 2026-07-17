@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import SYSTEM_TENANT_ID
 from app.core.logging import get_logger
 from app.core.security import generate_password_hash
+from app.core.security import verify_password
 from app.models.api_key import APIKey
 from app.models.audit_log import AuditAction
 from app.models.user import User
@@ -222,26 +223,54 @@ class UserService:
     ) -> User:
         """Update own profile.
 
+        Supports updating name, email, phone, and password with proper
+        verification. When email changes or a new password is set, the
+        current_password must be provided and verified.
+
         Args:
             user: Current user
             data: Update data
 
         Returns:
             Updated User
+
+        Raises:
+            UserServiceError: On validation failure or email conflict.
         """
-        update_data = {}
+        update_data: dict[str, str | int] = {}
         if data.email is not None:
             update_data["email"] = data.email
         if data.full_name is not None:
             update_data["full_name"] = data.full_name
+        if data.phone is not None:
+            update_data["phone"] = data.phone
 
-        if (
-            isinstance(update_data.get("email"), str)
-            and update_data["email"] != user.email
-        ):
-            existing = await self.user_repository.get_by_email(update_data["email"])
+        email_changing = isinstance(data.email, str) and data.email != user.email
+        password_changing = data.new_password is not None
+
+        # Require current_password for email change or password change.
+        if email_changing or password_changing:
+            if not data.current_password:
+                raise UserServiceError("Current password is required for this change")
+            if not verify_password(data.current_password, user.hashed_password):
+                raise UserServiceError("Current password is incorrect")
+
+        # Verify password provided with no sensitive change.
+        if data.current_password and not email_changing and not password_changing:
+            raise UserServiceError(
+                "Current password provided with no sensitive change"
+            )
+
+        # Check email uniqueness before updating.
+        if email_changing:
+            existing = await self.user_repository.get_by_email(data.email)  # type: ignore[arg-type]
             if existing:
                 raise UserServiceError("Email already in use")
+
+        # Hash new password if provided.
+        if password_changing:
+            update_data["hashed_password"] = generate_password_hash(data.new_password)  # type: ignore[arg-type]
+            update_data["token_version"] = user.token_version + 1
 
         if update_data:
             updated_user = await self.user_repository.update(user.id, update_data)

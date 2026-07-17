@@ -191,6 +191,7 @@ def _make_user_mock(**overrides: object) -> MagicMock:
     user.id = uuid4()
     user.email = "test@example.com"
     user.full_name = "Test User"
+    user.phone = None
     user.hashed_password = "$2b$12$hashedsecretvalueherehashedsecr"
     user.is_active = True
     user.is_superuser = False
@@ -236,8 +237,13 @@ class TestUpdateProfile:
         mock_user_service.user_repository.update = AsyncMock(return_value=updated)
         mock_user_service.user_repository.get = AsyncMock(return_value=updated)
 
-        data = UserUpdateMe.model_construct(email="new@example.com")
-        result = await mock_user_service.update_profile(user, data)
+        data = UserUpdateMe.model_construct(
+            email="new@example.com", current_password="correct-password"
+        )
+        with patch(
+            "app.services.user_service.verify_password", return_value=True
+        ):
+            result = await mock_user_service.update_profile(user, data)
 
         assert result.email == "new@example.com"
         mock_user_service.user_repository.update.assert_awaited_once_with(
@@ -253,8 +259,13 @@ class TestUpdateProfile:
         mock_user_service.user_repository.update = AsyncMock(return_value=updated)
         mock_user_service.user_repository.get = AsyncMock(return_value=updated)
 
-        data = UserUpdateMe.model_construct(full_name="New", email="new@example.com")
-        result = await mock_user_service.update_profile(user, data)
+        data = UserUpdateMe.model_construct(
+            full_name="New", email="new@example.com", current_password="correct-password"
+        )
+        with patch(
+            "app.services.user_service.verify_password", return_value=True
+        ):
+            result = await mock_user_service.update_profile(user, data)
 
         assert result.full_name == "New"
         assert result.email == "new@example.com"
@@ -276,6 +287,53 @@ class TestUpdateProfile:
         assert result is user
         mock_user_service.user_repository.update.assert_not_called()
         mock_user_service.user_repository.get.assert_awaited_once_with(user.id)
+
+    @pytest.mark.asyncio
+    async def test_update_phone(self, mock_user_service: UserService) -> None:
+        """Should update the user's phone number."""
+        user = _make_user_mock(phone=None)
+        updated = _make_user_mock(phone="+306912345678", id=user.id)
+        mock_user_service.user_repository.update = AsyncMock(return_value=updated)
+        mock_user_service.user_repository.get = AsyncMock(return_value=updated)
+
+        data = UserUpdateMe.model_construct(phone="+306912345678")
+        result = await mock_user_service.update_profile(user, data)
+
+        assert result.phone == "+306912345678"
+        mock_user_service.user_repository.update.assert_awaited_once_with(
+            user.id, {"phone": "+306912345678"}
+        )
+
+    @pytest.mark.asyncio
+    async def test_update_phone_clears_phone(self, mock_user_service: UserService) -> None:
+        """Should clear the phone field when None is not sent."""
+        user = _make_user_mock(phone="+306912345678")
+        updated = _make_user_mock(phone=None, id=user.id)
+        mock_user_service.user_repository.update = AsyncMock(return_value=updated)
+        mock_user_service.user_repository.get = AsyncMock(return_value=updated)
+
+        data = UserUpdateMe.model_construct(phone=None)
+        result = await mock_user_service.update_profile(user, data)
+
+        assert result.phone is None
+        # phone is None, so it should not be in update_data.
+        mock_user_service.user_repository.update.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_update_phone_called(self, mock_user_service: UserService) -> None:
+        """Phone field triggers update."""
+        user = _make_user_mock(phone=None)
+        updated = _make_user_mock(phone="+12025551234", id=user.id)
+        mock_user_service.user_repository.update = AsyncMock(return_value=updated)
+        mock_user_service.user_repository.get = AsyncMock(return_value=updated)
+
+        data = UserUpdateMe.model_construct(phone="+12025551234")
+        result = await mock_user_service.update_profile(user, data)
+
+        assert result.phone == "+12025551234"
+        mock_user_service.user_repository.update.assert_awaited_once_with(
+            user.id, {"phone": "+12025551234"}
+        )
 
 
 # delete_me
