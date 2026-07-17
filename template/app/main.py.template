@@ -32,7 +32,9 @@ from app.core.security import TokenRateLimitError
 from app.core.security_middleware import SecurityHeadersMiddleware
 from app.core.settings import settings
 from app.core.tenant import tenant_context
+from app.database import ADDITIONAL_DATABASE_MODE
 from app.database import close_db
+from app.database import database_mode_variable
 from app.database import init_db
 
 logger = get_logger("app")
@@ -139,6 +141,31 @@ def create_app() -> FastAPI:
     # Placed after RequestIDMiddleware for correlation IDs in logs.
     # Middleware runs in reverse registration order (LIFO) in Starlette.
     app.add_middleware(IdempotencyMiddleware)
+
+    # Database mode middleware.
+    # Sets the database_mode_variable contextvar from the X-Database-Mode header before
+    # request processing. get_async_session() reads the contextvar to route
+    # database queries to the additional database when mode is "additional".
+    # Unknown modes are rejected with 400 so callers get immediate feedback
+    # instead of silently routing to the default database.
+    @app.middleware("http")
+    async def database_mode_middleware(
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        raw = request.headers.get("X-Database-Mode", "")
+        mode = raw.strip().lower() if raw else ""
+        if mode and mode != ADDITIONAL_DATABASE_MODE:
+            return Response(
+                content=f"Unknown database mode: {mode}",
+                status_code=400,
+            )
+        token = database_mode_variable.set(mode)
+        try:
+            response = await call_next(request)
+        finally:
+            database_mode_variable.reset(token)
+        return response
 
     # Tenant context middleware.
     @app.middleware("http")
