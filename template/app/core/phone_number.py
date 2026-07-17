@@ -23,9 +23,9 @@ from pydantic import BeforeValidator
 _INTERNATIONAL_PREFIX_RE = re.compile(r"^00")
 
 
-def validate_and_format(  # noqa: ANN201
+def validate_and_format(
     value: object,
-):
+) -> str | None:
     """Validate and normalize a phone number to E.164 format.
 
     Parses the input using the phonenumbers library, checks it is a
