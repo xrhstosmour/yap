@@ -47,6 +47,32 @@ jobs:
       - run: uv run ruff format app/ tests/
       - run: uv run ruff format --check app/ tests/
       - run: uv run mypy app/ --config-file mypy-ci.toml
+      - name: Check single Alembic head
+        run: |
+          uv run python -c "
+          import re
+          from pathlib import Path
+
+          versions = Path('migrations/versions')
+          revisions = {}
+          for migration in versions.glob('*.py'):
+              content = migration.read_text()
+              rev_match = re.search(
+                  r'^revision:\s*str\s*=\s*\"([^\"]+)\"', content, re.MULTILINE
+              )
+              down_match = re.search(
+                  r'^down_revision.*=\s*\"([^\"]+)\"\s*$', content, re.MULTILINE
+              )
+              if rev_match:
+                  rev = rev_match.group(1)
+                  parent = down_match.group(1) if down_match else None
+                  revisions[rev] = parent
+
+          heads = set(revisions.keys()) - {p for p in revisions.values() if p}
+          assert len(heads) == 1, \
+              f'Expected 1 Alembic head, got {len(heads)}: {heads}'
+          print(f'Single Alembic head: {next(iter(heads))}')
+          "
       - name: Dependency Review
         uses: actions/dependency-review-action@v4
         if: github.event_name == 'pull_request'
