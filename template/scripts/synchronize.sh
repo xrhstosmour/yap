@@ -195,11 +195,18 @@ if ! git rev-parse --git-dir >/dev/null 2>&1; then
     TEMP_GIT=true
 fi
 
+# Ensure a stale /tmp/containers from a previous run does not block the old
+# template version's assemble.py from cloning fresh.
+python3 -c "import shutil; shutil.rmtree('/tmp/containers', ignore_errors=True)"
+
 # Sync mode: the setup.sh task only ensures .env and skips services/migrations,
 # so a template sync never requires Docker or a live database.
 export YAP_SYNC=1
+echo "+ copier update --trust --conflict inline --defaults --vcs-ref '${_target}' --answers-file '${ANSWERS_FILE}'" >&2
+set -x
 copier update --trust --conflict inline --defaults --vcs-ref "$_target" \
     --answers-file "$ANSWERS_FILE" 2>&1 || error "copier update failed"
+set +x
 
 # Check for unresolved merge conflicts from copier update.
 if grep -rq "^<<<<<<< \|^>>>>>>> " --include="*.py" --include="*.yml" --include="*.yaml" --include="*.sh" --include="*.toml" . 2>/dev/null; then

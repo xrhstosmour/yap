@@ -104,7 +104,14 @@ uv run alembic downgrade -1
 # Celery
 uv run celery -A app.celery_app worker --loglevel=info
 uv run celery -A app.celery_app beat --loglevel=info
+
+# Setup and sync
+./scripts/setup.sh
+# Requires clean git status and `copier` installed.
+./scripts/synchronize.sh
 ```
+
+`YAP_SYNC=1 ./scripts/setup.sh` skips Docker/migrations/seeding, only ensure `.env` exists. Automatically set by `synchronize.sh`.
 
 ## Architecture patterns
 

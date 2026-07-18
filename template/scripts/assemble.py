@@ -147,19 +147,24 @@ def main() -> None:
     containers_directory = "containers"
     services = read_services(containers_directory)
 
-    # Find the containers repo: either cloned alongside the project or clone it.
+    # Find the containers repo: check adjacent path first, then cached
+    # clone at /tmp/containers, then clone fresh if neither exists.
     containers_root = os.path.abspath("../containers")
     if os.path.isdir(containers_root):
         print(f"Using containers repo at {containers_root}")
-        cloned = False
+    elif os.path.isdir("/tmp/containers"):
+        print("Using cached containers repo at /tmp/containers")
+        containers_root = "/tmp/containers"
     else:
+        # Remove any stale directory before cloning so this step is
+        # idempotent even when a previous run left /tmp/containers behind.
+        shutil.rmtree("/tmp/containers", ignore_errors=True)
         print(f"Cloning {REPO_URL} ...")
         subprocess.run(
             ["git", "clone", "--depth", "1", REPO_URL, "/tmp/containers"],
             check=True,
         )
         containers_root = "/tmp/containers"
-        cloned = True
 
     # Copy service directories.
     for name in services:
@@ -254,9 +259,9 @@ def main() -> None:
         f.write(f"SSL_CERTIFICATE_PATH={ca_cert}\n")
     print(f"  Wrote {certs_env}")
 
-    # Clean up temp clone.
-    if cloned:
-        shutil.rmtree("/tmp/containers", ignore_errors=True)
+    # Keep /tmp/containers around so subsequent runs of assemble.py within the
+    # same copier update can reuse it instead of cloning again.
+    # The temp directory is cleaned up by synchronize.sh before the next update.
 
     print("Done.")
 
