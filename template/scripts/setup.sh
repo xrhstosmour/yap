@@ -144,6 +144,7 @@ fi
 # Dependencies installation.
 if command -v uv >/dev/null 2>&1; then
     info "Installing dependencies..."
+    unset VIRTUAL_ENV
     uv sync
     uv sync --extra dev 2>/dev/null || true
 else
