@@ -130,7 +130,6 @@ class TestAuthService:
         user.id = uuid7()
         user.email = "tokens@example.com"
         user.tenant_id = None
-        user.is_superuser = False
         user.token_version = 0
         user.role = UserRole.USER
 
@@ -284,7 +283,7 @@ class TestAuthServiceCreateUser:
 
     @pytest.mark.asyncio
     async def test_create_superuser(self, session: AsyncSession) -> None:
-        """Superuser should have is_superuser set to True."""
+        """Superuser should have role set to SUPERUSER."""
         from app.core import SYSTEM_TENANT_ID
 
         auth_service = _auth_service(session)
@@ -295,7 +294,7 @@ class TestAuthServiceCreateUser:
             role=UserRole.SUPERUSER,
         )
 
-        assert user.is_superuser is True
+        assert user.role == UserRole.SUPERUSER
 
 
 class TestResetPassword:

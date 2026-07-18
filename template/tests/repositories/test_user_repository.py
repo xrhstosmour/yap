@@ -70,7 +70,7 @@ class TestUserRepository:
         assert user.hashed_password == "hashed_pw_123"
         assert user.full_name == "Alice Wonderland"
         assert user.tenant_id == tenant.id
-        assert user.is_superuser is True
+        assert user.role == UserRole.SUPERUSER
         assert user.is_verified is True
         assert user.is_active is True
         assert user.token_version == 1
