@@ -15,6 +15,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
+from app.models.user import UserRole
 from app.schemas.user import UserCreate
 from app.schemas.user import UserUpdate
 from app.schemas.user import UserUpdateMe
@@ -685,7 +686,7 @@ class TestListUsers:
         await mock_user_service.list_users(is_superuser=True)
 
         mock_user_service.user_repository.list.assert_awaited_once_with(
-            skip=0, limit=20, filters={"is_superuser": True}
+            skip=0, limit=20, filters={"role": UserRole.SUPERUSER}
         )
 
     @pytest.mark.asyncio
@@ -707,7 +708,7 @@ class TestListUsers:
         await mock_user_service.list_users(is_active=True, is_superuser=False)
 
         mock_user_service.user_repository.list.assert_awaited_once_with(
-            skip=0, limit=20, filters={"is_active": True, "is_superuser": False}
+            skip=0, limit=20, filters={"is_active": True}
         )
 
     @pytest.mark.asyncio
@@ -769,12 +770,12 @@ class TestAdminUpdate:
         mock_user_service.user_repository.update = AsyncMock(return_value=updated)
         mock_user_service.audit_repository.log_user_action = AsyncMock()
 
-        data = UserUpdate.model_construct(is_superuser=True)
+        data = UserUpdate.model_construct(role="superuser")
         result = await mock_user_service.update(user_id, data, updated_by=admin_id)
 
         assert result.is_superuser is True
         mock_user_service.user_repository.update.assert_awaited_once_with(
-            user_id, {"is_superuser": True}
+            user_id, {"role": "superuser"}
         )
 
     @pytest.mark.asyncio

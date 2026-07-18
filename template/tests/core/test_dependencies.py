@@ -24,6 +24,7 @@ from app.dependencies import get_current_user
 from app.dependencies import get_optional_current_user
 from app.models.api_key import APIKey
 from app.models.user import User
+from app.models.user import UserRole
 from app.repositories.api_key_repository import APIKeyRepository
 from app.repositories.user_repository import UserRepository
 
@@ -35,7 +36,7 @@ def _make_user(
     user_id: uuid4 | None = None,
     email: str = "test@example.com",
     is_active: bool = True,
-    is_superuser: bool = False,
+    role: UserRole = UserRole.USER,
     token_version: int = 1,
     tenant_id: uuid4 | None = None,
 ) -> User:
@@ -46,7 +47,7 @@ def _make_user(
         hashed_password="hashed_test_value",
         full_name="Test User",
         is_active=is_active,
-        is_superuser=is_superuser,
+        role=role,
         is_verified=True,
         token_version=token_version,
         tenant_id=tenant_id,
@@ -494,7 +495,7 @@ class TestGetCurrentSuperuser:
     @pytest.mark.asyncio
     async def test_superuser_passes_through(self) -> None:
         """Should return the user when they are a superuser."""
-        user = _make_user(is_superuser=True)
+        user = _make_user(role=UserRole.SUPERUSER)
 
         result = await get_current_superuser(current_user=user)
 
@@ -503,7 +504,7 @@ class TestGetCurrentSuperuser:
     @pytest.mark.asyncio
     async def test_non_superuser_raises_403(self) -> None:
         """Should raise 403 when user is not a superuser."""
-        user = _make_user(is_superuser=False)
+        user = _make_user(role=UserRole.USER)
 
         with pytest.raises(HTTPException) as exc_info:
             await get_current_superuser(current_user=user)

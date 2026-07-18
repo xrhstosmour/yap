@@ -16,6 +16,7 @@ from sqlmodel import select
 
 from app.core.logging import get_logger
 from app.models.user import User
+from app.models.user import UserRole
 from app.repositories.base import BaseRepository
 from app.repositories.mixins import SearchMixin
 
@@ -99,7 +100,7 @@ class UserRepository(SearchMixin, BaseRepository[User]):
         password_hash: str,
         full_name: str | None = None,
         tenant_id: UUID | None = None,
-        is_superuser: bool = False,
+        role: UserRole = UserRole.USER,
         is_verified: bool = False,
     ) -> User:
         """Create a new user with password.
@@ -109,7 +110,7 @@ class UserRepository(SearchMixin, BaseRepository[User]):
             password_hash: Bcrypt hash of password (or random bytes for OAuth).
             full_name: Optional display name.
             tenant_id: Optional tenant ID.
-            is_superuser: Whether user is admin.
+            role: User role for access control.
             is_verified: Whether email is pre-verified (e.g. OAuth accounts).
 
         Returns:
@@ -121,7 +122,7 @@ class UserRepository(SearchMixin, BaseRepository[User]):
                 "hashed_password": password_hash,
                 "full_name": full_name,
                 "tenant_id": tenant_id,
-                "is_superuser": is_superuser,
+                "role": role,
                 "is_active": True,
                 "is_verified": is_verified,
             }
