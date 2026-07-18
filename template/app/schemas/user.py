@@ -26,7 +26,8 @@ class UserBase(BaseSchema):
         default=None, max_length=255, description="Display name"
     )
     is_active: bool = Field(default=True, description="Whether user is active")
-    is_superuser: bool = Field(default=False, description="Whether user is admin")
+    role: str = Field(default="user", description="User role")
+    is_superuser: bool = Field(default=False, description="Whether user is admin (computed from role)")
     is_verified: bool = Field(default=False, description="Whether email is verified")
 
 
@@ -47,7 +48,7 @@ class UserUpdate(BaseSchema):
         default=None, max_length=255, description="Display name"
     )
     is_active: bool | None = Field(default=None, description="Active status")
-    is_superuser: bool | None = Field(default=None, description="Admin status")
+    role: str | None = Field(default=None, description="User role")
 
 
 class UserUpdateMe(BaseSchema):

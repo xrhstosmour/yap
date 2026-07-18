@@ -22,6 +22,7 @@ from app.core.security import verify_password
 from app.models.api_key import APIKey
 from app.models.audit_log import AuditAction
 from app.models.user import User
+from app.models.user import UserRole
 from app.repositories.audit_repository import AuditLogRepository
 from app.repositories.user_repository import UserRepository
 from app.schemas.user import UserCreate
@@ -96,11 +97,12 @@ class UserService:
         Returns:
             Tuple of (users, total_count)
         """
-        filters: dict[str, bool] = {}
+        filters: dict[str, object] = {}
         if is_active is not None:
             filters["is_active"] = is_active
         if is_superuser is not None:
-            filters["is_superuser"] = is_superuser
+            if is_superuser:
+                filters["role"] = UserRole.SUPERUSER
 
         if search:
             return await self.user_repository.search(
@@ -135,13 +137,14 @@ class UserService:
             raise UserServiceError("Email already in use")
 
         # Create user.
+        role = UserRole.SUPERUSER if data.is_superuser else UserRole.USER
         password_hash = generate_password_hash(data.password)
         user = await self.user_repository.create_user(
             email=data.email,
             password_hash=password_hash,
             full_name=data.full_name,
             tenant_id=data.tenant_id or SYSTEM_TENANT_ID,
-            is_superuser=data.is_superuser,
+            role=role,
         )
 
         # Log creation.
@@ -187,8 +190,8 @@ class UserService:
             update_data["full_name"] = data.full_name
         if data.is_active is not None:
             update_data["is_active"] = data.is_active
-        if data.is_superuser is not None:
-            update_data["is_superuser"] = data.is_superuser
+        if data.role is not None:
+            update_data["role"] = data.role
 
         # Check for email conflicts if email is being changed.
         email = update_data.get("email")
