@@ -59,7 +59,7 @@ async def list_users(
         skip=parameters.skip,
         limit=parameters.limit,
         is_active=parameters.is_active,
-        is_superuser=parameters.is_superuser,
+        role=parameters.role,
         search=parameters.search,
     )
 

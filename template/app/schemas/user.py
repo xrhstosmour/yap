@@ -27,7 +27,6 @@ class UserBase(BaseSchema):
     )
     is_active: bool = Field(default=True, description="Whether user is active")
     role: str = Field(default="user", description="User role")
-    is_superuser: bool = Field(default=False, description="Whether user is admin (computed from role)")
     is_verified: bool = Field(default=False, description="Whether email is verified")
 
 
@@ -101,7 +100,5 @@ class UserListParameters(PaginationParameters):
     """Query parameters for listing users."""
 
     is_active: bool | None = Field(default=None, description="Filter by active status")
-    is_superuser: bool | None = Field(
-        default=None, description="Filter by admin status"
-    )
+    role: str | None = Field(default=None, description="Filter by user role")
     search: str | None = Field(default=None, description="Search in email/name")

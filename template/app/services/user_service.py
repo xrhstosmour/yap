@@ -82,7 +82,7 @@ class UserService:
         skip: int = 0,
         limit: int = 20,
         is_active: bool | None = None,
-        is_superuser: bool | None = None,
+        role: UserRole | None = None,
         search: str | None = None,
     ) -> tuple[list[User], int]:
         """List users with filtering.
@@ -91,7 +91,7 @@ class UserService:
             skip: Pagination offset
             limit: Maximum results
             is_active: Filter by active status
-            is_superuser: Filter by admin status
+            role: Filter by user role
             search: Search in email/name
 
         Returns:
@@ -100,9 +100,8 @@ class UserService:
         filters: dict[str, object] = {}
         if is_active is not None:
             filters["is_active"] = is_active
-        if is_superuser is not None:
-            if is_superuser:
-                filters["role"] = UserRole.SUPERUSER
+        if role is not None:
+            filters["role"] = role
 
         if search:
             return await self.user_repository.search(
@@ -137,7 +136,7 @@ class UserService:
             raise UserServiceError("Email already in use")
 
         # Create user.
-        role = UserRole.SUPERUSER if data.is_superuser else UserRole.USER
+        role = data.role or UserRole.USER
         password_hash = generate_password_hash(data.password)
         user = await self.user_repository.create_user(
             email=data.email,

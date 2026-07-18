@@ -9,6 +9,7 @@ from unittest.mock import patch
 import pytest
 
 from app.core import SYSTEM_TENANT_ID
+from app.models.user import UserRole
 
 
 class TestInit:
@@ -108,13 +109,13 @@ class TestInit:
         # Only user is added — tenant is skipped.
         assert session.add.call_count == 1
         added_user = session.add.call_args_list[0][0][0]
-        assert added_user.is_superuser is True
+        assert added_user.role == UserRole.SUPERUSER
 
     # Superuser creation / skip
 
     @pytest.mark.anyio
     async def test_creates_superuser_when_missing(self) -> None:
-        """init() creates a superuser with is_superuser=True when none exists."""
+        """init() creates a superuser with role=SUPERUSER when none exists."""
         from app.initial_data import init
 
         session, context, factory = self._make_session_mock(
@@ -135,7 +136,7 @@ class TestInit:
         assert user_call.email == "admin@test.com"
         assert user_call.hashed_password == "hashed_password"
         assert user_call.full_name == "Admin"
-        assert user_call.is_superuser is True
+        assert user_call.role == UserRole.SUPERUSER
         assert user_call.is_active is True
         assert user_call.is_verified is True
         assert user_call.tenant_id == SYSTEM_TENANT_ID

@@ -195,7 +195,6 @@ def _make_user_mock(**overrides: object) -> MagicMock:
     user.phone = None
     user.hashed_password = "$2b$12$hashedsecretvalueherehashedsecr"
     user.is_active = True
-    user.is_superuser = False
     user.is_verified = False
     user.token_version = 1
     user.tenant_id = uuid4()
@@ -679,11 +678,11 @@ class TestListUsers:
         )
 
     @pytest.mark.asyncio
-    async def test_is_superuser_filter(self, mock_user_service: UserService) -> None:
-        """Should pass is_superuser filter to repository.list."""
+    async def test_role_filter(self, mock_user_service: UserService) -> None:
+        """Should pass role filter to repository.list."""
         mock_user_service.user_repository.list = AsyncMock(return_value=([], 0))
 
-        await mock_user_service.list_users(is_superuser=True)
+        await mock_user_service.list_users(role=UserRole.SUPERUSER)
 
         mock_user_service.user_repository.list.assert_awaited_once_with(
             skip=0, limit=20, filters={"role": UserRole.SUPERUSER}
@@ -702,13 +701,13 @@ class TestListUsers:
 
     @pytest.mark.asyncio
     async def test_combined_filters(self, mock_user_service: UserService) -> None:
-        """Should pass both is_active and is_superuser when both are set."""
+        """Should pass both is_active and role when both are set."""
         mock_user_service.user_repository.list = AsyncMock(return_value=([], 0))
 
-        await mock_user_service.list_users(is_active=True, is_superuser=False)
+        await mock_user_service.list_users(is_active=True, role=UserRole.USER)
 
         mock_user_service.user_repository.list.assert_awaited_once_with(
-            skip=0, limit=20, filters={"is_active": True}
+            skip=0, limit=20, filters={"is_active": True, "role": UserRole.USER}
         )
 
     @pytest.mark.asyncio
@@ -757,14 +756,14 @@ class TestAdminUpdate:
         mock_user_service.audit_repository.log_user_action.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_update_is_superuser_field(
+    async def test_update_role_field(
         self, mock_user_service: UserService
     ) -> None:
-        """Admin should be able to grant admin privileges via is_superuser=True."""
+        """Admin should be able to grant admin role."""
         user_id = uuid4()
         admin_id = uuid4()
-        existing = _make_user_mock(id=user_id, is_superuser=False)
-        updated = _make_user_mock(id=user_id, is_superuser=True)
+        existing = _make_user_mock(id=user_id, role=UserRole.USER)
+        updated = _make_user_mock(id=user_id, role=UserRole.SUPERUSER)
 
         mock_user_service.user_repository.get = AsyncMock(return_value=existing)
         mock_user_service.user_repository.update = AsyncMock(return_value=updated)
@@ -773,7 +772,7 @@ class TestAdminUpdate:
         data = UserUpdate.model_construct(role="superuser")
         result = await mock_user_service.update(user_id, data, updated_by=admin_id)
 
-        assert result.is_superuser is True
+        assert result.role == UserRole.SUPERUSER
         mock_user_service.user_repository.update.assert_awaited_once_with(
             user_id, {"role": "superuser"}
         )

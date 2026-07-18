@@ -46,7 +46,6 @@ class User(BaseModel, table=True):
         hashed_password: Bcrypt hash of the password
         is_active: Whether the user can log in
         role: User role for access control (superuser, user)
-        is_superuser: Backward-compatible property for superuser check
         is_verified: Whether email has been verified
         is_2fa_enabled: Whether TOTP 2FA is enabled
         totp_secret_encrypted: Encrypted TOTP secret for 2FA enrollment/login
@@ -93,11 +92,6 @@ class User(BaseModel, table=True):
             values_callable=lambda e: [m.value for m in e],
         ),  # type: ignore[call-overload]
     )
-
-    @property
-    def is_superuser(self) -> bool:
-        """Backward-compatible property for superuser check."""
-        return self.role == UserRole.SUPERUSER
 
     is_verified: bool = Field(default=False, nullable=False)
 
