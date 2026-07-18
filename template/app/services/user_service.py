@@ -136,7 +136,7 @@ class UserService:
             raise UserServiceError("Email already in use")
 
         # Create user.
-        role = data.role or UserRole.USER
+        role = UserRole(data.role) if data.role else UserRole.USER
         password_hash = generate_password_hash(data.password)
         user = await self.user_repository.create_user(
             email=data.email,
