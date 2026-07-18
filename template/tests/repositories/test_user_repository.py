@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.tenant import Tenant
 from app.models.user import User
+from app.models.user import UserRole
 from app.repositories.user_repository import UserRepository
 
 
@@ -59,7 +60,7 @@ class TestUserRepository:
             password_hash="hashed_pw_123",
             full_name="Alice Wonderland",
             tenant_id=tenant.id,
-            is_superuser=True,
+            role=UserRole.SUPERUSER,
             is_verified=True,
         )
 

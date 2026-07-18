@@ -12,6 +12,7 @@ from httpx import AsyncClient
 
 from app.main import app
 from app.models.user import User
+from app.models.user import UserRole
 
 
 @pytest.fixture
@@ -95,7 +96,7 @@ async def test_crud_tenant_as_admin(client: AsyncClient, session) -> None:
     admin = User(
         email="admin-tenant@example.com",
         hashed_password="hash",
-        is_superuser=True,
+        role=UserRole.SUPERUSER,
         is_active=True,
     )
     session.add(admin)
@@ -144,7 +145,7 @@ async def test_cannot_delete_system_tenant(client: AsyncClient, session) -> None
     admin = User(
         email="admin-sys@example.com",
         hashed_password="hash",
-        is_superuser=True,
+        role=UserRole.SUPERUSER,
         is_active=True,
     )
     session.add(admin)
@@ -168,7 +169,7 @@ async def test_duplicate_slug_rejected(client: AsyncClient, session) -> None:
     admin = User(
         email="admin-dup@example.com",
         hashed_password="hash",
-        is_superuser=True,
+        role=UserRole.SUPERUSER,
         is_active=True,
     )
     session.add(admin)

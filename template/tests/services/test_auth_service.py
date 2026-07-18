@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import decode_token
 from app.core.security import generate_password_hash
+from app.models.user import UserRole
 from app.schemas.auth import RegisterRequest
 from app.services.auth_service import AuthenticationError
 from app.services.auth_service import AuthService
@@ -123,6 +124,7 @@ class TestAuthService:
         auth_service = _auth_service(session)
         # Create a minimal User-like object to avoid DB round-trip.
         from app.models.user import User as UserModel
+        from app.models.user import UserRole
 
         user = MagicMock(spec=UserModel)
         user.id = uuid7()
@@ -130,6 +132,7 @@ class TestAuthService:
         user.tenant_id = None
         user.is_superuser = False
         user.token_version = 0
+        user.role = UserRole.USER
 
         tokens = auth_service.create_tokens(user)
 
@@ -289,7 +292,7 @@ class TestAuthServiceCreateUser:
             email="admin@example.com",
             password_hash=generate_password_hash("adminpass"),
             tenant_id=SYSTEM_TENANT_ID,
-            is_superuser=True,
+            role=UserRole.SUPERUSER,
         )
 
         assert user.is_superuser is True
