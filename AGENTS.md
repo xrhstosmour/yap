@@ -37,6 +37,14 @@ template/               # Scaffolded application (Jinja2 suffix: .template)
 2. Test locally: `copier copy --trust . /tmp/test-project`
 3. After rendering, verify with `cd /tmp/test-project && uv sync --extra dev && uv run pytest`.
 
+## Merge workflow
+
+- Never push directly to `main`. All changes must go through a pull request.
+- Branch protection is enabled: `main` blocks direct pushes, enforces admin
+  compliance, and requires all CI checks (lint, test, security) to pass before merge.
+- Create a PR, wait for green CI, then merge via `gh pr merge <n> --merge --delete-branch`.
+- Force-push is only allowed on feature branches, never on `main`.
+
 ## CI pipeline (`.github/workflows/ci.yml`)
 
 1. **lint**: Renders the template via Copier, runs `ruff check`, `ruff format`,
