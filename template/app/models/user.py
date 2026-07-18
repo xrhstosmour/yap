@@ -6,11 +6,13 @@ authentication and role-based access control.
 
 from __future__ import annotations
 
+import enum
 from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
 from pydantic import EmailStr
+from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import relationship
 from sqlmodel import Field
 from sqlmodel import Relationship
@@ -21,6 +23,13 @@ if TYPE_CHECKING:
     from app.models.api_key import APIKey
     from app.models.oauth_account import OAuthAccount
     from app.models.tenant import Tenant
+
+
+class UserRole(enum.StrEnum):
+    """Enumeration of user roles for role-based access control."""
+
+    SUPERUSER = "superuser"
+    USER = "user"
 
 
 class User(BaseModel, table=True):
@@ -36,7 +45,8 @@ class User(BaseModel, table=True):
         full_name: User's display name
         hashed_password: Bcrypt hash of the password
         is_active: Whether the user can log in
-        is_superuser: Full admin access (bypasses tenant restrictions)
+        role: User role for access control (superuser, user)
+        is_superuser: Backward-compatible property for superuser check
         is_verified: Whether email has been verified
         is_2fa_enabled: Whether TOTP 2FA is enabled
         totp_secret_encrypted: Encrypted TOTP secret for 2FA enrollment/login
@@ -50,10 +60,6 @@ class User(BaseModel, table=True):
         tenant: The organization this user belongs to
         api_keys: API keys owned by this user
         oauth_accounts: Linked OAuth provider accounts
-
-    Note:
-        Superusers (is_superuser=True) have access to all tenants
-        but still belong to a primary tenant.
     """
 
     __tablename__ = "users"  # pyright: ignore[reportAssignmentType]
@@ -79,7 +85,19 @@ class User(BaseModel, table=True):
 
     is_active: bool = Field(default=True, nullable=False)
 
-    is_superuser: bool = Field(default=False, nullable=False)
+    role: UserRole = Field(
+        default=UserRole.USER,
+        nullable=False,
+        sa_type=SAEnum(
+            UserRole,
+            values_callable=lambda e: [m.value for m in e],
+        ),  # type: ignore[call-overload]
+    )
+
+    @property
+    def is_superuser(self) -> bool:
+        """Backward-compatible property for superuser check."""
+        return self.role == UserRole.SUPERUSER
 
     is_verified: bool = Field(default=False, nullable=False)
 
