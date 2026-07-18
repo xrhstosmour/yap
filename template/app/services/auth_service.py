@@ -28,6 +28,7 @@ from app.core.security import verify_password
 from app.core.settings import settings
 from app.models.audit_log import AuditAction
 from app.models.user import User
+from app.models.user import UserRole
 from app.repositories.audit_repository import AuditLogRepository
 from app.repositories.oauth_account_repository import OAuthAccountRepository
 from app.repositories.user_repository import UserRepository
@@ -215,6 +216,7 @@ class AuthService:
             password_hash=password_hash,
             full_name=data.full_name,
             tenant_id=tenant_id,
+            role=UserRole.USER,
         )
 
         logger.info("user_registered", user_id=str(user.id))
@@ -284,7 +286,7 @@ class AuthService:
             additional_claims={
                 "email": user.email,
                 "tenant_id": str(user.tenant_id) if user.tenant_id else None,
-                "is_superuser": user.is_superuser,
+                "role": user.role.value,
                 "token_version": user.token_version,
             },
         )
@@ -672,6 +674,7 @@ class AuthService:
                     email=email,
                     password_hash=placeholder_hash,
                     full_name=full_name,
+                    role=UserRole.USER,
                     is_verified=True,
                 )
                 await self.oauth_account_repository.create_link(
