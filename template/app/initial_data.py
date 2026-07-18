@@ -14,6 +14,7 @@ from app.core.settings import settings
 from app.database import async_session_factory
 from app.models.tenant import Tenant
 from app.models.user import User
+from app.models.user import UserRole
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -41,7 +42,7 @@ async def init() -> None:
                 email=settings.FIRST_SUPERUSER_EMAIL,
                 hashed_password=password_hash,
                 full_name=settings.FIRST_SUPERUSER_FULL_NAME,
-                is_superuser=True,
+                role=UserRole.SUPERUSER,
                 is_active=True,
                 is_verified=True,
                 tenant_id=SYSTEM_TENANT_ID,

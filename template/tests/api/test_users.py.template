@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.security import create_access_token
 from app.core.security import generate_password_hash
 from app.main import app
+from app.models.user import UserRole
 from app.schemas.auth import RegisterRequest
 from app.services.auth_service import AuthService
 
@@ -24,7 +25,7 @@ async def _create_superuser(auth_service: AuthService) -> None:
         email=f"admin-{uuid7()}@{{ project_slug }}.com",
         password_hash=generate_password_hash("password123"),
         tenant_id=None,
-        is_superuser=True,
+        role=UserRole.SUPERUSER,
     )
 
 

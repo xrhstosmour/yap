@@ -28,6 +28,7 @@ from app.core.tenant import set_current_tenant_id
 from app.database import get_async_session
 from app.models.api_key import APIKey
 from app.models.user import User
+from app.models.user import UserRole
 from app.repositories.api_key_repository import APIKeyRepository
 from app.repositories.user_repository import UserRepository
 
@@ -146,7 +147,7 @@ async def get_current_superuser(current_user: CurrentUser) -> User:
     Raises:
         HTTPException: If user is not a superuser
     """
-    if not current_user.is_superuser:
+    if current_user.role != UserRole.SUPERUSER:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions",
