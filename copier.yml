@@ -38,6 +38,11 @@ postgresql_password:
   help: "Password for PostgreSQL (leave empty to auto-generate):"
   default: ""
 
+postgresql_extra_databases:
+  type: str
+  help: "Additional comma-separated databases to create:"
+  default: ""
+
 first_superuser_full_name:
   type: str
   help: "Full name for the first superuser:"
