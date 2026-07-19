@@ -203,10 +203,11 @@ python3 -c "import shutil; shutil.rmtree('/tmp/containers', ignore_errors=True)"
 # so a template sync never requires Docker or a live database.
 export YAP_SYNC=1
 echo "+ copier update --trust --conflict inline --defaults --vcs-ref '${_target}' --answers-file '${ANSWERS_FILE}'" >&2
-set -x
-copier update --trust --conflict inline --defaults --vcs-ref "$_target" \
-    --answers-file "$ANSWERS_FILE" 2>&1 || error "copier update failed"
-set +x
+(
+    set -x
+    copier update --trust --conflict inline --defaults --vcs-ref "$_target" \
+        --answers-file "$ANSWERS_FILE" 2>&1
+) || error "copier update failed"
 
 # Check for unresolved merge conflicts from copier update.
 if grep -rq "^<<<<<<< \|^>>>>>>> " --include="*.py" --include="*.yml" --include="*.yaml" --include="*.sh" --include="*.toml" . 2>/dev/null; then
@@ -228,11 +229,6 @@ info "Updated .copier/.version to ${_target:-unknown}."
 if [ "$TEMP_GIT" = true ]; then
     rm -rf .git
     info "Removed temporary git repo."
-fi
-
-if [ -f scripts/assemble.py ]; then
-    info "Reassembling container configurations..."
-    python3 scripts/assemble.py
 fi
 
 info "Installing dependencies..."
