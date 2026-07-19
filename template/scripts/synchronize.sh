@@ -230,11 +230,6 @@ if [ "$TEMP_GIT" = true ]; then
     info "Removed temporary git repo."
 fi
 
-if [ -f scripts/assemble.py ]; then
-    info "Reassembling container configurations..."
-    python3 scripts/assemble.py
-fi
-
 info "Installing dependencies..."
 uv sync --extra dev 2>/dev/null || uv sync
 
