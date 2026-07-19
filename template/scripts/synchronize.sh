@@ -31,7 +31,7 @@ cd "$PROJECT_DIR"
 
 echo ""
 echo "────────────────────────────────────────────────────────────"
-info "Synchronising with upstream YAP template"
+info "Synchronizing with upstream 'YAP' template"
 
 command -v copier >/dev/null 2>&1 || error "copier is required. Install with: uv tool install copier"
 command -v git >/dev/null 2>&1 || error "git is required"
@@ -124,7 +124,7 @@ if [ -f .copier/.version ]; then
     _commit=$(read_yaml_scalar "_commit" ".copier/.version" || true)
 fi
 if [ -z "$_commit" ]; then
-    info "Fetching latest YAP commit for version tracking..."
+    info "Fetching latest 'YAP' commit for version tracking..."
     _commit=$(git ls-remote "https://github.com/xrhstosmour/yap.git" HEAD | cut -f1) || _commit=""
 fi
 
@@ -134,7 +134,7 @@ fi
 # answers file, so relying on either leaves the recorded version stale.
 _target=$(git ls-remote "https://github.com/xrhstosmour/yap.git" HEAD | cut -f1) || _target=""
 if [ -z "$_target" ]; then
-    error "Could not resolve the latest YAP commit to sync to"
+    error "Could not resolve the latest 'YAP' commit to sync to"
 fi
 
 cat > .copier/.answers.yml << YAML
@@ -199,55 +199,71 @@ fi
 # template version's assemble.py from cloning fresh.
 python3 -c "import shutil; shutil.rmtree('/tmp/containers', ignore_errors=True)"
 
-# Sync mode: the setup.sh task only ensures .env and skips services/migrations,
-# so a template sync never requires Docker or a live database.
-export YAP_SYNC=1
-echo "+ copier update --trust --conflict inline --defaults --vcs-ref '${_target}' --answers-file '${ANSWERS_FILE}'" >&2
-(
-    set -x
-    copier update --trust --conflict inline --defaults --vcs-ref "$_target" \
-        --answers-file "$ANSWERS_FILE" 2>&1
-) || error "copier update failed"
-
-# Check for unresolved merge conflicts from copier update.
-if grep -rq "^<<<<<<< \|^>>>>>>> " --include="*.py" --include="*.yml" --include="*.yaml" --include="*.sh" --include="*.toml" . 2>/dev/null; then
-    error "Inline merge conflicts found. Search for '<<<<<<<' markers and resolve them before committing."
-fi
-
 # Persist only non-secret copier version metadata, recording the exact commit
-# we updated to.
+# we update to.  We write this before Copier runs so the recorded version
+# moves forward even when Copier produces conflicts, avoiding a stale
+# baseline on the next synchronize.
 cat > .copier/.version << YAML
 _src_path: gh:xrhstosmour/yap
 _commit: $_target
 YAML
+info "Recorded target 'YAP' commit in '.copier/.version'."
 
-# Ensure secret-bearing answers file is never left behind.
-rm -f .copier/.answers.yml
-info "Updated .copier/.version to ${_target:-unknown}."
+# Sync mode: the setup.sh task only ensures .env and skips services/migrations,
+# so a template synchronize never requires Docker or a live database.
+export YAP_SYNC=1
+info "Running copier update..."
+(
+    set -x
+    copier update --trust --conflict inline --defaults --vcs-ref "$_target" \
+        --answers-file "$ANSWERS_FILE" 2>&1 || exit 2
 
-# Clean up temporary git repo if we created one.
-if [ "$TEMP_GIT" = true ]; then
-    rm -rf .git
-    info "Removed temporary git repo."
-fi
+    # Check for unresolved merge conflicts from copier update.
+    if grep -rq "^<<<<<<< \|^>>>>>>> " --include="*.py" --include="*.yml" --include="*.yaml" --include="*.sh" --include="*.toml" . 2>/dev/null; then
+        warn "Inline merge conflicts found. Search for '<<<<<<<' markers and resolve them before committing."
+        exit 3
+    fi
 
-info "Installing dependencies..."
-uv sync --extra dev 2>/dev/null || uv sync
+    # Ensure secret-bearing answers file is never left behind.
+    rm -f .copier/.answers.yml
+    info "Cleaned up temporary answers file."
 
-echo ""
-info "Checking for changes..."
-if git diff --stat; then
+    # Clean up temporary git repo if we created one.
+    if [ "$TEMP_GIT" = true ]; then
+        rm -rf .git
+        info "Removed temporary git repo."
+    fi
+
+    if [ -f scripts/assemble.py ]; then
+        info "Reassembling container configurations..."
+        python3 scripts/assemble.py
+    fi
+
+    info "Installing dependencies..."
+    uv sync --extra dev 2>/dev/null || uv sync
+
     echo ""
-    info "Review changes, resolve any inline conflict markers (<<<<<<<), then commit."
-    echo "  git diff"
-    echo "  git add .copier/.version && git add -A && git commit -m \"Sync upstream YAP template changes\""
-else
-    info "No changes — project is up to date."
-fi
+    info "Checking for changes..."
+    if git diff --stat; then
+        echo ""
+        info "Review changes, resolve any inline conflict markers (<<<<<<<), then commit."
+        echo "  git diff"
+        echo "  git add .copier/.version && git add -A && git commit -m \"Synchronize upstream `YAP` template changes\""
+    else
+        info "No changes, project is up to date."
+    fi
 
-echo ""
-info "If services need restarting or secrets regenerating run:"
-echo "  ./scripts/setup.sh"
-echo ""
-echo "────────────────────────────────────────────────────────────"
-echo -e "  ${GREEN}Sync complete.${NC}"
+    echo ""
+    info "If services need restarting or secrets regenerating run:"
+    echo "  ./scripts/setup.sh"
+    echo ""
+    echo "────────────────────────────────────────────────────────────"
+    echo -e "  ${GREEN}Synchronization complete.${NC}"
+) || {
+    rc=$?
+    case $rc in
+        2) error "copier update failed";;
+        3) error "Inline merge conflicts found. Search for '<<<<<<<' markers and resolve them before committing.";;
+        *) error "Synchronization failed (exit $rc). See errors above.";;
+    esac
+}
