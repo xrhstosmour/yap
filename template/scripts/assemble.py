@@ -138,7 +138,7 @@ def read_services(containers_directory) -> list[str]:
                     "/docker-compose.yml", ""
                 )
                 for name, repo_path in MAP.items():
-                    if repo_path == path:
+                    if repo_path == path and name not in services:
                         services.append(name)
     return services
 
