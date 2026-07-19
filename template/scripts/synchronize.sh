@@ -199,23 +199,11 @@ fi
 # template version's assemble.py from cloning fresh.
 python3 -c "import shutil; shutil.rmtree('/tmp/containers', ignore_errors=True)"
 
-# Persist only non-secret copier version metadata, recording the exact commit
-# we update to.  We write this before Copier runs so the recorded version
-# moves forward even when Copier produces conflicts, avoiding a stale
-# baseline on the next synchronize.
-cat > .copier/.version << YAML
-_src_path: gh:xrhstosmour/yap
-_commit: $_target
-YAML
-info "Recorded target 'YAP' commit in '.copier/.version'."
-git add .copier/.version
-
 # Sync mode: the setup.sh task only ensures .env and skips services/migrations,
 # so a template synchronize never requires Docker or a live database.
 export YAP_SYNC=1
 info "Running copier update..."
 (
-    set -x
     copier update --trust --conflict inline --defaults --vcs-ref "$_target" \
         --answers-file "$ANSWERS_FILE" 2>&1 || exit 2
 
@@ -262,9 +250,24 @@ info "Running copier update..."
     echo -e "  ${GREEN}Synchronization complete.${NC}"
 ) || {
     rc=$?
+
+    # Persist version metadata even on error.
+    cat > .copier/.version << YAML
+_src_path: gh:xrhstosmour/yap
+_commit: $_target
+YAML
+    info "Recorded target 'YAP' commit in '.copier/.version'."
+
     case $rc in
         2) error "copier update failed";;
         3) error "Inline merge conflicts found. Search for '<<<<<<<' markers and resolve them before committing.";;
         *) error "Synchronization failed (exit $rc). See errors above.";;
     esac
 }
+
+# Record version on success too.
+cat > .copier/.version << YAML
+_src_path: gh:xrhstosmour/yap
+_commit: $_target
+YAML
+info "Recorded target 'YAP' commit in '.copier/.version'."
