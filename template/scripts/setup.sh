@@ -133,6 +133,17 @@ CURRENT_POSTGRESQL_PASSWORD="$(sed -n "s/^POSTGRESQL_PASSWORD=//p" .env | head -
 CURRENT_REDIS_PASSWORD="$(sed -n "s/^REDIS_PASSWORD=//p" .env | head -1)"
 "${SED_INPLACE[@]}" "s|REDIS_URL=redis://:.*@redis|REDIS_URL=redis://:${CURRENT_REDIS_PASSWORD}@redis|" .env
 
+# Generate self-signed TLS certificates for RabbitMQ and Traefik if they are
+# missing. assemble.py creates them during synchronize.sh, but a fresh clone
+# that runs setup.sh without a prior sync has empty certificate directories,
+# which crashes RabbitMQ with failed_to_prepare_configuration.
+rabbitmq_cert="$PROJECT_DIR/containers/distribute/brokers/rabbitmq/certificates/ca_certificate.pem"
+if [ ! -f "$rabbitmq_cert" ] && [ -f "$PROJECT_DIR/scripts/assemble.py" ]; then
+    info "Generating TLS certificates..."
+    python3 "$PROJECT_DIR/scripts/assemble.py" >/dev/null 2>&1 || \
+        warn "Certificate generation failed; RabbitMQ TLS may not start"
+fi
+
 # Merge certificate paths written by assemble.py into .env.
 # Replaces the placeholder SSL_CERTIFICATE_PATH with the absolute path from assemble.py.
 if [ -f containers/.certificates ]; then
@@ -161,10 +172,10 @@ if [ -f .pre-commit-config.yaml ] && command -v uv >/dev/null 2>&1; then
     fi
 fi
 
-# In sync mode (copier update via synchronize.sh), only a valid .env is needed;
-# skip services, migrations, and seeding so template updates never require Docker/DB.
+# In synchronize mode, only a valid .env is needed.
+# Skip services, migrations, and seeding so template updates never require Docker or Database.
 if [ "${YAP_SYNC:-0}" = "1" ]; then
-    info "Sync mode (YAP_SYNC=1): .env ensured, skipping services, migrations, and seeding."
+    info "Ensuring '.env', skipping services, migrations, and seeding..."
     exit 0
 fi
 
