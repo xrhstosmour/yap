@@ -208,6 +208,7 @@ _src_path: gh:xrhstosmour/yap
 _commit: $_target
 YAML
 info "Recorded target 'YAP' commit in '.copier/.version'."
+git add .copier/.version
 
 # Sync mode: the setup.sh task only ensures .env and skips services/migrations,
 # so a template synchronize never requires Docker or a live database.
