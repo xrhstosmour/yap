@@ -30,6 +30,7 @@ class UserRole(enum.StrEnum):
 
     SUPERUSER = "superuser"
     USER = "user"
+    BUSINESS = "business"
 
 
 class User(BaseModel, table=True):
