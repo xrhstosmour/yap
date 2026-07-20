@@ -20,10 +20,10 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.execute("CREATE TYPE userrole AS ENUM ('superuser', 'user')")
+    op.execute("CREATE TYPE userrole AS ENUM ('superuser', 'user', 'business')")
     op.add_column(
         "users",
-        sa.Column("role", sa.Enum("superuser", "user", name="userrole", create_type=False), nullable=True),
+        sa.Column("role", sa.Enum("superuser", "user", "business", name="userrole", create_type=False), nullable=True),
     )
     op.execute("UPDATE users SET role = 'superuser' WHERE is_superuser = TRUE")
     op.execute("UPDATE users SET role = 'user' WHERE role IS NULL")
