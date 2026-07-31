@@ -175,6 +175,10 @@ YAML
 ANSWERS_FILE=".copier/.answers.yml"
 info "Answers file reconstructed for copier update."
 
+# Ensure the secret-bearing answers file is never left behind, on success
+# or on any failure path below.
+trap 'rm -f "$ANSWERS_FILE"' EXIT
+
 if [ -n "$(git status --porcelain -- .)" ]; then
     warn "Uncommitted changes detected."
     warn "Commit or stash before running sync to avoid merge conflicts."
@@ -212,10 +216,6 @@ info "Running copier update..."
         warn "Inline merge conflicts found. Search for '<<<<<<<' markers and resolve them before committing."
         exit 3
     fi
-
-    # Ensure secret-bearing answers file is never left behind.
-    rm -f .copier/.answers.yml
-    info "Cleaned up temporary answers file."
 
     # Clean up temporary git repo if we created one.
     if [ "$TEMP_GIT" = true ]; then

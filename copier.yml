@@ -32,11 +32,13 @@ jwt_secret_key:
   type: str
   help: "Secret key for JWT signing (leave empty to auto-generate):"
   default: ""
+  secret: true
 
 postgresql_password:
   type: str
   help: "Password for PostgreSQL (leave empty to auto-generate):"
   default: ""
+  secret: true
 
 postgresql_extra_databases:
   type: str
@@ -52,21 +54,25 @@ first_superuser_password:
   type: str
   help: "Password for the first superuser (leave empty to auto-generate):"
   default: ""
+  secret: true
 
 rabbitmq_password:
   type: str
   help: "Password for RabbitMQ (leave empty to auto-generate):"
   default: ""
+  secret: true
 
 redis_password:
   type: str
   help: "Password for Redis (leave empty to auto-generate):"
   default: ""
+  secret: true
 
 crypto_key:
   type: str
   help: "Encryption key (leave empty to auto-generate):"
   default: ""
+  secret: true
 
 include_traefik:
   type: bool
@@ -94,6 +100,7 @@ glitchtip_secret_key:
   help: "Secret key for GlitchTip (leave empty to auto-generate):"
   default: ""
   when: "include_glitchtip"
+  secret: true
 
 include_metabase:
   type: bool
@@ -105,6 +112,7 @@ metabase_read_only_password:
   help: "Password for Metabase read-only database user (leave empty to auto-generate):"
   default: ""
   when: "include_metabase"
+  secret: true
 
 include_pgadmin4:
   type: bool
@@ -116,6 +124,7 @@ pgadmin4_password:
   help: "Password for pgAdmin4 (leave empty to auto-generate):"
   default: ""
   when: "include_pgadmin4"
+  secret: true
 
 include_mailpit:
   type: bool
@@ -132,6 +141,7 @@ redis_commander_password:
   help: "Password for Redis Commander (leave empty to auto-generate):"
   default: ""
   when: "include_redis_commander"
+  secret: true
 
 include_flower:
   type: bool
@@ -143,6 +153,7 @@ flower_password:
   help: "Password for Flower dashboard (leave empty to auto-generate):"
   default: ""
   when: "include_flower"
+  secret: true
 
 include_redbeat:
   type: bool
