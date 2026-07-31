@@ -12,7 +12,9 @@ from uuid import UUID
 
 from fastapi import Depends
 from fastapi import HTTPException
+from fastapi import Query
 from fastapi import Request
+from fastapi import WebSocketException
 from fastapi import status
 from fastapi.security import OAuth2PasswordBearer
 from jose import ExpiredSignatureError
@@ -156,6 +158,122 @@ async def get_current_superuser(current_user: CurrentUser) -> User:
 
 
 SuperuserUser = Annotated[User, Depends(get_current_superuser)]
+
+
+async def get_current_user_ws(
+    session: SessionDependency,
+    token: Annotated[str | None, Query()] = None,
+) -> User:
+    """Authenticate a WebSocket connection from a JWT access token.
+
+    WebSocket handshakes have no equivalent of the ``Authorization`` header
+    dependency used by ``get_current_user``, so the token travels as a
+    ``token`` query parameter instead. Validation otherwise mirrors
+    ``get_current_user`` (JWT decode, blacklist check, active-user check).
+    Failures raise ``WebSocketException``, which FastAPI turns into a
+    policy-violation close before the connection is ever accepted.
+
+    Args:
+        session: Database session
+        token: JWT access token passed as a query parameter
+
+    Returns:
+        Authenticated User
+
+    Raises:
+        WebSocketException: If the token is missing, invalid, or the user
+            cannot be validated
+    """
+    if not token:
+        raise WebSocketException(
+            code=status.WS_1008_POLICY_VIOLATION,
+            reason="Missing authentication token",
+        )
+
+    try:
+        payload = decode_token(token)
+
+        if payload.get("type") != "access":
+            raise WebSocketException(
+                code=status.WS_1008_POLICY_VIOLATION,
+                reason="Invalid token type",
+            )
+
+        user_id = payload.get("sub")
+        if not user_id:
+            raise WebSocketException(
+                code=status.WS_1008_POLICY_VIOLATION,
+                reason="Invalid token",
+            )
+
+        token_identifier = payload.get("jti")
+        if isinstance(token_identifier, str) and await is_token_blacklisted(
+            token_identifier
+        ):
+            raise WebSocketException(
+                code=status.WS_1008_POLICY_VIOLATION,
+                reason="Could not validate credentials",
+            )
+
+    except (JWTError, ExpiredSignatureError) as e:
+        raise WebSocketException(
+            code=status.WS_1008_POLICY_VIOLATION,
+            reason="Could not validate credentials",
+        ) from e
+
+    user_repository = UserRepository(session)
+    user = await user_repository.get(UUID(user_id))
+
+    if not user:
+        raise WebSocketException(
+            code=status.WS_1008_POLICY_VIOLATION,
+            reason="User not found",
+        )
+
+    if not user.is_active:
+        raise WebSocketException(
+            code=status.WS_1008_POLICY_VIOLATION,
+            reason="User account is inactive",
+        )
+
+    # Reject access tokens issued before the last password change or reset.
+    token_version = payload.get("token_version")
+    if token_version is not None and int(token_version) != user.token_version:
+        raise WebSocketException(
+            code=status.WS_1008_POLICY_VIOLATION,
+            reason="Could not validate credentials",
+        )
+
+    if user.tenant_id:
+        set_current_tenant_id(user.tenant_id)
+
+    return user
+
+
+CurrentUserWS = Annotated[User, Depends(get_current_user_ws)]
+
+
+async def get_current_superuser_ws(current_user: CurrentUserWS) -> User:
+    """Get the current WebSocket user if they are a superuser.
+
+    Args:
+        current_user: Current authenticated WebSocket user
+
+    Returns:
+        User if superuser
+
+    Raises:
+        WebSocketException: If user is not a superuser
+    """
+    if current_user.role != UserRole.SUPERUSER:
+        raise WebSocketException(
+            code=status.WS_1008_POLICY_VIOLATION,
+            reason="Not enough permissions",
+        )
+    return current_user
+
+
+SuperuserUserWS = Annotated[User, Depends(get_current_superuser_ws)]
 
 
 async def get_api_key_auth(
