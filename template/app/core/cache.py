@@ -11,6 +11,10 @@ and cluster modes.
 
 from __future__ import annotations
 
+import asyncio
+import time
+from collections.abc import Awaitable
+from collections.abc import Callable
 from datetime import timedelta
 from typing import Annotated
 from typing import Any
@@ -26,6 +30,11 @@ from app.core.logging import get_logger
 from app.core.settings import settings
 
 logger = get_logger("cache")
+
+# Stampede-protection lock defaults for get_or_set().
+LOCK_TTL_SECONDS = 10
+WAIT_TIMEOUT_SECONDS = 5.0
+RETRY_INTERVAL_SECONDS = 0.1
 
 # Type alias covering both standalone and cluster Redis clients.
 AsyncRedisClient = redis.Redis | redis_cluster.RedisCluster  # noqa: UP040
@@ -224,6 +233,85 @@ class CacheService:
                 error=str(error),
             )
             return False
+
+    async def get_or_set(
+        self,
+        key: str,
+        compute: Callable[[], Awaitable[Any]],
+        ttl: int | timedelta | None = None,
+        lock_ttl: int = LOCK_TTL_SECONDS,
+        wait_timeout: float = WAIT_TIMEOUT_SECONDS,
+        retry_interval: float = RETRY_INTERVAL_SECONDS,
+    ) -> Any:  # noqa: ANN401
+        """Get a cached value, computing it on miss with stampede protection.
+
+        On a cache miss, callers race for a short-lived per-key lock
+        (`SET NX EX`, mirroring `IdempotencyService.try_lock`). The
+        winner computes the value, caches it, and releases the lock.
+        Losers poll the cache for the winner's result; if it has not
+        appeared before `wait_timeout` elapses (e.g. the winner died
+        mid-compute), they fall through and compute their own value
+        rather than waiting indefinitely.
+
+        Args:
+            key: Cache key (without prefix)
+            compute: Async callable that produces the value on a miss
+            ttl: Time-to-live for the cached value, or None for no expiration
+            lock_ttl: Seconds the stampede lock is held before auto-expiring
+            wait_timeout: Max seconds a lock-losing caller waits for the
+                winner's result before computing independently
+            retry_interval: Seconds between cache-read retries while waiting
+
+        Returns:
+            The cached or freshly computed value
+        """
+        cached = await self.get(key)
+        if cached is not None:
+            return cached
+
+        full_key = self._make_key(key)
+        lock_key = f"{full_key}:lock"
+
+        acquired = False
+        try:
+            acquired = bool(await self.redis.set(lock_key, "1", nx=True, ex=lock_ttl))
+        except (ConnectionError, TimeoutError) as error:
+            logger.error(
+                "cache_operation_failed",
+                operation="get_or_set_lock",
+                key=full_key,
+                error=str(error),
+            )
+            # Redis is unavailable for locking; compute directly rather
+            # than blocking, no stampede protection is possible here.
+            return await compute()
+
+        if acquired:
+            try:
+                value = await compute()
+                await self.set(key, value, ttl=ttl)
+                return value
+            finally:
+                try:
+                    await self.redis.delete(lock_key)
+                except (ConnectionError, TimeoutError) as error:
+                    logger.error(
+                        "cache_operation_failed",
+                        operation="get_or_set_unlock",
+                        key=full_key,
+                        error=str(error),
+                    )
+
+        # Lost the race: wait briefly for the winner, then retry the read.
+        deadline = time.monotonic() + wait_timeout
+        while time.monotonic() < deadline:
+            await asyncio.sleep(retry_interval)
+            cached = await self.get(key)
+            if cached is not None:
+                return cached
+
+        # The winner did not publish a value in time; compute independently.
+        return await compute()
 
     async def delete(self, key: str) -> bool:
         """Delete key from cache.
