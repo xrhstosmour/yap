@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
@@ -40,7 +42,7 @@ class TestOutbox:
         pending = await outbox.publish("order.created", {"order_id": "1"})
         published = await outbox.publish("order.created", {"order_id": "2"})
         await session.flush()
-        await outbox.mark_published(published.id)
+        await outbox.mark_published(published)
         await session.flush()
 
         results = await outbox.get_pending()
@@ -56,7 +58,7 @@ class TestOutbox:
         event = await outbox.publish("user.created", {"user_id": "x"})
         await session.flush()
 
-        await outbox.mark_published(event.id)
+        await outbox.mark_published(event)
 
         result = await session.execute(
             select(OutboxEvent).where(OutboxEvent.id == event.id)
@@ -75,7 +77,7 @@ class TestOutbox:
         event = await outbox.publish("order.created", {"order_id": "1"})
         await session.flush()
 
-        await outbox.mark_failed(event.id)
+        await outbox.mark_failed(event)
 
         result = await session.execute(
             select(OutboxEvent).where(OutboxEvent.id == event.id)
@@ -84,6 +86,34 @@ class TestOutbox:
         assert updated is not None
         assert updated.retry_count == 1
         assert updated.status == "pending"
+
+    @pytest.mark.anyio
+    async def test_mark_published_does_not_query_the_database(
+        self, session: AsyncSession
+    ) -> None:
+        """mark_published updates the passed event without a re-SELECT."""
+        outbox = Outbox(session)
+        event = await outbox.publish("user.created", {"user_id": "x"})
+        await session.flush()
+
+        with patch.object(session, "execute", wraps=session.execute) as execute_spy:
+            await outbox.mark_published(event)
+
+        execute_spy.assert_not_called()
+
+    @pytest.mark.anyio
+    async def test_mark_failed_does_not_query_the_database(
+        self, session: AsyncSession
+    ) -> None:
+        """mark_failed updates the passed event without a re-SELECT."""
+        outbox = Outbox(session)
+        event = await outbox.publish("order.created", {"order_id": "1"})
+        await session.flush()
+
+        with patch.object(session, "execute", wraps=session.execute) as execute_spy:
+            await outbox.mark_failed(event)
+
+        execute_spy.assert_not_called()
 
     @pytest.mark.anyio
     async def test_mark_failed_moves_to_dead_after_max_retries(
@@ -95,7 +125,7 @@ class TestOutbox:
         event.retry_count = 4
         await session.flush()
 
-        await outbox.mark_failed(event.id)
+        await outbox.mark_failed(event)
 
         result = await session.execute(
             select(OutboxEvent).where(OutboxEvent.id == event.id)
