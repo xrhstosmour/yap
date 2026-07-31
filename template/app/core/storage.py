@@ -6,13 +6,20 @@ Image files get automatic thumbnail generation and dimension extraction.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import io
 from typing import Any
 
+from app.core.logging import get_logger
 from app.core.settings import settings
 
+logger = get_logger("storage")
+
 _cached_s3_client: Any | None = None
+
+# boto3/botocore error codes head_bucket raises when the bucket is missing.
+_BUCKET_NOT_FOUND_CODES = {"404", "NoSuchBucket"}
 
 
 def _s3_client() -> Any:  # noqa: ANN401
@@ -38,13 +45,49 @@ def _s3_client() -> Any:  # noqa: ANN401
     return _cached_s3_client
 
 
-def _ensure_bucket(bucket: str) -> None:
+async def _ensure_bucket(bucket: str) -> None:
     """Create the bucket if it does not exist (idempotent)."""
+    from botocore.exceptions import ClientError
+
     client = _s3_client()
     try:
-        client.head_bucket(Bucket=bucket)
-    except Exception:
-        client.create_bucket(Bucket=bucket)
+        await asyncio.to_thread(client.head_bucket, Bucket=bucket)
+    except ClientError as error:
+        error_code = error.response.get("Error", {}).get("Code", "")
+        if error_code not in _BUCKET_NOT_FOUND_CODES:
+            logger.error(
+                "bucket_head_check_failed",
+                bucket=bucket,
+                error_code=error_code,
+                error=str(error),
+            )
+            raise
+        await asyncio.to_thread(client.create_bucket, Bucket=bucket)
+
+
+def _build_thumbnail(content: bytes, mimetype: str) -> tuple[int, int, bytes]:
+    """Decode an image and build a thumbnail (CPU-bound, run off the event loop).
+
+    Args:
+        content: Raw image bytes.
+        mimetype: MIME type of the source image.
+
+    Returns:
+        Tuple of (width, height, thumbnail_bytes).
+    """
+    import PIL.Image
+
+    img = PIL.Image.open(io.BytesIO(content))
+    width, height = img.size
+
+    # Generate thumbnail (800px max dimension).
+    thumb = img.copy()
+    thumb.thumbnail((800, 800), PIL.Image.LANCZOS)  # type: ignore[attr-defined]
+    thumb_buffer = io.BytesIO()
+    thumb_format = "JPEG" if mimetype == "image/jpeg" else "PNG"
+    thumb.save(thumb_buffer, format=thumb_format)
+
+    return width, height, thumb_buffer.getvalue()
 
 
 async def upload_file(
@@ -69,17 +112,16 @@ async def upload_file(
         Tuple of (object_key, content_hash, image_width, image_height,
         thumbnail_object_key).
     """
-    import PIL.Image
-
     bucket = bucket or settings.STORAGE_BUCKET
-    _ensure_bucket(bucket)
+    await _ensure_bucket(bucket)
     client = _s3_client()
 
     content_hash = hashlib.sha256(content).hexdigest()
     object_key = f"uploads/{content_hash}"
 
     # Upload original.
-    client.put_object(
+    await asyncio.to_thread(
+        client.put_object,
         Bucket=bucket,
         Key=object_key,
         Body=content,
@@ -92,26 +134,26 @@ async def upload_file(
 
     if mimetype.startswith("image/") and mimetype != "image/gif":
         try:
-            img = PIL.Image.open(io.BytesIO(content))
-            image_width, image_height = img.size
-
-            # Generate thumbnail (800px max dimension).
-            thumb = img.copy()
-            thumb.thumbnail((800, 800), PIL.Image.LANCZOS)  # type: ignore[attr-defined]
-            thumb_buffer = io.BytesIO()
-            thumb_format = "JPEG" if mimetype == "image/jpeg" else "PNG"
-            thumb.save(thumb_buffer, format=thumb_format)
-            thumb_bytes = thumb_buffer.getvalue()
+            image_width, image_height, thumb_bytes = await asyncio.to_thread(
+                _build_thumbnail, content, mimetype
+            )
 
             thumbnail_object_key = f"thumbnails/{content_hash}"
-            client.put_object(
+            await asyncio.to_thread(
+                client.put_object,
                 Bucket=bucket,
                 Key=thumbnail_object_key,
                 Body=thumb_bytes,
                 ContentType=mimetype,
             )
         except Exception:
-            pass  # Non-image or unprocessable. Thumbnails not critical.
+            # Non-image or unprocessable. Thumbnails not critical.
+            logger.warning(
+                "thumbnail_generation_failed",
+                exc_info=True,
+                filename=filename,
+                mimetype=mimetype,
+            )
 
     return object_key, content_hash, image_width, image_height, thumbnail_object_key
 
@@ -135,14 +177,13 @@ async def get_download_url(
 
     client = _s3_client()
     bucket = bucket or settings.STORAGE_BUCKET
-    return cast(
-        str,
-        client.generate_presigned_url(
-            "get_object",
-            Parameters={"Bucket": bucket, "Key": object_key},
-            ExpiresIn=expires_in,
-        ),
+    url = await asyncio.to_thread(
+        client.generate_presigned_url,
+        "get_object",
+        Parameters={"Bucket": bucket, "Key": object_key},
+        ExpiresIn=expires_in,
     )
+    return cast(str, url)
 
 
 async def delete_object(
@@ -158,6 +199,6 @@ async def delete_object(
     client = _s3_client()
     bucket = bucket or settings.STORAGE_BUCKET
     try:
-        client.delete_object(Bucket=bucket, Key=object_key)
+        await asyncio.to_thread(client.delete_object, Bucket=bucket, Key=object_key)
     except client.exceptions.ClientError:
         pass  # Already deleted. Idempotent.
