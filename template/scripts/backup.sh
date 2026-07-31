@@ -17,7 +17,7 @@ set -euo pipefail
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 info()  { echo -e "${GREEN}[BACKUP]${NC} $(date '+%Y-%m-%d %H:%M:%S') $*"; }
 warn()  { echo -e "${YELLOW}[BACKUP]${NC} $(date '+%Y-%m-%d %H:%M:%S') $*"; }
-error() { echo -e "${RED}[BACKUP]${NC} $(date '+%Y-%m-%d %H:%M:%S') $*"; exit 0; }
+error() { echo -e "${RED}[BACKUP]${NC} $(date '+%Y-%m-%d %H:%M:%S') $*"; exit 1; }
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BACKUP_DIRECTORY="${BACKUP_DIRECTORY:-$PROJECT_DIR/backups}"
