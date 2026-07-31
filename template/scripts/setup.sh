@@ -74,6 +74,7 @@ GLITCHTIP_SECRET_KEY="${GLITCHTIP_SECRET_KEY:-$(python3 -c "import secrets; prin
 REDIS_COMMANDER_PASSWORD="${REDIS_COMMANDER_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(12))")}"
 METABASE_READ_ONLY_PASSWORD="${METABASE_READ_ONLY_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")}"
 STORAGE_SECRET_KEY="${STORAGE_SECRET_KEY:-$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")}"
+MINIO_ROOT_PASSWORD="${MINIO_ROOT_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")}"
 GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET:-$(python3 -c "import secrets; print(secrets.token_urlsafe(24))")}"
 SMTP_PASSWORD="${SMTP_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")}"
 
@@ -93,19 +94,27 @@ if [ ! -f .env ]; then
     "${SED_INPLACE[@]}" "s/GLITCHTIP_SECRET_KEY=.*/GLITCHTIP_SECRET_KEY=your-glitchtip-secret-key/" .env.example
     "${SED_INPLACE[@]}" "s/REDIS_COMMANDER_PASSWORD=.*/REDIS_COMMANDER_PASSWORD=your-redis-commander-password/" .env.example
     "${SED_INPLACE[@]}" "s/METABASE_READ_ONLY_PASSWORD=.*/METABASE_READ_ONLY_PASSWORD=your-metabase-read-only-password/" .env.example
+    "${SED_INPLACE[@]}" "s/MINIO_ROOT_PASSWORD=.*/MINIO_ROOT_PASSWORD=minioadmin/" .env.example
     "${SED_INPLACE[@]}" "s/SENTRY_DSN=.*/SENTRY_DSN=https:\/\/public:secret@sentry.com\/1/" .env.example
 else
     info "Backfilling any placeholder secrets in existing .env..."
 fi
 
-# Replace KEY's value only when it is empty or a placeholder ("your-...").
+# Replace KEY's value only when it is empty, a placeholder ("your-..."), or
+# matches the optional extra placeholder (e.g. a well-known service default).
 backfill_secret() {
     key="$1"
     value="$2"
+    extra_placeholder="${3:-}"
     current="$(sed -n "s/^${key}=//p" .env | head -1)"
     case "$current" in
         "" | your-*)
             "${SED_INPLACE[@]}" "s|^${key}=.*|${key}=${value}|" .env
+            ;;
+        *)
+            if [ -n "$extra_placeholder" ] && [ "$current" = "$extra_placeholder" ]; then
+                "${SED_INPLACE[@]}" "s|^${key}=.*|${key}=${value}|" .env
+            fi
             ;;
     esac
 }
@@ -122,6 +131,7 @@ backfill_secret GLITCHTIP_SECRET_KEY "${GLITCHTIP_SECRET_KEY}"
 backfill_secret REDIS_COMMANDER_PASSWORD "${REDIS_COMMANDER_PASSWORD}"
 backfill_secret METABASE_READ_ONLY_PASSWORD "${METABASE_READ_ONLY_PASSWORD}"
 backfill_secret STORAGE_SECRET_KEY "${STORAGE_SECRET_KEY}"
+backfill_secret MINIO_ROOT_PASSWORD "${MINIO_ROOT_PASSWORD}" "minioadmin"
 backfill_secret GOOGLE_CLIENT_SECRET "${GOOGLE_CLIENT_SECRET}"
 backfill_secret SMTP_PASSWORD "${SMTP_PASSWORD}"
 
