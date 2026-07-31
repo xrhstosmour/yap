@@ -6,6 +6,7 @@ user authentication, registration, and token management.
 
 from __future__ import annotations
 
+import asyncio
 import secrets
 from datetime import UTC
 from datetime import datetime
@@ -126,7 +127,7 @@ class AuthService:
             user: User whose password is being changed.
             new_password: New plain-text password.
         """
-        hashed = generate_password_hash(new_password)
+        hashed = await asyncio.to_thread(generate_password_hash, new_password)
         await self.user_repository.update(
             user.id,
             {
@@ -210,7 +211,7 @@ class AuthService:
             raise EmailAlreadyExistsError("Email already registered")
 
         # Create user.
-        password_hash = generate_password_hash(data.password)
+        password_hash = await asyncio.to_thread(generate_password_hash, data.password)
         user = await self.user_repository.create_user(
             email=data.email,
             password_hash=password_hash,
@@ -248,11 +249,11 @@ class AuthService:
 
         if not user:
             # Verify against dummy hash to prevent timing attacks.
-            verify_password(password, DUMMY_PASSWORD_HASH)
+            await asyncio.to_thread(verify_password, password, DUMMY_PASSWORD_HASH)
             raise InvalidCredentialsError("Invalid email or password")
 
         # Verify password.
-        if not verify_password(password, user.hashed_password):
+        if not await asyncio.to_thread(verify_password, password, user.hashed_password):
             raise InvalidCredentialsError("Invalid email or password")
 
         # Check if active.
@@ -416,7 +417,9 @@ class AuthService:
         self._validate_password_strength(new_password)
 
         # Verify current password.
-        if not verify_password(current_password, user.hashed_password):
+        if not await asyncio.to_thread(
+            verify_password, current_password, user.hashed_password
+        ):
             raise InvalidCredentialsError("Current password is incorrect")
 
         # Update password and invalidate tokens.
@@ -669,7 +672,9 @@ class AuthService:
                 # NOTE: OAuth users are created without a tenant_id.
                 # Projects requiring multi-tenancy should assign a tenant
                 # during OAuth registration (e.g. via invitation or subdomain).
-                placeholder_hash = generate_password_hash(secrets.token_urlsafe(32))
+                placeholder_hash = await asyncio.to_thread(
+                    generate_password_hash, secrets.token_urlsafe(32)
+                )
                 user = await self.user_repository.create_user(
                     email=email,
                     password_hash=placeholder_hash,
