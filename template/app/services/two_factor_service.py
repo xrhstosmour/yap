@@ -6,6 +6,7 @@ This module provides the TwoFactorAuthService for managing TOTP-based
 
 from __future__ import annotations
 
+import asyncio
 import secrets
 from datetime import UTC
 from datetime import datetime
@@ -297,7 +298,9 @@ class TwoFactorAuthService:
         unused_codes = result.scalars().all()
 
         for code_record in unused_codes:
-            if verify_password(recovery_code, code_record.code_hash):
+            if await asyncio.to_thread(
+                verify_password, recovery_code, code_record.code_hash
+            ):
                 statement = (
                     update(TotpRecoveryCode)
                     .where(TotpRecoveryCode.id == code_record.id)  # type: ignore[arg-type]
@@ -479,8 +482,17 @@ class TwoFactorAuthService:
         """
         async with self.session.begin_nested():
             await self._delete_all_recovery_codes(user_id)
-            for code in plaintext_codes:
-                code_hash = generate_password_hash(code)
+            # Hash all codes concurrently off the event loop instead of
+            # sequentially — bcrypt is ~100-250ms per call, so hashing 10
+            # codes one at a time would block the loop for 1-2.5s while
+            # this nested transaction is open.
+            code_hashes = await asyncio.gather(
+                *(
+                    asyncio.to_thread(generate_password_hash, code)
+                    for code in plaintext_codes
+                )
+            )
+            for code_hash in code_hashes:
                 new_code = TotpRecoveryCode(user_id=user_id, code_hash=code_hash)
                 self.session.add(new_code)
             await self.session.flush()
