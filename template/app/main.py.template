@@ -11,6 +11,7 @@ from collections.abc import AsyncIterator
 from collections.abc import Awaitable
 from collections.abc import Callable
 from contextlib import asynccontextmanager
+from typing import Any
 
 import sentry_sdk
 from fastapi import FastAPI
@@ -19,6 +20,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.responses import Response
 from fastapi.routing import APIRoute
+from sentry_sdk.types import Event
+from sentry_sdk.types import Hint
 from starlette.middleware.gzip import GZipMiddleware
 
 from app.api.idempotency import IdempotencyMiddleware
@@ -46,8 +49,48 @@ def custom_generate_unique_id(route: APIRoute) -> str:
     return f"{tag}-{route.name}"
 
 
+# Keys whose values are redacted from Sentry events, in addition to the
+# `send_default_pii=False` SDK setting, as defense in depth against PII/secret
+# leakage via exception stack frame locals, request data, and extra context.
+SENTRY_SENSITIVE_KEYS = ("password", "token", "secret", "authorization")
+
+
+def _scrub_sensitive_data(data: Any) -> Any:  # noqa: ANN401
+    """Recursively redact known-sensitive keys from Sentry event data.
+
+    Args:
+        data: A Sentry event, or any nested value within one.
+
+    Returns:
+        The same structure with values under sensitive keys replaced.
+    """
+    if isinstance(data, dict):
+        return {
+            key: "[Filtered]"
+            if isinstance(key, str)
+            and any(sensitive in key.lower() for sensitive in SENTRY_SENSITIVE_KEYS)
+            else _scrub_sensitive_data(value)
+            for key, value in data.items()
+        }
+    if isinstance(data, list):
+        return [_scrub_sensitive_data(item) for item in data]
+    return data
+
+
+def _before_send(event: Event, hint: Hint) -> Event | None:
+    """Scrub known-sensitive keys from a Sentry event before it is sent."""
+    scrubbed: Event = _scrub_sensitive_data(event)
+    return scrubbed
+
+
 if settings.SENTRY_DSN and settings.ENVIRONMENT != "local":
-    sentry_sdk.init(dsn=str(settings.SENTRY_DSN), enable_tracing=True)
+    sentry_sdk.init(
+        dsn=str(settings.SENTRY_DSN),
+        enable_tracing=True,
+        # Do not attach request cookies/headers/IP or user data by default.
+        send_default_pii=False,
+        before_send=_before_send,
+    )
 
 
 @asynccontextmanager
