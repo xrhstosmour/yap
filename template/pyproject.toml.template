@@ -76,6 +76,7 @@ module = [
     "PIL.*",
     "webauthn.*",
     "boto3.*",
+    "botocore.*",
     "pybreaker.*",
     "phonenumbers.*",
 ]

@@ -7,12 +7,18 @@ from unittest.mock import MagicMock
 from unittest.mock import patch
 
 import pytest
+from botocore.exceptions import ClientError
 
 from app.core.storage import _ensure_bucket
 from app.core.storage import _s3_client
 from app.core.storage import delete_object
 from app.core.storage import get_download_url
 from app.core.storage import upload_file
+
+
+def _client_error(code: str, operation_name: str = "HeadBucket") -> ClientError:
+    """Build a botocore ClientError with the given error code."""
+    return ClientError({"Error": {"Code": code, "Message": code}}, operation_name)
 
 
 @pytest.fixture(autouse=True)
@@ -57,7 +63,7 @@ class TestUploadFile:
     @pytest.mark.asyncio
     async def test_creates_bucket_if_missing(self, mock_s3_client: MagicMock) -> None:
         """Should create bucket on first upload."""
-        mock_s3_client.head_bucket.side_effect = Exception("Not found")
+        mock_s3_client.head_bucket.side_effect = _client_error("404")
 
         await upload_file(content=b"test", filename="t.txt", mimetype="text/plain")
 
@@ -109,24 +115,41 @@ class TestS3Client:
 class TestEnsureBucket:
     """Tests for _ensure_bucket()."""
 
-    def test_ensure_bucket_creates_when_missing(self) -> None:
-        """_ensure_bucket calls create_bucket when head_bucket raises."""
+    @pytest.mark.asyncio
+    async def test_ensure_bucket_creates_when_missing(self) -> None:
+        """_ensure_bucket calls create_bucket when head_bucket raises 404."""
         mock_client = MagicMock()
-        mock_client.head_bucket.side_effect = Exception("NoSuchBucket")
+        mock_client.head_bucket.side_effect = _client_error("404")
 
         with patch("app.core.storage._s3_client", return_value=mock_client):
-            _ensure_bucket("test-bucket")
+            await _ensure_bucket("test-bucket")
 
         mock_client.head_bucket.assert_called_once_with(Bucket="test-bucket")
         mock_client.create_bucket.assert_called_once_with(Bucket="test-bucket")
 
-    def test_ensure_bucket_skips_create_when_exists(self) -> None:
+    @pytest.mark.asyncio
+    async def test_ensure_bucket_skips_create_when_exists(self) -> None:
         """_ensure_bucket does not call create_bucket when bucket exists."""
         mock_client = MagicMock()
         mock_client.head_bucket.return_value = {}  # No error
 
         with patch("app.core.storage._s3_client", return_value=mock_client):
-            _ensure_bucket("test-bucket")
+            await _ensure_bucket("test-bucket")
+
+        mock_client.head_bucket.assert_called_once_with(Bucket="test-bucket")
+        mock_client.create_bucket.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_ensure_bucket_reraises_non_not_found_error(self) -> None:
+        """_ensure_bucket propagates errors other than 'bucket not found'."""
+        mock_client = MagicMock()
+        mock_client.head_bucket.side_effect = _client_error("403")
+
+        with (
+            patch("app.core.storage._s3_client", return_value=mock_client),
+            pytest.raises(ClientError),
+        ):
+            await _ensure_bucket("test-bucket")
 
         mock_client.head_bucket.assert_called_once_with(Bucket="test-bucket")
         mock_client.create_bucket.assert_not_called()
@@ -176,6 +199,29 @@ class TestUploadFileImage:
         assert thumb_key is None
         # Only one put_object call (original only).
         assert mock_s3_client.put_object.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_unprocessable_image_logs_warning(
+        self, mock_s3_client: MagicMock
+    ) -> None:
+        """Should log a warning when thumbnail generation fails."""
+        with (
+            patch("PIL.Image.open", side_effect=OSError("cannot identify image")),
+            patch("app.core.storage.logger") as mock_logger,
+        ):
+            object_key, content_hash, width, height, thumb_key = await upload_file(
+                content=b"not-actually-an-image",
+                filename="broken.png",
+                mimetype="image/png",
+            )
+
+        assert thumb_key is None
+        assert width is None
+        assert height is None
+        mock_logger.warning.assert_called_once()
+        arguments, keyword_arguments = mock_logger.warning.call_args
+        assert arguments[0] == "thumbnail_generation_failed"
+        assert keyword_arguments.get("exc_info") is True
 
 
 class TestDeleteObject:
