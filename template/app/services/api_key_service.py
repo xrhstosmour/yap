@@ -100,7 +100,7 @@ class APIKeyService:
         )
 
         # Log creation.
-        await self.audit_repository.log_user_action(
+        await self.audit_repository.log_user_action_safe(
             action=AuditAction.APIKEY_CREATE,
             user_id=user_id,
             tenant_id=tenant_id,
@@ -210,7 +210,7 @@ class APIKeyService:
             api_key = await self.apikey_repository.update(key_id, update_data)
 
             # Log update.
-            await self.audit_repository.log_user_action(
+            await self.audit_repository.log_user_action_safe(
                 action=AuditAction.APIKEY_UPDATE,
                 user_id=user_id,
                 tenant_id=tenant_id,
@@ -247,7 +247,7 @@ class APIKeyService:
         await self.apikey_repository.update(key_id, {"is_active": False})
 
         # Log revocation.
-        await self.audit_repository.log_user_action(
+        await self.audit_repository.log_user_action_safe(
             action=AuditAction.APIKEY_REVOKE,
             user_id=user_id,
             tenant_id=tenant_id,
@@ -285,7 +285,7 @@ class APIKeyService:
         await self.apikey_repository.delete(key_id)
 
         # Log deletion.
-        await self.audit_repository.log_user_action(
+        await self.audit_repository.log_user_action_safe(
             action=AuditAction.APIKEY_DELETE,
             user_id=user_id,
             tenant_id=tenant_id,

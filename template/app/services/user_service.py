@@ -148,7 +148,7 @@ class UserService:
         )
 
         # Log creation.
-        await self.audit_repository.log_user_action(
+        await self.audit_repository.log_user_action_safe(
             action=AuditAction.USER_CREATE,
             user_id=user.id,
             tenant_id=user.tenant_id or SYSTEM_TENANT_ID,
@@ -207,7 +207,7 @@ class UserService:
             user = updated_user
 
             # Log update.
-            await self.audit_repository.log_user_action(
+            await self.audit_repository.log_user_action_safe(
                 action=AuditAction.USER_UPDATE,
                 user_id=updated_by,
                 tenant_id=user.tenant_id or SYSTEM_TENANT_ID,
@@ -303,7 +303,7 @@ class UserService:
         await self.user_repository.delete(user_id)
 
         # Log deletion.
-        await self.audit_repository.log_user_action(
+        await self.audit_repository.log_user_action_safe(
             action=AuditAction.USER_DELETE,
             user_id=deleted_by,
             tenant_id=user.tenant_id or SYSTEM_TENANT_ID,
@@ -361,7 +361,7 @@ class UserService:
             # Soft-delete the record (token already bumped above).
             await self.user_repository.delete(user.id)
 
-        await self.audit_repository.log_user_action(
+        await self.audit_repository.log_user_action_safe(
             action=AuditAction.ACCOUNT_DELETION,
             user_id=user.id,
             tenant_id=tenant_id,
@@ -393,7 +393,7 @@ class UserService:
         await self.user_repository.increment_token_version(user_id)
 
         tenant_id = user.tenant_id or SYSTEM_TENANT_ID
-        await self.audit_repository.log_user_action(
+        await self.audit_repository.log_user_action_safe(
             action=AuditAction.SESSION_REVOKE,
             user_id=revoked_by.id,
             tenant_id=tenant_id,
@@ -473,7 +473,7 @@ class UserService:
             for log in activity_logs
         ]
 
-        await self.audit_repository.log_user_action(
+        await self.audit_repository.log_user_action_safe(
             action=AuditAction.DATA_EXPORT,
             user_id=user.id,
             tenant_id=tenant_id,
