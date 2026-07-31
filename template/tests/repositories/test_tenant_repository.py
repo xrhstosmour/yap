@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.tenant import Tenant
@@ -181,3 +182,37 @@ class TestTenantRepository:
         found = await repo.get(tenant.id, include_deleted=True)
         assert found is not None
         assert found.deleted_at is not None
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        "index_name", ["ix_tenants_name_trgm", "ix_tenants_slug_trgm"]
+    )
+    async def test_search_trigram_indexes_exist(
+        self, session: AsyncSession, index_name: str
+    ) -> None:
+        """The GIN trigram indexes backing list_tenants() search should exist.
+
+        Verifies that migration `7089da61aec9` applies cleanly (the schema
+        is built via `alembic upgrade head` for every test run) and that
+        the leading-wildcard `ILIKE` search in `list_tenants()` has a GIN
+        trigram index to use instead of a sequential scan.
+
+        Args:
+            session: Async database session fixture.
+            index_name: Name of the index expected on the `tenants` table.
+
+        Returns:
+            None.
+        """
+        result = await session.execute(
+            text(
+                "SELECT indexdef FROM pg_indexes "
+                "WHERE tablename = 'tenants' AND indexname = :index_name"
+            ),
+            {"index_name": index_name},
+        )
+        row = result.first()
+
+        assert row is not None, f"Expected index {index_name} on tenants table"
+        assert "gin" in row[0].lower()
+        assert "gin_trgm_ops" in row[0]
