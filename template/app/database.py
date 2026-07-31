@@ -10,6 +10,13 @@ Database routing:
     preview/demo/staging database isolation without per-model flag columns.
     Call ``get_additional_sync_session()`` for Alembic migrations on the
     additional database.
+
+    The additional database engines are only created when
+    ``settings.POSTGRESQL_ADDITIONAL_DATABASE`` is configured (non-empty), the
+    same "empty string disables the feature" convention used elsewhere in
+    ``app.core.settings`` (e.g. ``SSL_CERTIFICATE_PATH``, ``GOOGLE_CLIENT_ID``).
+    When disabled, ``ADDITIONAL_DATABASE_ENABLED`` is ``False`` and the
+    additional engine/session-factory attributes are ``None``.
 """
 
 from __future__ import annotations
@@ -18,7 +25,9 @@ from collections.abc import AsyncGenerator
 from collections.abc import Generator
 from contextvars import ContextVar
 
+from sqlalchemy import Engine
 from sqlalchemy import create_engine
+from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -39,6 +48,11 @@ ADDITIONAL_DATABASE_MODE = "additional"
 # Set by middleware when the X-Database-Mode header is present.
 database_mode_variable: ContextVar[str] = ContextVar("database_mode", default="")
 
+# The additional database is optional. It is only provisioned when a name is
+# configured, mirroring the empty-string-disables convention used by other
+# optional features in app.core.settings.
+ADDITIONAL_DATABASE_ENABLED = bool(settings.POSTGRESQL_ADDITIONAL_DATABASE)
+
 
 # Main engine.
 async_database_url = str(settings.DATABASE_URI)
@@ -50,7 +64,7 @@ async_engine = create_async_engine(
     max_overflow=settings.DATABASE_MAX_OVERFLOW,
     pool_pre_ping=True,
     pool_recycle=settings.DATABASE_POOL_RECYCLE,
-    pool_timeout=30,
+    pool_timeout=settings.DATABASE_POOL_TIMEOUT,
 )
 
 async_session_factory = async_sessionmaker(
@@ -61,26 +75,30 @@ async_session_factory = async_sessionmaker(
     autoflush=False,
 )
 
-# Additional engine (preview/demo/staging database).
-additional_async_database_url = str(settings.ADDITIONAL_DATABASE_URI)
+# Additional engine (preview/demo/staging database), created only when enabled.
+additional_async_engine: AsyncEngine | None = None
+additional_async_session_factory: async_sessionmaker[AsyncSession] | None = None
 
-additional_async_engine = create_async_engine(
-    additional_async_database_url,
-    echo=settings.ENVIRONMENT == "local",
-    pool_size=settings.DATABASE_POOL_SIZE,
-    max_overflow=settings.DATABASE_MAX_OVERFLOW,
-    pool_pre_ping=True,
-    pool_recycle=settings.DATABASE_POOL_RECYCLE,
-    pool_timeout=30,
-)
+if ADDITIONAL_DATABASE_ENABLED:
+    additional_async_database_url = str(settings.ADDITIONAL_DATABASE_URI)
 
-additional_async_session_factory = async_sessionmaker(
-    additional_async_engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-    autocommit=False,
-    autoflush=False,
-)
+    additional_async_engine = create_async_engine(
+        additional_async_database_url,
+        echo=settings.ENVIRONMENT == "local",
+        pool_size=settings.DATABASE_POOL_SIZE,
+        max_overflow=settings.DATABASE_MAX_OVERFLOW,
+        pool_pre_ping=True,
+        pool_recycle=settings.DATABASE_POOL_RECYCLE,
+        pool_timeout=settings.DATABASE_POOL_TIMEOUT,
+    )
+
+    additional_async_session_factory = async_sessionmaker(
+        additional_async_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autocommit=False,
+        autoflush=False,
+    )
 
 
 async def get_async_session() -> AsyncGenerator[AsyncSession]:
@@ -92,12 +110,20 @@ async def get_async_session() -> AsyncGenerator[AsyncSession]:
 
     Yields:
         AsyncSession instance for database operations.
+
+    Raises:
+        RuntimeError: If additional database mode is requested but
+            ``settings.POSTGRESQL_ADDITIONAL_DATABASE`` is not configured.
     """
-    factory = (
-        additional_async_session_factory
-        if database_mode_variable.get() == ADDITIONAL_DATABASE_MODE
-        else async_session_factory
-    )
+    if database_mode_variable.get() == ADDITIONAL_DATABASE_MODE:
+        if additional_async_session_factory is None:
+            raise RuntimeError(
+                "Additional database mode requested but "
+                "POSTGRESQL_ADDITIONAL_DATABASE is not configured."
+            )
+        factory = additional_async_session_factory
+    else:
+        factory = async_session_factory
     async with factory() as session:
         try:
             yield session
@@ -124,20 +150,25 @@ sync_session_factory = sessionmaker(
     autoflush=False,
 )
 
-# Additional sync engine for Alembic migrations on the additional database.
-additional_sync_database_url = str(settings.ADDITIONAL_DATABASE_URI)
-additional_sync_engine = create_engine(
-    additional_sync_database_url,
-    echo=settings.ENVIRONMENT == "local",
-    pool_pre_ping=True,
-    pool_recycle=3600,
-)
+# Additional sync engine for Alembic migrations on the additional database,
+# created only when the additional database is enabled.
+additional_sync_engine: Engine | None = None
+additional_sync_session_factory: sessionmaker[Session] | None = None
 
-additional_sync_session_factory = sessionmaker(
-    additional_sync_engine,
-    autocommit=False,
-    autoflush=False,
-)
+if ADDITIONAL_DATABASE_ENABLED:
+    additional_sync_database_url = str(settings.ADDITIONAL_DATABASE_URI)
+    additional_sync_engine = create_engine(
+        additional_sync_database_url,
+        echo=settings.ENVIRONMENT == "local",
+        pool_pre_ping=True,
+        pool_recycle=3600,
+    )
+
+    additional_sync_session_factory = sessionmaker(
+        additional_sync_engine,
+        autocommit=False,
+        autoflush=False,
+    )
 
 
 def get_sync_session() -> Generator[Session]:
@@ -167,7 +198,16 @@ def get_additional_sync_session() -> Generator[Session]:
 
     Note:
         Only used by Alembic when targeting the additional database.
+
+    Raises:
+        RuntimeError: If ``settings.POSTGRESQL_ADDITIONAL_DATABASE`` is not
+            configured.
     """
+    if additional_sync_session_factory is None:
+        raise RuntimeError(
+            "Additional database sync session requested but "
+            "POSTGRESQL_ADDITIONAL_DATABASE is not configured."
+        )
     with additional_sync_session_factory() as session:
         try:
             yield session
@@ -191,10 +231,11 @@ async def init_db() -> None:
     """
     logger.info("database_initializing", url=settings.POSTGRESQL_SERVER)
 
-    for label, engine in [
-        ("main", async_engine),
-        ("additional", additional_async_engine),
-    ]:
+    engines: list[tuple[str, AsyncEngine]] = [("main", async_engine)]
+    if additional_async_engine is not None:
+        engines.append(("additional", additional_async_engine))
+
+    for label, engine in engines:
         try:
             async with engine.connect() as connection:
                 await connection.execute(text("SELECT 1"))
@@ -214,16 +255,19 @@ async def close_db() -> None:
     all database connections and release resources.
     """
     logger.info("database_closing")
-    for label, async_eng in [
-        ("main", async_engine),
-        ("additional", additional_async_engine),
-    ]:
+    async_engines: list[tuple[str, AsyncEngine]] = [("main", async_engine)]
+    if additional_async_engine is not None:
+        async_engines.append(("additional", additional_async_engine))
+
+    for label, async_eng in async_engines:
         await async_eng.dispose()
         logger.info("database_closed", label=label)
-    for label, sync_eng in [
-        ("main-sync", sync_engine),
-        ("additional-sync", additional_sync_engine),
-    ]:
+
+    sync_engines: list[tuple[str, Engine]] = [("main-sync", sync_engine)]
+    if additional_sync_engine is not None:
+        sync_engines.append(("additional-sync", additional_sync_engine))
+
+    for label, sync_eng in sync_engines:
         sync_eng.dispose()
         logger.info("database_closed", label=label)
 
@@ -243,10 +287,11 @@ async def create_tables() -> None:
     from app.models import tenant  # noqa: F401
     from app.models import user  # noqa: F401
 
-    for label, engine in [
-        ("main", async_engine),
-        ("additional", additional_async_engine),
-    ]:
+    engines: list[tuple[str, AsyncEngine]] = [("main", async_engine)]
+    if additional_async_engine is not None:
+        engines.append(("additional", additional_async_engine))
+
+    for label, engine in engines:
         try:
             async with engine.begin() as connection:
                 await connection.run_sync(SQLModel.metadata.create_all)
