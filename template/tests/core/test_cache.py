@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
@@ -192,6 +193,160 @@ class TestSet:
         result = await cache.set("mykey", "value")
 
         assert result is False
+
+
+# get_or_set (stampede protection)
+
+
+class FakeLockingRedis:
+    """Minimal in-memory Redis fake supporting SET NX EX semantics.
+
+    `AsyncMock` cannot model the atomicity `get_or_set()` relies on, so
+    this fake serialises access behind an `asyncio.Lock` the same way a
+    single Redis instance serialises commands, letting concurrency tests
+    exercise real lock-contention behaviour instead of pre-programmed
+    mock return values.
+    """
+
+    def __init__(self) -> None:
+        self._store: dict[str, str] = {}
+        self._mutex = asyncio.Lock()
+
+    async def set(
+        self,
+        key: str,
+        value: str,
+        nx: bool = False,
+        ex: int | None = None,
+    ) -> bool | None:
+        async with self._mutex:
+            if nx and key in self._store:
+                return None
+            self._store[key] = value
+            return True
+
+    async def get(self, key: str) -> str | None:
+        async with self._mutex:
+            return self._store.get(key)
+
+    async def setex(self, key: str, ttl: int, value: str) -> bool:
+        async with self._mutex:
+            self._store[key] = value
+            return True
+
+    async def delete(self, key: str) -> int:
+        async with self._mutex:
+            return 1 if self._store.pop(key, None) is not None else 0
+
+
+class TestGetOrSet:
+    """Tests for CacheService.get_or_set()."""
+
+    @pytest.mark.asyncio
+    async def test_cache_hit_skips_compute(
+        self, cache: CacheService, mock_redis: AsyncMock
+    ) -> None:
+        """A cache hit should return the cached value without calling compute."""
+        import json
+
+        mock_redis.get.return_value = json.dumps({"cached": True})
+        compute = AsyncMock(return_value={"cached": False})
+
+        result = await cache.get_or_set("mykey", compute)
+
+        assert result == {"cached": True}
+        compute.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_miss_acquires_lock_computes_and_caches(
+        self, cache: CacheService, mock_redis: AsyncMock
+    ) -> None:
+        """On a miss, the lock winner computes, caches, and releases the lock."""
+        mock_redis.get.return_value = None
+        mock_redis.set.return_value = True
+        compute = AsyncMock(return_value={"computed": True})
+
+        result = await cache.get_or_set("mykey", compute, ttl=60)
+
+        assert result == {"computed": True}
+        compute.assert_awaited_once()
+        mock_redis.set.assert_any_call("test:mykey:lock", "1", nx=True, ex=10)
+        mock_redis.delete.assert_awaited_once_with("test:mykey:lock")
+
+    @pytest.mark.asyncio
+    async def test_lock_loser_retries_and_returns_winners_value(
+        self, cache: CacheService, mock_redis: AsyncMock
+    ) -> None:
+        """A caller that loses the lock race should return the winner's value."""
+        import json
+
+        # First get() (initial check) misses; lock acquisition fails (another
+        # caller holds it); next get() (retry) returns the winner's value.
+        mock_redis.get.side_effect = [None, json.dumps({"from": "winner"})]
+        mock_redis.set.return_value = None
+        compute = AsyncMock(return_value={"from": "loser"})
+
+        result = await cache.get_or_set(
+            "mykey", compute, retry_interval=0.01, wait_timeout=1
+        )
+
+        assert result == {"from": "winner"}
+        compute.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_lock_loser_falls_through_after_wait_timeout(
+        self, cache: CacheService, mock_redis: AsyncMock
+    ) -> None:
+        """If the winner never publishes a value, the loser computes its own."""
+        mock_redis.get.return_value = None
+        mock_redis.set.return_value = None
+        compute = AsyncMock(return_value={"from": "loser"})
+
+        result = await cache.get_or_set(
+            "mykey", compute, retry_interval=0.01, wait_timeout=0.05
+        )
+
+        assert result == {"from": "loser"}
+        compute.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_lock_error_falls_through_to_compute(
+        self, cache: CacheService, mock_redis: AsyncMock
+    ) -> None:
+        """A Redis error while acquiring the lock should not block computation."""
+        mock_redis.get.return_value = None
+        mock_redis.set.side_effect = ConnectionError("connection refused")
+        compute = AsyncMock(return_value={"from": "fallback"})
+
+        result = await cache.get_or_set("mykey", compute)
+
+        assert result == {"from": "fallback"}
+        compute.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_concurrent_misses_compute_only_once(self) -> None:
+        """Concurrent callers racing a cache miss should compute exactly once.
+
+        Uses `FakeLockingRedis` instead of `AsyncMock` because this test
+        needs genuine lock contention across concurrently scheduled
+        coroutines, not a scripted sequence of return values.
+        """
+        fake_redis = FakeLockingRedis()
+        concurrent_cache = CacheService(fake_redis, prefix="test")
+        call_count = 0
+
+        async def compute() -> dict[str, int]:
+            nonlocal call_count
+            call_count += 1
+            await asyncio.sleep(0.05)
+            return {"value": 42}
+
+        results = await asyncio.gather(
+            *[concurrent_cache.get_or_set("shared", compute, ttl=60) for _ in range(10)]
+        )
+
+        assert call_count == 1
+        assert all(result == {"value": 42} for result in results)
 
 
 # delete
