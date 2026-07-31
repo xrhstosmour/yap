@@ -59,6 +59,25 @@ class TestUserServiceCreate:
 
         assert user.hashed_password != "password123"
 
+    @pytest.mark.asyncio
+    async def test_create_user_succeeds_when_audit_log_write_fails(
+        self, session: AsyncSession
+    ) -> None:
+        """User creation should succeed even if the audit-log write fails."""
+        user_create = UserCreate(
+            email="test@example.com",
+            password="password123",
+        )
+
+        user_service = _user_service(session)
+        user_service.audit_repository.log_user_action = AsyncMock(
+            side_effect=Exception("db unavailable")
+        )
+
+        user = await user_service.create(user_create)
+
+        assert user.email == "test@example.com"
+
 
 class TestUserServiceGet:
     """Tests for UserService get operations."""
@@ -355,7 +374,7 @@ class TestDeleteMe:
         mock_user_service.user_repository.update = AsyncMock()
         mock_user_service.user_repository.increment_token_version = AsyncMock()
         mock_user_service.user_repository.delete = AsyncMock()
-        mock_user_service.audit_repository.log_user_action = AsyncMock()
+        mock_user_service.audit_repository.log_user_action_safe = AsyncMock()
 
         with patch(
             "app.services.user_service.generate_password_hash",
@@ -365,7 +384,7 @@ class TestDeleteMe:
 
         # API key revocation statement was issued.
         mock_session.execute.assert_awaited_once()
-        mock_user_service.audit_repository.log_user_action.assert_awaited_once()
+        mock_user_service.audit_repository.log_user_action_safe.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_delete_me_anonymizes_personal_fields(
@@ -379,7 +398,7 @@ class TestDeleteMe:
         mock_user_service.user_repository.update = AsyncMock()
         mock_user_service.user_repository.increment_token_version = AsyncMock()
         mock_user_service.user_repository.delete = AsyncMock()
-        mock_user_service.audit_repository.log_user_action = AsyncMock()
+        mock_user_service.audit_repository.log_user_action_safe = AsyncMock()
 
         with patch(
             "app.services.user_service.generate_password_hash",
@@ -409,7 +428,7 @@ class TestDeleteMe:
         mock_user_service.user_repository.update = AsyncMock()
         mock_user_service.user_repository.increment_token_version = AsyncMock()
         mock_user_service.user_repository.delete = AsyncMock()
-        mock_user_service.audit_repository.log_user_action = AsyncMock()
+        mock_user_service.audit_repository.log_user_action_safe = AsyncMock()
 
         with patch(
             "app.services.user_service.generate_password_hash",
@@ -431,7 +450,7 @@ class TestDeleteMe:
         mock_user_service.user_repository.update = AsyncMock()
         mock_user_service.user_repository.increment_token_version = AsyncMock()
         mock_user_service.user_repository.delete = AsyncMock()
-        mock_user_service.audit_repository.log_user_action = AsyncMock()
+        mock_user_service.audit_repository.log_user_action_safe = AsyncMock()
 
         with patch(
             "app.services.user_service.generate_password_hash",
@@ -439,9 +458,9 @@ class TestDeleteMe:
         ):
             await mock_user_service.delete_me(user)
 
-        mock_user_service.audit_repository.log_user_action.assert_awaited_once()
+        mock_user_service.audit_repository.log_user_action_safe.assert_awaited_once()
         call_kwargs = (
-            mock_user_service.audit_repository.log_user_action.call_args.kwargs
+            mock_user_service.audit_repository.log_user_action_safe.call_args.kwargs
         )
         assert call_kwargs["user_id"] == user.id
         assert call_kwargs["resource_type"] == "user"
@@ -461,7 +480,7 @@ class TestRevokeAllSessions:
 
         mock_user_service.user_repository.get = AsyncMock(return_value=target_user)
         mock_user_service.user_repository.increment_token_version = AsyncMock()
-        mock_user_service.audit_repository.log_user_action = AsyncMock()
+        mock_user_service.audit_repository.log_user_action_safe = AsyncMock()
 
         result = await mock_user_service.revoke_all_sessions(
             user_id=target_user.id,
@@ -472,7 +491,7 @@ class TestRevokeAllSessions:
         mock_user_service.user_repository.increment_token_version.assert_awaited_once_with(
             target_user.id
         )
-        mock_user_service.audit_repository.log_user_action.assert_awaited_once()
+        mock_user_service.audit_repository.log_user_action_safe.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_revoke_all_sessions_user_not_found(
@@ -522,7 +541,7 @@ class TestExportMyData:
         mock_api_key_repo = MagicMock()
         mock_api_key_repo.list = AsyncMock(return_value=([], 0))
 
-        mock_user_service.audit_repository.log_user_action = AsyncMock()
+        mock_user_service.audit_repository.log_user_action_safe = AsyncMock()
 
         with patch(
             "app.repositories.api_key_repository.APIKeyRepository",
@@ -560,7 +579,7 @@ class TestExportMyData:
         mock_api_key_repo = MagicMock()
         mock_api_key_repo.list = AsyncMock(return_value=([mock_api_key], 1))
 
-        mock_user_service.audit_repository.log_user_action = AsyncMock()
+        mock_user_service.audit_repository.log_user_action_safe = AsyncMock()
 
         with patch(
             "app.repositories.api_key_repository.APIKeyRepository",
@@ -608,7 +627,7 @@ class TestExportMyData:
         mock_api_key_repo = MagicMock()
         mock_api_key_repo.list = AsyncMock(return_value=([], 0))
 
-        mock_user_service.audit_repository.log_user_action = AsyncMock()
+        mock_user_service.audit_repository.log_user_action_safe = AsyncMock()
 
         with patch(
             "app.repositories.api_key_repository.APIKeyRepository",
@@ -635,7 +654,7 @@ class TestExportMyData:
         mock_api_key_repo = MagicMock()
         mock_api_key_repo.list = AsyncMock(return_value=([], 0))
 
-        mock_user_service.audit_repository.log_user_action = AsyncMock()
+        mock_user_service.audit_repository.log_user_action_safe = AsyncMock()
 
         with patch(
             "app.repositories.api_key_repository.APIKeyRepository",
@@ -643,7 +662,7 @@ class TestExportMyData:
         ):
             await mock_user_service.export_my_data(user)
 
-        mock_user_service.audit_repository.log_user_action.assert_awaited_once()
+        mock_user_service.audit_repository.log_user_action_safe.assert_awaited_once()
 
 
 # list_users
@@ -744,7 +763,7 @@ class TestAdminUpdate:
 
         mock_user_service.user_repository.get = AsyncMock(return_value=existing)
         mock_user_service.user_repository.update = AsyncMock(return_value=updated)
-        mock_user_service.audit_repository.log_user_action = AsyncMock()
+        mock_user_service.audit_repository.log_user_action_safe = AsyncMock()
 
         data = UserUpdate.model_construct(is_active=False)
         result = await mock_user_service.update(user_id, data, updated_by=admin_id)
@@ -753,7 +772,7 @@ class TestAdminUpdate:
         mock_user_service.user_repository.update.assert_awaited_once_with(
             user_id, {"is_active": False}
         )
-        mock_user_service.audit_repository.log_user_action.assert_awaited_once()
+        mock_user_service.audit_repository.log_user_action_safe.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_update_role_field(
@@ -767,7 +786,7 @@ class TestAdminUpdate:
 
         mock_user_service.user_repository.get = AsyncMock(return_value=existing)
         mock_user_service.user_repository.update = AsyncMock(return_value=updated)
-        mock_user_service.audit_repository.log_user_action = AsyncMock()
+        mock_user_service.audit_repository.log_user_action_safe = AsyncMock()
 
         data = UserUpdate.model_construct(role="superuser")
         result = await mock_user_service.update(user_id, data, updated_by=admin_id)
@@ -789,7 +808,7 @@ class TestAdminUpdate:
 
         mock_user_service.user_repository.get = AsyncMock(return_value=existing)
         mock_user_service.user_repository.update = AsyncMock(return_value=updated)
-        mock_user_service.audit_repository.log_user_action = AsyncMock()
+        mock_user_service.audit_repository.log_user_action_safe = AsyncMock()
 
         data = UserUpdate.model_construct(full_name="New", is_active=False)
         result = await mock_user_service.update(user_id, data, updated_by=admin_id)
@@ -816,7 +835,7 @@ class TestAdminUpdate:
 
         assert result is existing
         mock_user_service.user_repository.update.assert_not_called()
-        mock_user_service.audit_repository.log_user_action.assert_not_called()
+        mock_user_service.audit_repository.log_user_action_safe.assert_not_called()
 
 
 # UserServiceError
@@ -859,7 +878,7 @@ class TestUserServiceErrors:
 
         mock_user_service.user_repository.get = AsyncMock(return_value=existing)
         mock_user_service.user_repository.update = AsyncMock(return_value=updated)
-        mock_user_service.audit_repository.log_user_action = AsyncMock()
+        mock_user_service.audit_repository.log_user_action_safe = AsyncMock()
 
         data = UserUpdate.model_construct(email="same@example.com")
         result = await mock_user_service.update(user_id, data, updated_by=admin_id)

@@ -49,6 +49,30 @@ class TestAuthService:
         assert authenticated.email == user.email
 
     @pytest.mark.asyncio
+    async def test_authenticate_succeeds_when_audit_log_write_fails(
+        self, session: AsyncSession
+    ) -> None:
+        """Login should succeed even if the audit-log write fails."""
+        user_create = RegisterRequest(
+            email="test@example.com",
+            password="password123",
+        )
+
+        auth_service = _auth_service(session)
+        user = await auth_service.register(user_create)
+        auth_service.audit_repository.log_user_action = AsyncMock(
+            side_effect=Exception("db unavailable")
+        )
+
+        authenticated = await auth_service.authenticate(
+            email="test@example.com",
+            password="password123",
+        )
+
+        assert authenticated is not None
+        assert authenticated.email == user.email
+
+    @pytest.mark.asyncio
     async def test_authenticate_user_wrong_password(
         self, session: AsyncSession
     ) -> None:
