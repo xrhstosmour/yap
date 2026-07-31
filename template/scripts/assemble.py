@@ -13,6 +13,9 @@ import sys
 from typing import Any
 
 REPO_URL = "https://github.com/xrhstosmour/containers.git"
+# Pin to a specific commit instead of floating on the default branch tip.
+# Bump this deliberately when the containers repo needs to be updated.
+REPO_COMMIT = "45fd5762264be7c5bedcfe80f41c0e75ddcdaa0e"
 
 
 def run_openssl(*args: Any) -> None:  # noqa: ANN401
@@ -159,10 +162,23 @@ def main() -> None:
         # Remove any stale directory before cloning so this step is
         # idempotent even when a previous run left /tmp/containers behind.
         shutil.rmtree("/tmp/containers", ignore_errors=True)
-        print(f"Cloning {REPO_URL} ...")
+        print(f"Cloning {REPO_URL} @ {REPO_COMMIT} ...")
+        os.makedirs("/tmp/containers")
+        subprocess.run(["git", "init"], check=True, cwd="/tmp/containers")
         subprocess.run(
-            ["git", "clone", "--depth", "1", REPO_URL, "/tmp/containers"],
+            ["git", "remote", "add", "origin", REPO_URL],
             check=True,
+            cwd="/tmp/containers",
+        )
+        subprocess.run(
+            ["git", "fetch", "--depth", "1", "origin", REPO_COMMIT],
+            check=True,
+            cwd="/tmp/containers",
+        )
+        subprocess.run(
+            ["git", "checkout", "FETCH_HEAD"],
+            check=True,
+            cwd="/tmp/containers",
         )
         containers_root = "/tmp/containers"
 
