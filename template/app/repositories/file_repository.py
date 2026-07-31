@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+from datetime import UTC
+from datetime import datetime
+from typing import Any
 from uuid import UUID
+from uuid import uuid7
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
+from app.core.tenant import get_current_tenant_id
 from app.models.file import File
 from app.repositories.base import BaseRepository
 
@@ -28,6 +34,59 @@ class FileRepository(BaseRepository[File]):
         )
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
+
+    async def create_or_increment(self, data: dict[str, Any]) -> tuple[File, bool]:
+        """Insert a new file record, or increment ``reference_count`` if one
+        with the same ``content_hash`` already exists.
+
+        Uses ``INSERT ... ON CONFLICT (content_hash) DO UPDATE`` so the
+        database resolves duplicate-content races atomically: two concurrent
+        uploads of identical content can no longer both pass a stale
+        existence check and create duplicate rows. ``content_hash`` is
+        globally unique (see ``File.content_hash``), so this check and
+        follow-up lookup are intentionally not tenant-scoped.
+
+        Args:
+            data: Field values for the new file record.
+
+        Returns:
+            Tuple of ``(record, created)``. ``created`` is ``True`` when a
+            new row was inserted, ``False`` when an existing row's
+            ``reference_count`` was incremented instead.
+        """
+        tenant_id = get_current_tenant_id()
+        if tenant_id and "tenant_id" not in data:
+            data["tenant_id"] = tenant_id
+
+        now = datetime.now(UTC)
+        data.setdefault("created_at", now)
+        data.setdefault("updated_at", now)
+        new_id = data.setdefault("id", uuid7())
+
+        statement = (
+            pg_insert(File)
+            .values(**data)
+            .on_conflict_do_update(
+                index_elements=["content_hash"],
+                set_={
+                    "reference_count": File.reference_count + 1,
+                    "updated_at": now,
+                },
+            )
+            .returning(File.id)  # type: ignore[call-overload]
+        )
+        result = await self.session.execute(statement)
+        row_id = result.scalar_one()
+        await self.session.flush()
+
+        created = row_id == new_id
+        record = await self.get_by_content_hash(data["content_hash"])
+        if record is None:
+            raise RuntimeError(
+                "create_or_increment: no row found for content_hash "
+                f"immediately after upsert ({data['content_hash'][:16]}...)"
+            )
+        return record, created
 
     async def get_owned(self, file_id: UUID, user_id: UUID) -> File | None:
         """Get a file by ID ensuring the requesting user owns it."""

@@ -40,9 +40,14 @@ class File(BaseModel, table=True):
         nullable=False,
     )
 
+    # Globally unique (not tenant-scoped): identical content is stored once
+    # regardless of tenant, mirroring User.email and other codebase-wide
+    # unique columns. The constraint also closes the race between
+    # concurrent uploads of identical content on the dedup check.
     content_hash: str = Field(
         nullable=False,
         max_length=64,
+        unique=True,
         index=True,
     )
 
