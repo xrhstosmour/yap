@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -97,6 +98,58 @@ class TestAuditLogRepository:
         persisted = result.scalar_one_or_none()
         assert persisted is not None
         assert persisted.action == "user_create"
+
+    @pytest.mark.anyio
+    async def test_log_user_action_safe_creates_audit_entry(
+        self, session: AsyncSession
+    ) -> None:
+        """log_user_action_safe() should create an entry on success.
+
+        Args:
+            session: Async database session fixture.
+
+        Returns:
+            None.
+        """
+        tenant = await self._create_tenant(session)
+        repo = AuditLogRepository(session)
+        user_id = uuid4()
+
+        await repo.log_user_action_safe(
+            action=AuditAction.USER_CREATE,
+            user_id=user_id,
+            tenant_id=tenant.id,
+            email="admin@example.com",
+        )
+
+        logs, total = await repo.list(filters={"actor_id": str(user_id)})
+        assert total == 1
+        assert logs[0].action == "user_create"
+
+    @pytest.mark.anyio
+    async def test_log_user_action_safe_swallows_write_failure(
+        self, session: AsyncSession
+    ) -> None:
+        """log_user_action_safe() should not raise when the write fails.
+
+        Args:
+            session: Async database session fixture.
+
+        Returns:
+            None.
+        """
+        tenant = await self._create_tenant(session)
+        repo = AuditLogRepository(session)
+        repo.log_user_action = AsyncMock(  # type: ignore[method-assign]
+            side_effect=Exception("db unavailable")
+        )
+
+        await repo.log_user_action_safe(
+            action=AuditAction.USER_CREATE,
+            user_id=uuid4(),
+            tenant_id=tenant.id,
+            email="admin@example.com",
+        )
 
     @pytest.mark.anyio
     async def test_list_with_user_id_filter(self, session: AsyncSession) -> None:
