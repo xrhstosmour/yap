@@ -17,6 +17,8 @@ from fastapi import WebSocket
 from fastapi import WebSocketDisconnect
 
 from app.core.logging import get_logger
+from app.dependencies import CurrentUserWS
+from app.dependencies import SuperuserUserWS
 
 router = APIRouter(prefix="/ws", tags=["WebSocket"])
 logger = get_logger("api.ws")
@@ -44,11 +46,15 @@ def _get_metrics() -> dict:
 
 
 @router.websocket("/metrics")
-async def metrics_stream(websocket: WebSocket) -> None:
+async def metrics_stream(websocket: WebSocket, _current_user: SuperuserUserWS) -> None:
     """Stream live system metrics every 2 seconds.
+
+    Requires an authenticated superuser (see ``get_current_superuser_ws``)
+    since this exposes internal DB connection-pool state.
 
     Args:
         websocket: Incoming WebSocket connection
+        _current_user: Authenticated superuser, validated before accept
     """
     await websocket.accept()
     client_id = str(id(websocket))
@@ -74,11 +80,14 @@ async def metrics_stream(websocket: WebSocket) -> None:
 
 
 @router.websocket("/health")
-async def health_socket(websocket: WebSocket) -> None:
+async def health_socket(websocket: WebSocket, _current_user: CurrentUserWS) -> None:
     """WebSocket health check endpoint.
+
+    Requires an authenticated user (see ``get_current_user_ws``).
 
     Args:
         websocket: Incoming WebSocket connection
+        _current_user: Authenticated user, validated before accept
     """
     await websocket.accept()
     client_id = str(id(websocket))

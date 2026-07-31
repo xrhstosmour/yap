@@ -5,21 +5,58 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
+from uuid import uuid4
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from starlette.testclient import WebSocketDisconnect
 
 from app.api.v1.websocket import broadcast_notification
 from app.api.v1.websocket import router as ws_router
+from app.core.security import create_access_token
+from app.database import get_async_session
+from app.dependencies import UserRepository
+from app.models.user import User
+from app.models.user import UserRole
+
+
+def _make_user(*, role: UserRole = UserRole.USER, is_active: bool = True) -> User:
+    """Build an in-memory `User` for stubbing the auth dependency."""
+    return User(
+        id=uuid4(),
+        email=f"{uuid4()}@example.com",
+        hashed_password="hashed",
+        is_active=is_active,
+        role=role,
+        tenant_id=None,
+    )
+
+
+def _stub_user_repository(monkeypatch: pytest.MonkeyPatch, user: User | None) -> None:
+    """Make `UserRepository.get()` return `user` without touching the DB."""
+
+    async def _get(self: UserRepository, _user_id: object) -> User | None:
+        return user
+
+    monkeypatch.setattr(UserRepository, "get", _get)
 
 
 @pytest.fixture
 def ws_client() -> TestClient:
-    """Create a minimal test app with only the WebSocket router mounted."""
+    """Create a minimal test app with only the WebSocket router mounted.
+
+    The DB session dependency is overridden with a stub, since the auth
+    dependency's DB lookup is stubbed per-test via `_stub_user_repository`.
+    """
     app = FastAPI()
     # ws_router already has prefix="/ws"; mount under /api/v1
     app.include_router(ws_router, prefix="/api/v1")
+
+    async def _fake_session() -> object:
+        yield None
+
+    app.dependency_overrides[get_async_session] = _fake_session
     return TestClient(app)
 
 
@@ -49,21 +86,117 @@ class TestHealthWebSocket:
     """Tests for the /ws/health WebSocket endpoint."""
 
     @pytest.mark.usefixtures("patch_get_event_loop")
-    def test_websocket_connect_and_ping_received(self, ws_client: TestClient) -> None:
-        """Connecting to /ws/health should receive a ping message."""
-        with ws_client.websocket_connect("/api/v1/ws/health") as websocket:
+    def test_websocket_connect_and_ping_received(
+        self, ws_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Connecting with a valid token should receive a ping message."""
+        user = _make_user()
+        _stub_user_repository(monkeypatch, user)
+        token = create_access_token(user.id)
+
+        with ws_client.websocket_connect(
+            f"/api/v1/ws/health?token={token}"
+        ) as websocket:
             data = websocket.receive_json()
             assert data["type"] == "ping"
 
     @pytest.mark.usefixtures("patch_get_event_loop")
-    def test_websocket_pong_roundtrip(self, ws_client: TestClient) -> None:
+    def test_websocket_pong_roundtrip(
+        self, ws_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Sending 'pong' should receive a pong confirmation."""
-        with ws_client.websocket_connect("/api/v1/ws/health") as websocket:
+        user = _make_user()
+        _stub_user_repository(monkeypatch, user)
+        token = create_access_token(user.id)
+
+        with ws_client.websocket_connect(
+            f"/api/v1/ws/health?token={token}"
+        ) as websocket:
             data = websocket.receive_json()
             assert data["type"] == "ping"
             websocket.send_text("pong")
             response = websocket.receive_json()
             assert response == {"type": "pong", "ok": True}
+
+    def test_websocket_rejects_missing_token(self, ws_client: TestClient) -> None:
+        """Connecting without a token should be rejected before any data is sent."""
+        with pytest.raises(WebSocketDisconnect) as excinfo:
+            with ws_client.websocket_connect("/api/v1/ws/health"):
+                pass
+        assert excinfo.value.code == 1008
+
+    def test_websocket_rejects_invalid_token(self, ws_client: TestClient) -> None:
+        """Connecting with a malformed token should be rejected."""
+        with pytest.raises(WebSocketDisconnect) as excinfo:
+            with ws_client.websocket_connect(
+                "/api/v1/ws/health?token=not-a-real-token"
+            ):
+                pass
+        assert excinfo.value.code == 1008
+
+    def test_websocket_rejects_inactive_user(
+        self, ws_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A token for an inactive user should be rejected."""
+        user = _make_user(is_active=False)
+        _stub_user_repository(monkeypatch, user)
+        token = create_access_token(user.id)
+
+        with pytest.raises(WebSocketDisconnect) as excinfo:
+            with ws_client.websocket_connect(f"/api/v1/ws/health?token={token}"):
+                pass
+        assert excinfo.value.code == 1008
+
+    def test_websocket_rejects_unknown_user(
+        self, ws_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A token for a user that no longer exists should be rejected."""
+        _stub_user_repository(monkeypatch, None)
+        token = create_access_token(uuid4())
+
+        with pytest.raises(WebSocketDisconnect) as excinfo:
+            with ws_client.websocket_connect(f"/api/v1/ws/health?token={token}"):
+                pass
+        assert excinfo.value.code == 1008
+
+
+class TestMetricsWebSocket:
+    """Tests for the /ws/metrics WebSocket endpoint."""
+
+    def test_websocket_rejects_missing_token(self, ws_client: TestClient) -> None:
+        """Connecting without a token should be rejected before any data is sent."""
+        with pytest.raises(WebSocketDisconnect) as excinfo:
+            with ws_client.websocket_connect("/api/v1/ws/metrics"):
+                pass
+        assert excinfo.value.code == 1008
+
+    def test_websocket_rejects_non_superuser(
+        self, ws_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An authenticated but non-superuser token should be rejected."""
+        user = _make_user(role=UserRole.USER)
+        _stub_user_repository(monkeypatch, user)
+        token = create_access_token(user.id)
+
+        with pytest.raises(WebSocketDisconnect) as excinfo:
+            with ws_client.websocket_connect(f"/api/v1/ws/metrics?token={token}"):
+                pass
+        assert excinfo.value.code == 1008
+
+    def test_websocket_connect_as_superuser_receives_metrics(
+        self, ws_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A superuser token should be accepted and stream metrics."""
+        user = _make_user(role=UserRole.SUPERUSER)
+        _stub_user_repository(monkeypatch, user)
+        token = create_access_token(user.id)
+
+        with ws_client.websocket_connect(
+            f"/api/v1/ws/metrics?token={token}"
+        ) as websocket:
+            data = websocket.receive_json()
+            assert data["type"] == "metrics"
+            assert "pool" in data["data"]
 
 
 class TestBroadcastNotification:
