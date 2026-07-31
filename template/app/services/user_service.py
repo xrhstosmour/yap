@@ -6,6 +6,7 @@ user-related operations.
 
 from __future__ import annotations
 
+import asyncio
 import secrets
 from datetime import UTC
 from datetime import datetime
@@ -137,7 +138,7 @@ class UserService:
 
         # Create user.
         role = UserRole(data.role) if data.role else UserRole.USER
-        password_hash = generate_password_hash(data.password)
+        password_hash = await asyncio.to_thread(generate_password_hash, data.password)
         user = await self.user_repository.create_user(
             email=data.email,
             password_hash=password_hash,
@@ -254,7 +255,9 @@ class UserService:
         if email_changing or password_changing:
             if not data.current_password:
                 raise UserServiceError("Current password is required for this change")
-            if not verify_password(data.current_password, user.hashed_password):
+            if not await asyncio.to_thread(
+                verify_password, data.current_password, user.hashed_password
+            ):
                 raise UserServiceError("Current password is incorrect")
 
         # Check email uniqueness before updating.
@@ -265,7 +268,10 @@ class UserService:
 
         # Hash new password if provided.
         if password_changing:
-            update_data["hashed_password"] = generate_password_hash(data.new_password)  # type: ignore[arg-type]
+            update_data["hashed_password"] = await asyncio.to_thread(
+                generate_password_hash,
+                data.new_password,  # type: ignore[arg-type]
+            )
             update_data["token_version"] = user.token_version + 1
 
         if update_data:
@@ -339,7 +345,9 @@ class UserService:
 
             # Anonymize personal fields to satisfy GDPR Article 17 right to erasure.
             anonymized_email = f"deleted_{user.id}@deleted.invalid"
-            placeholder_hash = generate_password_hash(secrets.token_urlsafe(32))
+            placeholder_hash = await asyncio.to_thread(
+                generate_password_hash, secrets.token_urlsafe(32)
+            )
             await self.user_repository.update(
                 user.id,
                 {
