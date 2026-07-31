@@ -20,6 +20,7 @@ module = [
     "qrcode.*",
     "PIL.*",
     "boto3.*",
+    "botocore.*",
     "webauthn.*",
     "pybreaker.*",
     "opentelemetry.*",
