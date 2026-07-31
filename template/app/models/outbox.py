@@ -101,26 +101,30 @@ class Outbox:
         self.session.add(event)
         return event
 
-    async def mark_published(self, event_id: UUID) -> None:
-        result = await self.session.execute(
-            select(OutboxEvent).where(OutboxEvent.id == event_id)  # type: ignore[arg-type]
-        )
-        event = result.scalar_one_or_none()
-        if event:
-            event.status = "published"
-            event.published_at = datetime.now(UTC)
+    async def mark_published(self, event: OutboxEvent) -> None:
+        """Mark an already-fetched event as published.
 
-    async def mark_failed(self, event_id: UUID) -> None:
-        result = await self.session.execute(
-            select(OutboxEvent).where(OutboxEvent.id == event_id)  # type: ignore[arg-type]
-        )
-        event = result.scalar_one_or_none()
-        if event:
-            event.retry_count += 1
-            if event.retry_count >= 5:
-                event.status = "dead"
-            else:
-                event.status = "pending"
+        Args:
+            event: The OutboxEvent instance to update, as returned by
+                `get_pending()`. Updating the object directly avoids a
+                redundant re-`SELECT` by primary key.
+        """
+        event.status = "published"
+        event.published_at = datetime.now(UTC)
+
+    async def mark_failed(self, event: OutboxEvent) -> None:
+        """Mark an already-fetched event as failed, retrying or dead-lettering.
+
+        Args:
+            event: The OutboxEvent instance to update, as returned by
+                `get_pending()`. Updating the object directly avoids a
+                redundant re-`SELECT` by primary key.
+        """
+        event.retry_count += 1
+        if event.retry_count >= 5:
+            event.status = "dead"
+        else:
+            event.status = "pending"
 
     async def get_pending(self, limit: int = 100) -> list[OutboxEvent]:
         result = await self.session.execute(
