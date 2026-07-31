@@ -72,22 +72,15 @@ class TenantService:
         )
 
         if self.audit_repository:
-            try:
-                await self.audit_repository.log_user_action(
-                    action=AuditAction.TENANT_CREATE,
-                    user_id=created_by or SYSTEM_TENANT_ID,
-                    tenant_id=tenant.id,
-                    email=None,
-                    resource_type="tenant",
-                    resource_id=str(tenant.id),
-                    metadata={"name": tenant.name, "slug": tenant.slug},
-                )
-            except Exception:
-                logger.warning(
-                    "tenant_audit_log_failed",
-                    tenant_id=str(tenant.id),
-                    exc_info=True,
-                )
+            await self.audit_repository.log_user_action_safe(
+                action=AuditAction.TENANT_CREATE,
+                user_id=created_by or SYSTEM_TENANT_ID,
+                tenant_id=tenant.id,
+                email=None,
+                resource_type="tenant",
+                resource_id=str(tenant.id),
+                metadata={"name": tenant.name, "slug": tenant.slug},
+            )
 
         logger.info("tenant_created", tenant_id=str(tenant.id), slug=tenant.slug)
         return tenant
@@ -120,25 +113,18 @@ class TenantService:
 
         if result:
             if self.audit_repository:
-                try:
-                    await self.audit_repository.log_user_action(
-                        action=AuditAction.TENANT_UPDATE,
-                        user_id=updated_by or SYSTEM_TENANT_ID,
-                        tenant_id=tenant.id,
-                        email=None,
-                        resource_type="tenant",
-                        resource_id=str(tenant.id),
-                        metadata={
-                            "name": result.name,
-                            "slug": result.slug,
-                        },
-                    )
-                except Exception:
-                    logger.warning(
-                        "tenant_audit_log_failed",
-                        tenant_id=str(tenant_id),
-                        exc_info=True,
-                    )
+                await self.audit_repository.log_user_action_safe(
+                    action=AuditAction.TENANT_UPDATE,
+                    user_id=updated_by or SYSTEM_TENANT_ID,
+                    tenant_id=tenant.id,
+                    email=None,
+                    resource_type="tenant",
+                    resource_id=str(tenant.id),
+                    metadata={
+                        "name": result.name,
+                        "slug": result.slug,
+                    },
+                )
 
             logger.info(
                 "tenant_updated",
@@ -158,22 +144,15 @@ class TenantService:
         deleted = await self.tenant_repository.delete(tenant_id)
 
         if deleted and self.audit_repository:
-            try:
-                await self.audit_repository.log_user_action(
-                    action=AuditAction.TENANT_DELETE,
-                    user_id=deleted_by or SYSTEM_TENANT_ID,
-                    tenant_id=tenant.id,
-                    email=None,
-                    resource_type="tenant",
-                    resource_id=str(tenant.id),
-                    metadata={"name": tenant.name, "slug": tenant.slug},
-                )
-            except Exception:
-                logger.warning(
-                    "tenant_audit_log_failed",
-                    tenant_id=str(tenant_id),
-                    exc_info=True,
-                )
+            await self.audit_repository.log_user_action_safe(
+                action=AuditAction.TENANT_DELETE,
+                user_id=deleted_by or SYSTEM_TENANT_ID,
+                tenant_id=tenant.id,
+                email=None,
+                resource_type="tenant",
+                resource_id=str(tenant.id),
+                metadata={"name": tenant.name, "slug": tenant.slug},
+            )
 
         logger.info("tenant_deleted", tenant_id=str(tenant_id))
         return deleted
