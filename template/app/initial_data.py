@@ -10,6 +10,7 @@ from sqlmodel import select
 from sqlmodel import text
 
 from app.core import SYSTEM_TENANT_ID
+from app.core.encryption import crypto
 from app.core.security import generate_password_hash
 from app.core.settings import settings
 from app.database import async_session_factory
@@ -33,7 +34,10 @@ async def init() -> None:
             logger.info("Created system tenant")
 
         result = await session.execute(
-            select(User).where(User.email == settings.FIRST_SUPERUSER_EMAIL)
+            select(User).where(
+                User.email_hash
+                == crypto.hash_for_search(settings.FIRST_SUPERUSER_EMAIL)
+            )
         )
         existing_user = result.scalar_one_or_none()
 
