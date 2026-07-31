@@ -13,10 +13,13 @@ from uuid import UUID
 
 from pydantic import EmailStr
 from sqlalchemy import Enum as SAEnum
+from sqlalchemy import event
 from sqlalchemy.orm import relationship
 from sqlmodel import Field
 from sqlmodel import Relationship
 
+from app.core.encryption import EncryptedString
+from app.core.encryption import crypto
 from app.models.base import BaseModel
 
 if TYPE_CHECKING:
@@ -41,8 +44,17 @@ class User(BaseModel, table=True):
 
     Attributes:
         id: UUID primary key
-        email: Unique email address
-        full_name: User's display name
+        email: Unique email address. Encrypted at rest (`EncryptedString`);
+            reads/writes are transparent plain text. `email_hash` is a
+            deterministic HMAC of the address, used for equality lookups
+            (e.g. login) and to enforce uniqueness, since ciphertext is
+            randomised and cannot be compared or indexed directly.
+        email_hash: Deterministic HMAC-SHA256 hash of `email`, unique and
+            indexed. See `CryptoService.hash_for_search()`.
+        full_name: User's display name. Left unencrypted — see note below.
+        phone: Phone number in E.164 format. Encrypted at rest, same
+            pattern as `email`. `phone_hash` enables exact-match lookups.
+        phone_hash: Deterministic HMAC-SHA256 hash of `phone`, indexed.
         hashed_password: Bcrypt hash of the password
         is_active: Whether the user can log in
         role: User role for access control (superuser, user)
@@ -59,15 +71,33 @@ class User(BaseModel, table=True):
         tenant: The organization this user belongs to
         api_keys: API keys owned by this user
         oauth_accounts: Linked OAuth provider accounts
+
+    Note:
+        `full_name` is intentionally NOT encrypted. It backs the
+        greeklish/trigram fuzzy search in `UserRepository.search()`
+        (`app/core/search.py`), which requires substring/similarity
+        matching directly in SQL. Fernet ciphertext is randomised per
+        value, so encrypted text cannot support trigram or full-text
+        search — only exact-match lookups via a deterministic HMAC hash
+        (as used for `email`/`phone`) are possible on encrypted columns.
+        Encrypting `full_name` would require dropping name search
+        entirely or building a bespoke searchable-encryption scheme
+        (e.g. per-token HMAC blind indexing), which is out of scope here.
     """
 
     __tablename__ = "users"  # pyright: ignore[reportAssignmentType]
 
     email: EmailStr = Field(
+        nullable=False,
+        max_length=255,
+        sa_type=EncryptedString(512),  # type: ignore[call-overload]
+    )
+
+    email_hash: str = Field(
         unique=True,
         index=True,
         nullable=False,
-        max_length=255,
+        max_length=64,
     )
 
     full_name: str | None = Field(
@@ -75,7 +105,19 @@ class User(BaseModel, table=True):
         max_length=255,
     )
 
-    phone: str | None = Field(default=None, max_length=16, nullable=True)
+    phone: str | None = Field(
+        default=None,
+        max_length=16,
+        nullable=True,
+        sa_type=EncryptedString(255),  # type: ignore[call-overload]
+    )
+
+    phone_hash: str | None = Field(
+        default=None,
+        index=True,
+        nullable=True,
+        max_length=64,
+    )
 
     hashed_password: str = Field(
         nullable=False,
@@ -142,3 +184,28 @@ class User(BaseModel, table=True):
             lazy="selectin",
         ),
     )
+
+
+@event.listens_for(User.email, "set")
+def _sync_email_hash(
+    target: User, value: str | None, oldvalue: object, initiator: object
+) -> None:
+    """Keep `email_hash` in sync whenever `email` is assigned.
+
+    Fires on every attribute assignment, including model construction
+    (`User(email=...)`) and `setattr()`, so callers never compute the
+    search hash themselves. Does not fire on ORM load — the hash is
+    read back as its own column value there. `email` is required
+    (`nullable=False`), so `value` is only falsy transiently, e.g.
+    before pydantic validation has run.
+    """
+    if value:
+        target.email_hash = crypto.hash_for_search(value)
+
+
+@event.listens_for(User.phone, "set")
+def _sync_phone_hash(
+    target: User, value: str | None, oldvalue: object, initiator: object
+) -> None:
+    """Keep `phone_hash` in sync whenever `phone` is assigned. See `_sync_email_hash`."""
+    target.phone_hash = crypto.hash_for_search(value) if value else None

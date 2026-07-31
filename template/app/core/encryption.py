@@ -25,25 +25,22 @@ Module-level convenience wrappers::
     encrypted = encrypt("my-totp-secret")
     original = decrypt(encrypted)
 
-Model field pattern::
+Transparent model field pattern (used by `User.email` / `User.phone`)::
 
-    from app.core.encryption import crypto
+    from app.core.encryption import EncryptedString
 
     class User(BaseModel, table=True):
-        email_encrypted: str = Field(...)
-
-        @property
-        def email(self) -> str:
-            return crypto.decrypt(self.email_encrypted)
-
-        @email.setter
-        def email(self, value: str) -> None:
-            self.email_encrypted = crypto.encrypt(value)
+        # The column stores ciphertext; the Python attribute always
+        # reads/writes plain text — encryption happens at the SQLAlchemy
+        # bind/result boundary, transparently to the rest of the app.
+        email: EmailStr = Field(sa_type=EncryptedString(512))
 
 Searchable encrypted field (deterministic)::
 
     search_token = crypto.hash_for_search("user@yap.com")
-    # Store search_token alongside encrypted value for lookups
+    # Store search_token in a companion `*_hash` column (e.g. `email_hash`)
+    # alongside the encrypted value, and filter on it for equality lookups
+    # — the encrypted column itself cannot be searched or indexed.
 """
 
 from __future__ import annotations
@@ -51,10 +48,13 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+from typing import Any
 
 
 from cryptography.fernet import Fernet
 from cryptography.fernet import MultiFernet
+from sqlalchemy import String
+from sqlalchemy.types import TypeDecorator
 
 
 class CryptoService:
@@ -163,6 +163,42 @@ class CryptoService:
         hmac_key = hashlib.sha256(key_bytes + b":search-hmac").digest()
         h = hmac.new(hmac_key, value.encode(), hashlib.sha256)
         return "hmac:" + base64.urlsafe_b64encode(h.digest()).decode()
+
+
+class EncryptedString(TypeDecorator[str]):
+    """SQLAlchemy column type that transparently encrypts values at rest.
+
+    Wraps a `String` column so application code reads and writes plain
+    text while the database only ever stores ciphertext. Encryption
+    happens on bind (write) via `crypto.encrypt()` and decryption
+    happens on load (read) via `crypto.decrypt()`, using the global
+    `crypto` `CryptoService` instance.
+
+    Because Fernet ciphertext is randomised (unique IV per call), this
+    type is not suitable for columns that need equality lookups or
+    uniqueness constraints — pair it with a deterministic HMAC hash
+    column (see `CryptoService.hash_for_search()`) for that purpose.
+
+    Example::
+
+        class User(BaseModel, table=True):
+            email: EmailStr = Field(sa_type=EncryptedString(512))
+    """
+
+    impl = String
+    cache_ok = True
+
+    def process_bind_param(self, value: Any, dialect: Any) -> str | None:
+        """Encrypt the plain text value before it is written to the database."""
+        if value is None:
+            return None
+        return crypto.encrypt(str(value))
+
+    def process_result_value(self, value: Any, dialect: Any) -> str | None:
+        """Decrypt the stored ciphertext after it is read from the database."""
+        if value is None:
+            return None
+        return crypto.decrypt(str(value))
 
 
 def generate_key() -> str:

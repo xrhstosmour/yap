@@ -14,6 +14,7 @@ from sqlmodel import and_
 from sqlmodel import func
 from sqlmodel import select
 
+from app.core.encryption import crypto
 from app.core.logging import get_logger
 from app.models.user import User
 from app.models.user import UserRole
@@ -41,6 +42,10 @@ class UserRepository(SearchMixin, BaseRepository[User]):
     async def get_by_email(self, email: str) -> User | None:
         """Get user by email address.
 
+        `email` is encrypted at rest, so lookups filter on `email_hash`
+        (a deterministic HMAC of the address) rather than the encrypted
+        column itself, which cannot be compared directly in SQL.
+
         Args:
             email: User's email address
 
@@ -49,7 +54,7 @@ class UserRepository(SearchMixin, BaseRepository[User]):
         """
         query = select(User).where(
             and_(
-                User.email == email,  # type: ignore[arg-type]
+                User.email_hash == crypto.hash_for_search(email),  # type: ignore[arg-type]
                 User.deleted_at.is_(None),  # type: ignore[union-attr]
             )
         )
@@ -65,7 +70,11 @@ class UserRepository(SearchMixin, BaseRepository[User]):
         Returns:
             True if email exists
         """
-        query = select(func.count()).select_from(User).where(User.email == email)  # type: ignore[arg-type]
+        query = (
+            select(func.count())
+            .select_from(User)
+            .where(User.email_hash == crypto.hash_for_search(email))  # type: ignore[arg-type]
+        )
         result = await self.session.execute(query)
         return (result.scalar() or 0) > 0
 
@@ -75,7 +84,14 @@ class UserRepository(SearchMixin, BaseRepository[User]):
         skip: int = 0,
         limit: int = 20,
     ) -> tuple[list[User], int]:
-        """Search users by email or name.
+        """Search users by name.
+
+        `email` is encrypted at rest (Fernet ciphertext is randomised
+        per value), so it cannot support trigram/full-text matching and
+        is intentionally excluded here — only exact-match lookups via
+        `email_hash` are possible on it (see `get_by_email`). Only
+        `full_name`, which is stored unencrypted for this reason, is
+        searched.
 
         Args:
             query_str: Search query
@@ -87,7 +103,7 @@ class UserRepository(SearchMixin, BaseRepository[User]):
         """
         users, total = await self.search_combined(
             query_str=query_str,
-            fields=["email", "full_name"],
+            fields=["full_name"],
             skip=skip,
             limit=limit,
         )

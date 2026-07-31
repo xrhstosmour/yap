@@ -195,10 +195,16 @@ class TestUserRepository:
         assert found.token_version == 3
 
     @pytest.mark.anyio
-    async def test_search_by_email(
+    async def test_search_by_name(
         self, monkeypatch: pytest.MonkeyPatch, session: AsyncSession
     ) -> None:
-        """search() should return users matching the search query by email or name.
+        """search() should return users matching the search query by name.
+
+        `email` is encrypted at rest and intentionally excluded from
+        `search()` (see `UserRepository.search`'s docstring): Fernet
+        ciphertext is randomised per value and cannot support
+        trigram/FTS matching, only the exact-match `email_hash` lookup
+        used by `get_by_email()`. Only `full_name` is searched.
 
         Uses mocked FTS/trigram to avoid PostgreSQL-specific requirements
         in the SQLite test backend.
@@ -254,7 +260,7 @@ class TestUserRepository:
             full_name="Carol Smith",
         )
 
-        # Search for "Smith" by email or name.
+        # Search for "Smith" by name.
         users, total = await repo.search("Smith")
 
         assert total == 2
@@ -262,11 +268,17 @@ class TestUserRepository:
         names = {u.full_name for u in users}
         assert names == {"Alice Smith", "Carol Smith"}
 
-        # Search for "bob" by email or name.
-        users, total = await repo.search("bob")
+        # Search for "Bob" by name.
+        users, total = await repo.search("Bob")
 
         assert total == 1
-        assert users[0].email == "bob@example.com"
+        assert users[0].full_name == "Bob Jones"
+
+        # Email is not searchable: a matching email substring finds nothing.
+        users, total = await repo.search("bob@example.com")
+
+        assert total == 0
+        assert users == []
 
     @pytest.mark.anyio
     async def test_get_by_email_excludes_soft_deleted(
