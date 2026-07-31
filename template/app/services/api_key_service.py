@@ -6,6 +6,7 @@ and managing API keys.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
@@ -132,11 +133,11 @@ class APIKeyService:
 
         if not api_key:
             # Verify against dummy to prevent timing attacks.
-            verify_password(provided_key, DUMMY_PASSWORD_HASH)
+            await asyncio.to_thread(verify_password, provided_key, DUMMY_PASSWORD_HASH)
             return None
 
         # Verify the key.
-        if not verify_password(provided_key, api_key.key_hash):
+        if not await asyncio.to_thread(verify_password, provided_key, api_key.key_hash):
             return None
 
         # Check if valid.
