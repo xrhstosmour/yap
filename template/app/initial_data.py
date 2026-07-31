@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 
+from psycopg import sql as psycopg_sql
 from sqlalchemy import create_engine
 from sqlmodel import select
 from sqlmodel import text
@@ -78,8 +79,12 @@ def _setup_metabase(password: str) -> None:
             pass
 
         try:
+            # `CREATE USER ... PASSWORD` is DDL and cannot take a bound
+            # parameter, so the password literal is quoted via psycopg's
+            # SQL-literal quoting instead of raw f-string interpolation.
+            quoted_password = psycopg_sql.Literal(password).as_string(None)
             conn.execute(
-                text(f"CREATE USER metabase_readonly WITH PASSWORD '{password}'"),
+                text(f"CREATE USER metabase_readonly WITH PASSWORD {quoted_password}"),
             )
         except Exception:
             logger.warning("metabase_readonly user already exists!")

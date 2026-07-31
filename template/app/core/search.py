@@ -105,6 +105,13 @@ def build_fts_condition(
         language = settings.FTS_LANGUAGE
     if language not in VALID_FTS_LANGUAGES:
         language = "simple"
+    # `language` must be allowlist-checked above before interpolation: it is
+    # embedded as a SQL string literal (not a bound parameter) because
+    # `to_tsvector`/`plainto_tsquery` have overloads on both `regconfig` and
+    # plain `text` first arguments, so an untyped bound parameter here is
+    # ambiguous to PostgreSQL. This assertion is defense in depth in case the
+    # allowlist check above is ever removed or bypassed.
+    assert language in VALID_FTS_LANGUAGES  # noqa: S101
     query_str = normalise_query(query_str)
     language_expr: Any = text(f"'{language}'")
     return func.to_tsvector(language_expr, func.unaccent(column_expr)).op("@@")(
@@ -172,6 +179,13 @@ def fts_rank_expr(column_expr, query_str: str, language: str | None = None) -> A
         language = settings.FTS_LANGUAGE
     if language not in VALID_FTS_LANGUAGES:
         language = "simple"
+    # `language` must be allowlist-checked above before interpolation: it is
+    # embedded as a SQL string literal (not a bound parameter) because
+    # `to_tsvector`/`plainto_tsquery` have overloads on both `regconfig` and
+    # plain `text` first arguments, so an untyped bound parameter here is
+    # ambiguous to PostgreSQL. This assertion is defense in depth in case the
+    # allowlist check above is ever removed or bypassed.
+    assert language in VALID_FTS_LANGUAGES  # noqa: S101
     query_str = normalise_query(query_str)
     language_expr: Any = text(f"'{language}'")
     return func.ts_rank(
