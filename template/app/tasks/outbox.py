@@ -41,7 +41,7 @@ def process_outbox(self) -> dict:
                             args=[payload],
                             queue="events",
                         )
-                        await outbox.mark_published(event.id)
+                        await outbox.mark_published(event)
                         processed += 1
                     except Exception as e:
                         logger.error(
@@ -50,7 +50,7 @@ def process_outbox(self) -> dict:
                             event_type=event.event_type,
                             error=str(e),
                         )
-                        await outbox.mark_failed(event.id)
+                        await outbox.mark_failed(event)
                         failed += 1
 
                 await session.commit()

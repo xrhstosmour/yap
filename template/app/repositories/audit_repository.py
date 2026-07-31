@@ -13,6 +13,8 @@ from typing import Any
 from typing import cast
 from uuid import UUID
 
+from sqlalchemy import update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import and_
 from sqlmodel import select
@@ -263,23 +265,22 @@ class AuditLogRepository(BaseRepository[AuditLog]):
         tenant_id = get_current_tenant_id()
         cutoff = datetime.now(UTC) - timedelta(days=days)
 
-        query = select(AuditLog).where(
-            and_(
-                AuditLog.created_at < cutoff,  # type: ignore[arg-type]
-                AuditLog.deleted_at.is_(None),  # type: ignore[union-attr]
+        query = (
+            update(AuditLog)
+            .where(
+                and_(
+                    AuditLog.created_at < cutoff,  # type: ignore[arg-type]
+                    AuditLog.deleted_at.is_(None),  # type: ignore[union-attr]
+                )
             )
+            .values(deleted_at=datetime.now(UTC))
         )
 
         if tenant_id:
             query = query.where(AuditLog.tenant_id == tenant_id)  # type: ignore[arg-type]
 
-        result = await self.session.execute(query)
-        logs = result.scalars().all()
-
-        count = 0
-        for log in logs:
-            log.deleted_at = datetime.now(UTC)
-            count += 1
+        result = cast(CursorResult[Any], await self.session.execute(query))
+        count = result.rowcount or 0
 
         await self.session.flush()
 
