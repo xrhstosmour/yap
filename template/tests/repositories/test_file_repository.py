@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+from uuid import UUID
+
 import pytest
+from sqlalchemy import delete
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.file import File
@@ -190,6 +196,61 @@ class TestFileRepository:
         found = await repo.get_by_content_hash("nonexistent-hash")
 
         assert found is None
+
+    @pytest.mark.anyio
+    async def test_create_or_increment_resolves_concurrent_upload_race(
+        self, engine: AsyncEngine
+    ) -> None:
+        """Two concurrent uploads of identical content should race safely.
+
+        Uses two independent sessions (separate connections, real commits)
+        so the database itself resolves the race via the unique constraint
+        on ``content_hash``, rather than the two coroutines serializing on
+        a single shared connection. Exactly one ``File`` row must exist
+        afterward, with ``reference_count == 2``.
+
+        Args:
+            engine: Async engine fixture, used to open independent sessions.
+
+        Returns:
+            None.
+        """
+        content_hash = "concurrent-upload-hash"
+
+        async with AsyncSession(engine, expire_on_commit=False) as setup_session:
+            user = await self._create_user(setup_session, "racer@example.com")
+
+        async def _attempt() -> tuple[UUID, bool]:
+            async with AsyncSession(engine, expire_on_commit=False) as own_session:
+                repo = FileRepository(own_session)
+                record, created = await repo.create_or_increment(
+                    self._file_data(uploaded_by=user.id, content_hash=content_hash)
+                )
+                await own_session.commit()
+                return record.id, created
+
+        try:
+            results = await asyncio.gather(_attempt(), _attempt())
+
+            # Exactly one attempt inserted, the other incremented.
+            assert sorted(created for _, created in results) == [False, True]
+            # Both attempts must have landed on the same row.
+            assert len({record_id for record_id, _ in results}) == 1
+
+            async with AsyncSession(engine, expire_on_commit=False) as verify_session:
+                found = await verify_session.execute(
+                    select(File).where(File.content_hash == content_hash)
+                )
+                rows = found.scalars().all()
+                assert len(rows) == 1
+                assert rows[0].reference_count == 2
+        finally:
+            async with AsyncSession(engine, expire_on_commit=False) as cleanup_session:
+                await cleanup_session.execute(
+                    delete(File).where(File.content_hash == content_hash)
+                )
+                await cleanup_session.execute(delete(User).where(User.id == user.id))
+                await cleanup_session.commit()
 
     @pytest.mark.anyio
     async def test_increment_reference_count(self, session: AsyncSession) -> None:
