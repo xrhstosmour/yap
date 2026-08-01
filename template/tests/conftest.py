@@ -9,6 +9,7 @@ transaction that is rolled back afterwards for isolation.
 from __future__ import annotations
 
 import os
+from collections.abc import Generator
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -151,8 +152,10 @@ async def override_get_async_session_fixture(session: AsyncSession) -> None:
 @pytest.fixture(
     name="disable_rate_limit", autouse=True
 )  # Disable rate limiting in tests by default
-def disable_rate_limit_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
+def disable_rate_limit_fixture(monkeypatch: pytest.MonkeyPatch) -> Generator[None]:
     """Disable rate limit checks to avoid Redis dependency in tests."""
+    from app.core.rate_limit import check_auth_rate_limit
+    from app.main import app
 
     async def _no_op(  # noqa: ANN401
         *_args: Any,  # noqa: ANN401
@@ -164,6 +167,20 @@ def disable_rate_limit_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("app.core.rate_limit.check_api_key_rate_limit", _no_op)
     monkeypatch.setattr("app.dependencies.check_user_rate_limit", _no_op)
     monkeypatch.setattr("app.dependencies.check_api_key_rate_limit", _no_op)
+
+    # check_auth_rate_limit is wired via `dependencies=[Depends(check_auth_rate_limit)]`
+    # on the route decorators, so FastAPI captures the callable at import time.
+    # Overriding the module attribute via monkeypatch would not reach it; use
+    # FastAPI's dependency_overrides, which is keyed by the original callable.
+    # The override must take no parameters: FastAPI re-derives the request
+    # schema from the override's own signature, so a `*_args, **_kwargs`
+    # no-op would surface `_args`/`_kwargs` as required query parameters.
+    async def _no_op_dependency() -> None:
+        return None
+
+    app.dependency_overrides[check_auth_rate_limit] = _no_op_dependency
+    yield
+    app.dependency_overrides.pop(check_auth_rate_limit, None)
 
 
 @pytest.fixture(name="disable_token_blacklist", autouse=True)

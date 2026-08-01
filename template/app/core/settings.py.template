@@ -83,6 +83,8 @@ class Settings(BaseSettings):
     Rate Limiting:
         RATE_LIMIT_PER_MINUTE: Default rate limit per user
         RATE_LIMIT_PER_MINUTE_API_KEY: Rate limit per API key
+        RATE_LIMIT_PER_MINUTE_AUTH: Rate limit per client IP on unauthenticated
+            auth endpoints (login, register, forgot-password, magic-link)
     """
 
     model_config = SettingsConfigDict(
@@ -254,6 +256,7 @@ class Settings(BaseSettings):
     # Rate Limiting.
     RATE_LIMIT_PER_MINUTE: int = 60
     RATE_LIMIT_PER_MINUTE_API_KEY: int = 300
+    RATE_LIMIT_PER_MINUTE_AUTH: int = 10
 
     # SSL certificate for Celery broker TLS verification.
     SSL_CERTIFICATE_PATH: str = ""
