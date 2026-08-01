@@ -65,18 +65,22 @@ class FileService:
         mimetype = file.content_type or "application/octet-stream"
 
         # Stream the file in chunks to limit memory usage and compute hash.
-        content = b""
+        # A bytearray avoids the O(n^2) cost of repeated bytes concatenation
+        # (each `content += chunk` on bytes reallocates and copies the whole
+        # buffer; bytearray.extend() amortizes to O(n) overall).
+        buffer = bytearray()
         hash_sha256 = hashlib.sha256()
         while True:
             chunk = await file.read(8192)
             if not chunk:
                 break
-            content += chunk
+            buffer.extend(chunk)
             hash_sha256.update(chunk)
-            if len(content) > MAX_UPLOAD_SIZE:
+            if len(buffer) > MAX_UPLOAD_SIZE:
                 raise FileServiceError(
                     f"File exceeds maximum size of {MAX_UPLOAD_SIZE} bytes"
                 )
+        content = bytes(buffer)
         content_hash = hash_sha256.hexdigest()
 
         # Fast-path dedup check to skip the storage upload for the common
