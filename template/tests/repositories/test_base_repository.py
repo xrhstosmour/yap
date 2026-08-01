@@ -183,6 +183,38 @@ class TestBaseRepository:
         assert len(records) == 2
 
     @pytest.mark.anyio
+    async def test_list_skip_past_total_returns_correct_total(
+        self, session: AsyncSession
+    ) -> None:
+        """list() should still report the correct total when skip exceeds it.
+
+        The total count rides along with each row via a window function, so
+        when `skip` lands past the last matching row and the page comes back
+        empty, list() must fall back to a plain count query rather than
+        reporting 0.
+        """
+        repo: BaseRepository[TestModel] = BaseRepository(session, TestModel)
+        for i in range(3):
+            await repo.create({"name": f"item-{i}"})
+
+        records, total = await repo.list(skip=10, limit=2)
+
+        assert records == []
+        assert total == 3
+
+    @pytest.mark.anyio
+    async def test_list_empty_table_returns_zero_total(
+        self, session: AsyncSession
+    ) -> None:
+        """list() on an empty table should return no records and total=0."""
+        repo: BaseRepository[TestModel] = BaseRepository(session, TestModel)
+
+        records, total = await repo.list()
+
+        assert records == []
+        assert total == 0
+
+    @pytest.mark.anyio
     async def test_update_updates_fields(self, session: AsyncSession) -> None:
         """update() should modify the specified fields on the record.
 
