@@ -1,9 +1,11 @@
 """Integration tests for `Auth` API endpoints."""
 
 import sys
+from typing import Any
 from typing import cast
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
+from unittest.mock import patch
 
 import pytest
 from httpx import ASGITransport
@@ -819,3 +821,85 @@ class TestGoogleOAuth:
 
         assert response.status_code == 400
         assert "Invalid or expired" in response.json()["detail"]
+
+
+class TestAuthRateLimit:
+    """Tests for the per-IP rate limit on unauthenticated `/auth/*` endpoints.
+
+    The `disable_rate_limit` autouse fixture (see conftest.py) overrides
+    `check_auth_rate_limit` with a no-op for every test by default. Each test
+    here removes that override for the duration of the request and mocks the
+    underlying `auth_rate_limiter.check_rate_limit()` to simulate a denied
+    request, then relies on the autouse fixture to reinstate the no-op
+    override on teardown.
+    """
+
+    @staticmethod
+    def _simulate_denied() -> Any:  # noqa: ANN401
+        import app.core.rate_limit as rate_limit_module
+
+        app.dependency_overrides.pop(rate_limit_module.check_auth_rate_limit, None)
+        return patch.object(
+            rate_limit_module.auth_rate_limiter,
+            "check_rate_limit",
+            AsyncMock(return_value=(False, 0, 30)),
+        )
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_login_rate_limited_returns_429(
+        self, client: AsyncClient, session
+    ) -> None:
+        """POST /auth/login should return 429 once the IP limit is exceeded."""
+        with self._simulate_denied():
+            response = await client.post(
+                "/api/v1/auth/login",
+                data={"username": "nobody@{{ project_slug }}.com", "password": "x"},
+            )
+
+        assert response.status_code == 429
+        assert response.headers["retry-after"] == "30"
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_register_rate_limited_returns_429(
+        self, client: AsyncClient, session
+    ) -> None:
+        """POST /auth/register should return 429 once the IP limit is exceeded."""
+        with self._simulate_denied():
+            response = await client.post(
+                "/api/v1/auth/register",
+                json={
+                    "email": "new@{{ project_slug }}.com",
+                    "password": "password123",
+                },
+            )
+
+        assert response.status_code == 429
+        assert response.headers["retry-after"] == "30"
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_forgot_password_rate_limited_returns_429(
+        self, client: AsyncClient, session
+    ) -> None:
+        """POST /auth/forgot-password should return 429 once the IP limit is exceeded."""
+        with self._simulate_denied():
+            response = await client.post(
+                "/api/v1/auth/forgot-password",
+                json={"email": "nobody@{{ project_slug }}.com"},
+            )
+
+        assert response.status_code == 429
+        assert response.headers["retry-after"] == "30"
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_magic_link_rate_limited_returns_429(
+        self, client: AsyncClient, session
+    ) -> None:
+        """POST /auth/magic-link should return 429 once the IP limit is exceeded."""
+        with self._simulate_denied():
+            response = await client.post(
+                "/api/v1/auth/magic-link",
+                json={"email": "nobody@{{ project_slug }}.com"},
+            )
+
+        assert response.status_code == 429
+        assert response.headers["retry-after"] == "30"
