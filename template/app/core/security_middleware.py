@@ -49,6 +49,30 @@ AI_BOT_PATTERNS: list[re.Pattern] = [
     ]
 ]
 
+# Swagger UI (/try) and Redoc (/documentation) load their JS/CSS/fonts from
+# this CDN. Every other response gets the stricter default with no CDN
+# allowance, so `script-src`/`style-src` aren't opened up API-wide for the
+# sake of two docs pages.
+DOCS_PATHS: frozenset[str] = frozenset({"/try", "/documentation"})
+
+_DEFAULT_CSP = (
+    "default-src 'none'; "
+    "img-src 'self' data:; "
+    "font-src 'self' data:; "
+    "connect-src 'self'; "
+    "frame-ancestors 'none'"
+)
+
+_DOCS_CSP = (
+    "default-src 'none'; "
+    "script-src 'self' cdn.jsdelivr.net; "
+    "style-src 'self' cdn.jsdelivr.net; "
+    "img-src 'self' data:; "
+    "font-src 'self' data: cdn.jsdelivr.net; "
+    "connect-src 'self'; "
+    "frame-ancestors 'none'"
+)
+
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Adds security-focused HTTP headers and blocks AI bot crawlers."""
@@ -79,13 +103,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Content-Security-Policy"] = (
-            "default-src 'none'; "
-            "script-src 'self' cdn.jsdelivr.net; "
-            "style-src 'self' cdn.jsdelivr.net; "
-            "img-src 'self' data:; "
-            "font-src 'self' data: cdn.jsdelivr.net; "
-            "connect-src 'self'; "
-            "frame-ancestors 'none'"
+            _DOCS_CSP if request.url.path in DOCS_PATHS else _DEFAULT_CSP
         )
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = (
