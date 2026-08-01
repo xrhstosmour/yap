@@ -9,6 +9,7 @@ from uuid import UUID
 
 import pytest
 
+from app.core.settings import settings
 from app.models.file import File
 from app.services.file_service import FileService
 
@@ -29,6 +30,7 @@ def service(mock_session: MagicMock) -> FileService:
     repo.get_by_content_hash = AsyncMock()
     repo.get_owned = AsyncMock()
     repo.increment_reference_count = AsyncMock()
+    repo.create_or_increment = AsyncMock()
     repo.decrement_reference_count = AsyncMock()
     repo.delete = AsyncMock()
     svc.file_repository = repo
@@ -54,6 +56,19 @@ class TestUpload:
         mock_file.read = AsyncMock(side_effect=[b"unique content", b""])
 
         service.file_repository.get_by_content_hash = AsyncMock(return_value=None)
+        new_record = File(
+            filename="test.txt",
+            mimetype="text/plain",
+            size=15,
+            content_hash="dummy",
+            bucket="default",
+            object_key="uploads/abc123",
+            reference_count=1,
+            uploaded_by=user.id,
+        )
+        service.file_repository.create_or_increment = AsyncMock(
+            return_value=(new_record, True)
+        )
 
         with (
             patch("app.services.file_service.upload_file") as mock_upload,
@@ -64,7 +79,7 @@ class TestUpload:
         assert record.filename == "test.txt"
         assert record.mimetype == "text/plain"
         assert record.reference_count == 1
-        service.session.add.assert_called_once()
+        service.file_repository.create_or_increment.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_increments_reference_count_for_duplicate(
@@ -93,6 +108,45 @@ class TestUpload:
 
         assert record is existing
         service.file_repository.increment_reference_count.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_discards_blob_and_returns_winner_when_insert_race_lost(
+        self, service: FileService
+    ) -> None:
+        """Should discard the just-uploaded blob when the DB upsert reveals
+        a concurrent upload of identical content already won the race."""
+        user = make_user()
+        mock_file = MagicMock()
+        mock_file.filename = "race.txt"
+        mock_file.content_type = "text/plain"
+        mock_file.read = AsyncMock(side_effect=[b"raced content", b""])
+
+        service.file_repository.get_by_content_hash = AsyncMock(return_value=None)
+        winner = File(
+            filename="race.txt",
+            mimetype="text/plain",
+            size=13,
+            content_hash="dummy",
+            bucket="default",
+            object_key="uploads/winner",
+            reference_count=2,
+            uploaded_by=user.id,
+        )
+        service.file_repository.create_or_increment = AsyncMock(
+            return_value=(winner, False)
+        )
+
+        with (
+            patch("app.services.file_service.upload_file") as mock_upload,
+            patch("app.services.file_service.delete_object") as mock_delete,
+        ):
+            mock_upload.return_value = ("uploads/loser", "loser-hash", None, None, None)
+            record = await service.upload(mock_file, user)
+
+        assert record is winner
+        mock_delete.assert_called_once_with(
+            object_key="uploads/loser", bucket=settings.STORAGE_BUCKET
+        )
 
 
 class TestDelete:

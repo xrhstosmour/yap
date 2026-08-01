@@ -79,11 +79,11 @@ class FileService:
                 )
         content_hash = hash_sha256.hexdigest()
 
-        # Dedup check.
-        # NOTE: In production, the get_by_content_hash → increment_reference_count
-        # sequence is not atomic. Two concurrent uploads of the same content can
-        # both pass the existence check and create duplicate records. Mitigate
-        # this with a DB-level unique constraint on content_hash or a row lock.
+        # Fast-path dedup check to skip the storage upload for the common
+        # case. This alone is racy (two concurrent uploads of identical
+        # content can both miss each other's in-flight row), so the actual
+        # insert below is made race-safe via a DB-level unique constraint
+        # on content_hash plus an atomic upsert.
         existing = await self.file_repository.get_by_content_hash(content_hash)
         if existing:
             await self.file_repository.increment_reference_count(content_hash)
@@ -101,24 +101,39 @@ class FileService:
             mimetype=mimetype,
         )
 
-        record = File(
-            filename=safe_filename,
-            mimetype=mimetype,
-            size=len(content),
-            content_hash=content_hash,
-            bucket=settings.STORAGE_BUCKET,
-            object_key=object_key,
-            thumbnail_object_key=thumbnail_key,
-            image_width=image_width,
-            image_height=image_height,
-            is_public=is_public,
-            reference_count=1,
-            uploaded_by=user.id,
-            resource_type=resource_type,
-            resource_id=resource_id,
+        record, created = await self.file_repository.create_or_increment(
+            {
+                "filename": safe_filename,
+                "mimetype": mimetype,
+                "size": len(content),
+                "content_hash": content_hash,
+                "bucket": settings.STORAGE_BUCKET,
+                "object_key": object_key,
+                "thumbnail_object_key": thumbnail_key,
+                "image_width": image_width,
+                "image_height": image_height,
+                "is_public": is_public,
+                "reference_count": 1,
+                "uploaded_by": user.id,
+                "resource_type": resource_type,
+                "resource_id": resource_id,
+            }
         )
-        self.session.add(record)
-        await self.session.flush()
+
+        if not created:
+            # Lost the race: another upload of identical content committed
+            # first. Discard the blob we just wrote so it does not leak.
+            await delete_object(object_key=object_key, bucket=settings.STORAGE_BUCKET)
+            if thumbnail_key:
+                await delete_object(
+                    object_key=thumbnail_key, bucket=settings.STORAGE_BUCKET
+                )
+            logger.info(
+                "file_upload_dedup_race",
+                content_hash=content_hash[:16],
+                reference_count=record.reference_count,
+            )
+            return record
 
         logger.info(
             "file_uploaded",
