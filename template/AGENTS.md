@@ -26,6 +26,9 @@ background tasks, and comprehensive security features.
 - Greeklish transliteration and Greek language support.
 - `SearchMixin` for reusable multi-field search on any model.
 - MinIO/S3 object storage with SHA-256 dedup, thumbnails, presigned URLs.
+- PII fields (`email`, `phone` on `User`) encrypted at rest via `EncryptedString`
+  (Fernet); deterministic HMAC search hashes (`email_hash`, `phone_hash`) support
+  exact-match lookups without exposing ciphertext to search or indexes.
 - Soft deletes with `graveyard` tombstone table for recovery.
 - Alembic migrations in `migrations/`.
 - Multi-database engine with header-based routing for preview/demo/staging isolation.
@@ -37,6 +40,9 @@ background tasks, and comprehensive security features.
 
 ### Reliability
 - Idempotency via `X-Idempotency-Key` header on mutating endpoints.
+- `CacheService.get_or_set()` prevents cache stampedes: callers race for a
+  short-lived per-key lock on a miss, losers poll for the winner's result
+  instead of recomputing in parallel.
 - Circuit breaker for external service calls (`pybreaker`).
 - Rate limiting per user and per API key (Redis sliding window).
 - Resilient container startup with retries.
@@ -50,7 +56,9 @@ background tasks, and comprehensive security features.
 - Structured JSON logging via `structlog` with correlation IDs.
 - OpenTelemetry distributed tracing.
 - Sentry/GlitchTip error tracking.
-- Health endpoints: liveness, readiness, metrics (pool stats, cache stats).
+- Health endpoints: REST liveness/readiness probes, plus authenticated WebSocket
+  streams for live health (`/ws/health`, any user) and metrics (`/ws/metrics`,
+  superuser-only, pool/cache stats).
 
 ## Where things live
 

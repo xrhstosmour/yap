@@ -6,7 +6,7 @@ This boilerplate provides a quick start for building high-performance, efficient
 
 You need:
 
-- [Python 3.13+](https://www.python.org/downloads/)
+- [Python 3.14+](https://www.python.org/downloads/)
 - [uv](https://docs.astral.sh/uv/getting-started/installation/)
 - [Docker](https://docs.docker.com/engine/install/)
 - [copier](https://copier.readthedocs.io/en/stable/#installation)
