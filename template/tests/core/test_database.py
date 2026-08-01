@@ -366,8 +366,14 @@ class TestLifespan:
         with (
             patch("app.main.init_db", new_callable=AsyncMock) as mock_init,
             patch("app.main.init_redis", new_callable=AsyncMock) as mock_redis_init,
+            patch(
+                "app.main.start_broadcast_relay", new_callable=AsyncMock
+            ) as mock_relay_start,
             patch("app.main.close_db", new_callable=AsyncMock) as mock_close,
             patch("app.main.close_redis", new_callable=AsyncMock) as mock_redis_close,
+            patch(
+                "app.main.stop_broadcast_relay", new_callable=AsyncMock
+            ) as mock_relay_stop,
             patch("app.main.setup_logging"),
         ):
             # setup_tracing is imported lazily inside lifespan and already
@@ -377,8 +383,10 @@ class TestLifespan:
 
         mock_init.assert_awaited_once()
         mock_redis_init.assert_awaited_once()
+        mock_relay_start.assert_awaited_once()
         mock_close.assert_awaited_once()
         mock_redis_close.assert_awaited_once()
+        mock_relay_stop.assert_awaited_once()
 
     @pytest.mark.anyio
     async def test_lifespan_handles_init_db_failure(self) -> None:
@@ -392,8 +400,10 @@ class TestLifespan:
                 side_effect=Exception("DB connection failed"),
             ) as mock_init,
             patch("app.main.init_redis", new_callable=AsyncMock) as mock_redis_init,
+            patch("app.main.start_broadcast_relay", new_callable=AsyncMock),
             patch("app.main.close_db", new_callable=AsyncMock) as mock_close,
             patch("app.main.close_redis", new_callable=AsyncMock) as mock_redis_close,
+            patch("app.main.stop_broadcast_relay", new_callable=AsyncMock),
             patch("app.main.setup_logging"),
         ):
             # lifespan must not propagate the init_db error.

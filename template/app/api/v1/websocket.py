@@ -9,6 +9,8 @@ Provides WebSocket support for:
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import json
 from typing import Any
 from typing import cast
 
@@ -16,6 +18,7 @@ from fastapi import APIRouter
 from fastapi import WebSocket
 from fastapi import WebSocketDisconnect
 
+from app.core.cache import get_redis
 from app.core.logging import get_logger
 from app.dependencies import CurrentUserWS
 from app.dependencies import SuperuserUserWS
@@ -24,6 +27,13 @@ router = APIRouter(prefix="/ws", tags=["WebSocket"])
 logger = get_logger("api.ws")
 
 _active_connections: dict[str, set[WebSocket]] = {}
+
+# Redis pub/sub channel prefix used to fan broadcasts out across worker
+# processes/replicas, since `_active_connections` only tracks sockets held
+# open by the current process. See `start_broadcast_relay`.
+_BROADCAST_CHANNEL_PREFIX = "ws:broadcast:"
+
+_relay_task: asyncio.Task[None] | None = None
 
 
 def _get_metrics() -> dict:
@@ -109,25 +119,92 @@ async def health_socket(websocket: WebSocket, _current_user: CurrentUserWS) -> N
 
 
 async def broadcast_notification(message: str, channel: str = "general") -> None:
-    """Broadcast a notification to all connected WebSocket clients.
+    """Broadcast a notification to every connected WebSocket client, cluster-wide.
+
+    Publishes to Redis rather than writing directly to `_active_connections`,
+    since that dict only holds sockets accepted by *this* worker process.
+    Every worker (including this one) relays the message to its own local
+    connections via `_broadcast_relay`.
 
     Args:
         message: Notification message to broadcast
         channel: Target channel for filtering
+    """
+    redis_client = cast(Any, await get_redis())
+    payload = json.dumps(
+        {
+            "type": "notification",
+            "channel": channel,
+            "message": message,
+        }
+    )
+    await redis_client.publish(f"{_BROADCAST_CHANNEL_PREFIX}{channel}", payload)
+
+
+async def _deliver_to_local_connections(channel: str, payload: dict[str, Any]) -> None:
+    """Send `payload` to every WebSocket this process holds open for `channel`.
+
+    Args:
+        channel: Target channel
+        payload: JSON-serializable message to send
     """
     connections = _active_connections.get(channel, set())
     dead: set[WebSocket] = set()
 
     for ws in connections:
         try:
-            await ws.send_json(
-                {
-                    "type": "notification",
-                    "channel": channel,
-                    "message": message,
-                }
-            )
+            await ws.send_json(payload)
         except Exception:
             dead.add(ws)
 
-    _active_connections[channel] = connections - dead
+    if dead:
+        _active_connections[channel] = connections - dead
+
+
+async def _broadcast_relay() -> None:
+    """Relay Redis pub/sub broadcasts to this worker's local connections.
+
+    Subscribes once to every `ws:broadcast:*` channel and forwards each
+    message to `_deliver_to_local_connections`. Runs for the lifetime of the
+    application; started/stopped from the FastAPI lifespan.
+    """
+    redis_client = cast(Any, await get_redis())
+    pubsub = redis_client.pubsub()
+    await pubsub.psubscribe(f"{_BROADCAST_CHANNEL_PREFIX}*")
+
+    try:
+        async for message in pubsub.listen():
+            if message["type"] != "pmessage":
+                continue
+
+            raw_channel = message["channel"]
+            channel = raw_channel.removeprefix(_BROADCAST_CHANNEL_PREFIX)
+
+            try:
+                payload = json.loads(message["data"])
+            except (TypeError, ValueError):
+                logger.warning("ws_broadcast_relay_bad_payload", channel=channel)
+                continue
+
+            await _deliver_to_local_connections(channel, payload)
+    finally:
+        with contextlib.suppress(Exception):
+            await pubsub.punsubscribe(f"{_BROADCAST_CHANNEL_PREFIX}*")
+            await pubsub.aclose()
+
+
+async def start_broadcast_relay() -> None:
+    """Start the Redis pub/sub relay task. Call once from the app lifespan."""
+    global _relay_task
+    if _relay_task is None:
+        _relay_task = asyncio.create_task(_broadcast_relay())
+
+
+async def stop_broadcast_relay() -> None:
+    """Cancel the Redis pub/sub relay task. Call once from the app lifespan."""
+    global _relay_task
+    if _relay_task is not None:
+        _relay_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await _relay_task
+        _relay_task = None
