@@ -43,7 +43,13 @@ logger = get_logger("deps")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 # Type aliases for dependency injection.
-SessionDependency = Annotated[AsyncSession, Depends(get_async_session)]
+# `scope="function"` ends the session (commit + close) before the response is
+# sent to the client. The default `scope="request"` defers that to after the
+# response is sent, which lets a client that immediately issues a follow-up
+# request race ahead of the commit — see issue #86.
+SessionDependency = Annotated[
+    AsyncSession, Depends(get_async_session, scope="function")
+]
 AccessTokenDependency = Annotated[str, Depends(oauth2_scheme)]
 
 
