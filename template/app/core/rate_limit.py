@@ -11,6 +11,7 @@ import secrets
 import time
 
 from fastapi import HTTPException
+from fastapi import Request
 from fastapi import status
 
 from app.core.cache import get_redis
@@ -141,6 +142,11 @@ api_key_rate_limiter = RateLimiter(
     key_prefix="ratelimit:api_key",
 )
 
+auth_rate_limiter = RateLimiter(
+    requests_per_minute=settings.RATE_LIMIT_PER_MINUTE_AUTH,
+    key_prefix="ratelimit:auth",
+)
+
 
 async def check_user_rate_limit(user_id: str) -> None:
     """Check if user has exceeded their rate limit.
@@ -175,6 +181,33 @@ async def check_api_key_rate_limit(api_key_id: str) -> None:
         logger.warning(
             "api_key_rate_limit_exceeded",
             api_key_id=api_key_id,
+            retry_after=retry_after,
+        )
+        raise RateLimitExceeded(retry_after)
+
+
+async def check_auth_rate_limit(request: Request) -> None:
+    """Check whether a client IP has exceeded the unauthenticated-auth rate limit.
+
+    Applied to endpoints that accept unauthenticated requests (login, register,
+    password-reset, magic-link) where the standard post-auth rate limiters
+    (`check_user_rate_limit`, `check_api_key_rate_limit`) never run.
+
+    Args:
+        request: Incoming request, used to key the limiter on client IP
+
+    Raises:
+        RateLimitExceeded: If rate limit is exceeded
+    """
+    client_ip = request.client.host if request.client else "unknown"
+    allowed, remaining, retry_after = await auth_rate_limiter.check_rate_limit(
+        client_ip
+    )
+
+    if not allowed:
+        logger.warning(
+            "auth_rate_limit_exceeded",
+            client_ip=client_ip,
             retry_after=retry_after,
         )
         raise RateLimitExceeded(retry_after)
