@@ -118,6 +118,74 @@ class TestSettingsValidation:
             Settings(_env_file=None, ENVIRONMENT="local")
 
 
+class TestPerformanceTuningDefaults:
+    """Tests for database pool and Celery tuning setting defaults."""
+
+    def test_database_pool_timeout_default(self) -> None:
+        """DATABASE_POOL_TIMEOUT defaults to 30 seconds, matching prior hardcoded value."""
+        from app.core.settings import Settings
+
+        settings = Settings(
+            _env_file=None,
+            ENVIRONMENT="local",
+            SECRET_KEY="test-key",
+            POSTGRESQL_PASSWORD="test",
+            FIRST_SUPERUSER_PASSWORD="test",
+            RABBITMQ_PASSWORD="test",
+            CRYPTO_KEY="dGVzdC1rZXktMzItYnl0ZXMtbG9uZw==",
+            GOOGLE_CLIENT_SECRET="test-secret",
+            SMTP_PASSWORD="test-pass",
+            STORAGE_SECRET_KEY="test-key",
+        )
+
+        assert settings.DATABASE_POOL_TIMEOUT == 30
+
+    def test_celery_tuning_defaults_match_prior_hardcoded_values(self) -> None:
+        """Celery tuning settings default to the values they replace."""
+        from app.core.settings import Settings
+
+        settings = Settings(
+            _env_file=None,
+            ENVIRONMENT="local",
+            SECRET_KEY="test-key",
+            POSTGRESQL_PASSWORD="test",
+            FIRST_SUPERUSER_PASSWORD="test",
+            RABBITMQ_PASSWORD="test",
+            CRYPTO_KEY="dGVzdC1rZXktMzItYnl0ZXMtbG9uZw==",
+            GOOGLE_CLIENT_SECRET="test-secret",
+            SMTP_PASSWORD="test-pass",
+            STORAGE_SECRET_KEY="test-key",
+        )
+
+        assert settings.CELERY_TASK_TIME_LIMIT == 300
+        assert settings.CELERY_TASK_SOFT_TIME_LIMIT == 240
+        assert settings.CELERY_WORKER_PREFETCH_MULTIPLIER == 4
+        assert settings.CELERY_RESULT_EXPIRES_SECONDS == 86400
+        assert settings.CELERY_CLEANUP_AUDIT_LOGS_HOUR == 3
+        assert settings.CELERY_CACHE_WARM_HOUR == 6
+        assert settings.CELERY_PURGE_GRAVEYARD_HOUR == 4
+
+    def test_database_pool_timeout_accepts_override(self) -> None:
+        """DATABASE_POOL_TIMEOUT can be overridden via settings."""
+        from app.core.settings import Settings
+
+        settings = Settings(
+            _env_file=None,
+            ENVIRONMENT="local",
+            SECRET_KEY="test-key",
+            POSTGRESQL_PASSWORD="test",
+            FIRST_SUPERUSER_PASSWORD="test",
+            RABBITMQ_PASSWORD="test",
+            CRYPTO_KEY="dGVzdC1rZXktMzItYnl0ZXMtbG9uZw==",
+            GOOGLE_CLIENT_SECRET="test-secret",
+            SMTP_PASSWORD="test-pass",
+            STORAGE_SECRET_KEY="test-key",
+            DATABASE_POOL_TIMEOUT=45,
+        )
+
+        assert settings.DATABASE_POOL_TIMEOUT == 45
+
+
 class TestSettingsValidationProduction:
     """Tests for settings validation in non-local environments."""
 

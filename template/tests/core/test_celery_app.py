@@ -16,6 +16,13 @@ _mock_settings.CELERY_BROKER_URL = "amqp://guest:guest@localhost:5672//"
 _mock_settings.CELERY_RESULT_BACKEND = "redis://localhost:6379/0"
 _mock_settings.SSL_CERTIFICATE_PATH = None
 _mock_settings.REDIS_URL = "redis://localhost:6379/0"
+_mock_settings.CELERY_TASK_TIME_LIMIT = 300
+_mock_settings.CELERY_TASK_SOFT_TIME_LIMIT = 240
+_mock_settings.CELERY_WORKER_PREFETCH_MULTIPLIER = 4
+_mock_settings.CELERY_RESULT_EXPIRES_SECONDS = 86400
+_mock_settings.CELERY_CLEANUP_AUDIT_LOGS_HOUR = 3
+_mock_settings.CELERY_CACHE_WARM_HOUR = 6
+_mock_settings.CELERY_PURGE_GRAVEYARD_HOUR = 4
 
 _stub_modules = {
     "app.tasks.email": MagicMock(),
@@ -67,6 +74,31 @@ class TestCeleryAppConfig:
         """Celery should be configured for UTC timezone."""
         assert celery_app.conf.timezone == "UTC"
         assert celery_app.conf.enable_utc is True
+
+    def test_task_time_limit_from_settings(self) -> None:
+        """task_time_limit is threaded through from settings.CELERY_TASK_TIME_LIMIT."""
+        assert celery_app.conf.task_time_limit == _mock_settings.CELERY_TASK_TIME_LIMIT
+
+    def test_task_soft_time_limit_from_settings(self) -> None:
+        """task_soft_time_limit comes from settings.CELERY_TASK_SOFT_TIME_LIMIT."""
+        assert (
+            celery_app.conf.task_soft_time_limit
+            == _mock_settings.CELERY_TASK_SOFT_TIME_LIMIT
+        )
+
+    def test_worker_prefetch_multiplier_from_settings(self) -> None:
+        """worker_prefetch_multiplier comes from settings.CELERY_WORKER_PREFETCH_MULTIPLIER."""
+        assert (
+            celery_app.conf.worker_prefetch_multiplier
+            == _mock_settings.CELERY_WORKER_PREFETCH_MULTIPLIER
+        )
+
+    def test_result_expires_from_settings(self) -> None:
+        """result_expires comes from settings.CELERY_RESULT_EXPIRES_SECONDS."""
+        assert (
+            celery_app.conf.result_expires
+            == _mock_settings.CELERY_RESULT_EXPIRES_SECONDS
+        )
 
 
 @pytest.mark.skipif(
@@ -126,6 +158,7 @@ class TestBeatSchedule:
         entry = schedule["cleanup-old-audit-logs"]
         assert entry["task"] == "app.tasks.cleanup.cleanup_old_audit_logs"
         assert "schedule" in entry
+        assert entry["schedule"].hour == {_mock_settings.CELERY_CLEANUP_AUDIT_LOGS_HOUR}
 
     def test_cache_warm_scheduled(self) -> None:
         """The cache-warm periodic task should be configured."""
@@ -134,6 +167,7 @@ class TestBeatSchedule:
         entry = schedule["cache-warm"]
         assert entry["task"] == "app.tasks.cache.warm_cache"
         assert "schedule" in entry
+        assert entry["schedule"].hour == {_mock_settings.CELERY_CACHE_WARM_HOUR}
 
     def test_purge_graveyard_scheduled(self) -> None:
         """The purge-graveyard periodic task should be configured."""
@@ -142,6 +176,7 @@ class TestBeatSchedule:
         entry = schedule["purge-graveyard"]
         assert entry["task"] == "app.tasks.cleanup.purge_graveyard"
         assert "schedule" in entry
+        assert entry["schedule"].hour == {_mock_settings.CELERY_PURGE_GRAVEYARD_HOUR}
 
     def test_process_outbox_scheduled(self) -> None:
         """The process-outbox periodic task should be configured."""

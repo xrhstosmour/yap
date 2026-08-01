@@ -207,6 +207,133 @@ class TestAsyncSessionFactory:
         assert async_session_factory.kw["autoflush"] is False
 
 
+# Pool timeout configuration
+# --------------------------
+
+
+class TestPoolTimeout:
+    """Tests that pool_timeout is threaded through from settings, not hardcoded."""
+
+    def test_async_engine_pool_timeout_from_settings(self) -> None:
+        """async_engine's pool_timeout matches settings.DATABASE_POOL_TIMEOUT."""
+        from app.core.settings import settings
+        from app.database import async_engine
+
+        assert async_engine.pool._timeout == settings.DATABASE_POOL_TIMEOUT
+
+    def test_additional_async_engine_pool_timeout_from_settings(self) -> None:
+        """additional_async_engine's pool_timeout matches settings.DATABASE_POOL_TIMEOUT."""
+        from app.core.settings import settings
+        from app.database import additional_async_engine
+
+        assert additional_async_engine is not None
+        assert additional_async_engine.pool._timeout == settings.DATABASE_POOL_TIMEOUT
+
+
+# Additional database gating
+# ---------------------------
+
+
+class TestAdditionalDatabaseGating:
+    """Tests that the additional database engine is only created when configured."""
+
+    def test_additional_database_enabled_by_default(self) -> None:
+        """ADDITIONAL_DATABASE_ENABLED is True when POSTGRESQL_ADDITIONAL_DATABASE is set."""
+        from app.database import ADDITIONAL_DATABASE_ENABLED
+
+        assert ADDITIONAL_DATABASE_ENABLED is True
+
+    def test_additional_engines_created_when_enabled(self) -> None:
+        """The additional engine/session-factory attributes are populated by default."""
+        from app.database import additional_async_engine
+        from app.database import additional_async_session_factory
+        from app.database import additional_sync_engine
+        from app.database import additional_sync_session_factory
+
+        assert additional_async_engine is not None
+        assert additional_async_session_factory is not None
+        assert additional_sync_engine is not None
+        assert additional_sync_session_factory is not None
+
+    @pytest.mark.anyio
+    async def test_get_async_session_raises_when_additional_disabled(self) -> None:
+        """get_async_session raises RuntimeError for additional mode when disabled."""
+        from unittest.mock import patch
+
+        from app.database import ADDITIONAL_DATABASE_MODE
+        from app.database import database_mode_variable
+        from app.database import get_async_session
+
+        token = database_mode_variable.set(ADDITIONAL_DATABASE_MODE)
+        try:
+            with patch("app.database.additional_async_session_factory", None):
+                with pytest.raises(
+                    RuntimeError, match="POSTGRESQL_ADDITIONAL_DATABASE"
+                ):
+                    async for _ in get_async_session():
+                        pass
+        finally:
+            database_mode_variable.reset(token)
+
+    def test_get_additional_sync_session_raises_when_disabled(self) -> None:
+        """get_additional_sync_session raises RuntimeError when disabled."""
+        from unittest.mock import patch
+
+        from app.database import get_additional_sync_session
+
+        with patch("app.database.additional_sync_session_factory", None):
+            with pytest.raises(RuntimeError, match="POSTGRESQL_ADDITIONAL_DATABASE"):
+                next(get_additional_sync_session())
+
+    @pytest.mark.anyio
+    async def test_init_db_skips_additional_engine_when_none(self) -> None:
+        """init_db only connects to the main engine when the additional one is None."""
+        from unittest.mock import AsyncMock
+        from unittest.mock import MagicMock
+        from unittest.mock import patch
+
+        from app.database import init_db
+
+        main_conn = AsyncMock()
+        main_ctx = MagicMock()
+        main_ctx.__aenter__ = AsyncMock(return_value=main_conn)
+        main_ctx.__aexit__ = AsyncMock(return_value=None)
+        mock_main = MagicMock()
+        mock_main.connect.return_value = main_ctx
+
+        with (
+            patch("app.database.async_engine", mock_main),
+            patch("app.database.additional_async_engine", None),
+        ):
+            await init_db()
+
+        mock_main.connect.assert_called_once()
+
+    @pytest.mark.anyio
+    async def test_close_db_skips_additional_engines_when_none(self) -> None:
+        """close_db only disposes the main engines when the additional ones are None."""
+        from unittest.mock import AsyncMock
+        from unittest.mock import MagicMock
+        from unittest.mock import patch
+
+        from app.database import close_db
+
+        mock_main = MagicMock()
+        mock_main.dispose = AsyncMock()
+        mock_sync_main = MagicMock()
+
+        with (
+            patch("app.database.async_engine", mock_main),
+            patch("app.database.additional_async_engine", None),
+            patch("app.database.sync_engine", mock_sync_main),
+            patch("app.database.additional_sync_engine", None),
+        ):
+            await close_db()
+
+        mock_main.dispose.assert_awaited_once()
+        mock_sync_main.dispose.assert_called_once()
+
+
 # lifespan (from app.main – may not be available until the template is rendered)
 
 import sys  # noqa: E402
