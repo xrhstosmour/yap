@@ -221,30 +221,24 @@ class BaseRepository[T: SQLModel]:
         Returns:
             Tuple of (records, total_count)
         """
-        # Base query.
-        query = select(self.model)
-        count_query = select(func.count()).select_from(self.model)
+        # Carry the total matching-row count alongside each row via a window
+        # function, instead of a separate `SELECT count(*)` round trip.
+        total_count_column = func.count().over().label("_total_count")
+        query = select(self.model, total_count_column)
 
         # Apply filters.
         query = self._apply_tenant_filter(query)
-        count_query = self._apply_tenant_filter(count_query)
         query = self._apply_soft_delete_filter(query, include_deleted)
-        count_query = self._apply_soft_delete_filter(count_query, include_deleted)
 
         # Apply additional filters.
+        filter_conditions = []
         if filters:
-            filter_conditions = []
             for field, value in filters.items():
                 if hasattr(self.model, field):
                     if value is not None:
                         filter_conditions.append(getattr(self.model, field) == value)
             if filter_conditions:
                 query = query.where(and_(*filter_conditions))
-                count_query = count_query.where(and_(*filter_conditions))
-
-        # Get total count.
-        count_result = await self.session.execute(count_query)
-        total = count_result.scalar() or 0
 
         # Apply sorting.
         if sort_by and hasattr(self.model, sort_by):
@@ -262,7 +256,22 @@ class BaseRepository[T: SQLModel]:
 
         # Execute.
         result = await self.session.execute(query)
-        records = result.scalars().all()
+        rows = result.all()
+        records = [cast(T, row[0]) for row in rows]
+
+        if rows:
+            # The window function count rides along with every returned row.
+            total = cast(int, rows[0][1])
+        else:
+            # `skip` landed past the end (or zero matches): the window
+            # function contributes no row, so fall back to a plain count.
+            count_query = select(func.count()).select_from(self.model)
+            count_query = self._apply_tenant_filter(count_query)
+            count_query = self._apply_soft_delete_filter(count_query, include_deleted)
+            if filter_conditions:
+                count_query = count_query.where(and_(*filter_conditions))
+            count_result = await self.session.execute(count_query)
+            total = count_result.scalar() or 0
 
         return records, total
 

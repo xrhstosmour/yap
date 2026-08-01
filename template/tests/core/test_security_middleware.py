@@ -19,6 +19,14 @@ def _create_app() -> FastAPI:
     async def root() -> PlainTextResponse:
         return PlainTextResponse("OK")
 
+    @app.get("/try")
+    async def docs_swagger() -> PlainTextResponse:
+        return PlainTextResponse("OK")
+
+    @app.get("/documentation")
+    async def docs_redoc() -> PlainTextResponse:
+        return PlainTextResponse("OK")
+
     app.add_middleware(SecurityHeadersMiddleware)
     return app
 
@@ -39,16 +47,29 @@ class TestSecurityHeaders:
         assert response.headers["X-Frame-Options"] == "DENY"
 
     def test_content_security_policy_header(self) -> None:
-        """CSP header should contain expected directives."""
+        """CSP header for a non-docs route should not allow the jsdelivr CDN."""
         client = TestClient(_create_app())
         response = client.get("/")
         csp = response.headers["Content-Security-Policy"]
         assert "default-src 'none'" in csp
-        assert "script-src 'self'" in csp
-        assert "style-src 'self'" in csp
         assert "img-src 'self' data:" in csp
         assert "font-src 'self'" in csp
         assert "connect-src 'self'" in csp
+        assert "frame-ancestors 'none'" in csp
+        assert "script-src" not in csp
+        assert "style-src" not in csp
+        assert "cdn.jsdelivr.net" not in csp
+
+    @pytest.mark.parametrize("path", ["/try", "/documentation"])
+    def test_content_security_policy_header_on_docs_paths(self, path: str) -> None:
+        """CSP header for the Swagger/Redoc doc pages should allow the jsdelivr CDN."""
+        client = TestClient(_create_app())
+        response = client.get(path)
+        csp = response.headers["Content-Security-Policy"]
+        assert "default-src 'none'" in csp
+        assert "script-src 'self' cdn.jsdelivr.net" in csp
+        assert "style-src 'self' cdn.jsdelivr.net" in csp
+        assert "font-src 'self' data: cdn.jsdelivr.net" in csp
         assert "frame-ancestors 'none'" in csp
 
     def test_referrer_policy_header(self) -> None:
