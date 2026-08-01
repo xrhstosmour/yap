@@ -237,7 +237,7 @@ info "Running copier update..."
         echo ""
         info "Review changes, resolve any inline conflict markers (<<<<<<<), then commit."
         echo "  git diff"
-        echo "  git add .copier/.version && git add -A && git commit -m \"Synchronize upstream `YAP` template changes\""
+        echo "  git add .copier/.version && git add -A && git commit -m \"Synchronize upstream \`YAP\` template changes\""
     else
         info "No changes, project is up to date."
     fi
