@@ -140,6 +140,41 @@ class AuditLogRepository(BaseRepository[AuditLog]):
             **kwargs,
         )
 
+    async def log_user_action_safe(
+        self,
+        action: str | AuditAction,
+        user_id: str | UUID,
+        tenant_id: str | UUID,
+        email: str | None,
+        resource_type: str | None = None,
+        resource_id: str | None = None,
+        **kwargs: Any,  # noqa: ANN401
+    ) -> None:
+        """Log an action performed by a user, swallowing write failures.
+
+        Use this at call sites where a transient audit-log write failure
+        (e.g. a DB error) should not fail the surrounding business
+        operation. The failure is logged with `exc_info` for visibility.
+        """
+        try:
+            await self.log_user_action(
+                action=action,
+                user_id=user_id,
+                tenant_id=tenant_id,
+                email=email,
+                resource_type=resource_type,
+                resource_id=resource_id,
+                **kwargs,
+            )
+        except Exception:
+            logger.warning(
+                "audit_log_write_failed",
+                action=action.value if isinstance(action, AuditAction) else action,
+                resource_type=resource_type,
+                resource_id=resource_id,
+                exc_info=True,
+            )
+
     async def log_api_key_action(
         self,
         action: str | AuditAction,
