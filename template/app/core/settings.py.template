@@ -265,7 +265,17 @@ class Settings(BaseSettings):
     DATABASE_POOL_SIZE: int = 10
     DATABASE_MAX_OVERFLOW: int = 20
     DATABASE_POOL_RECYCLE: int = 3600
+    DATABASE_POOL_TIMEOUT: int = 30
     REDIS_MAX_CONNECTIONS: int = 50
+
+    # Celery Tuning.
+    CELERY_TASK_TIME_LIMIT: int = 300
+    CELERY_TASK_SOFT_TIME_LIMIT: int = 240
+    CELERY_WORKER_PREFETCH_MULTIPLIER: int = 4
+    CELERY_RESULT_EXPIRES_SECONDS: int = 86400
+    CELERY_CLEANUP_AUDIT_LOGS_HOUR: int = 3
+    CELERY_CACHE_WARM_HOUR: int = 6
+    CELERY_PURGE_GRAVEYARD_HOUR: int = 4
 
     # Superuser (created on first startup).
     FIRST_SUPERUSER_EMAIL: EmailStr = "admin@{{ project_slug }}.com"
