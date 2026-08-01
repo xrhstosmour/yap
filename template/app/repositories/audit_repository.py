@@ -157,15 +157,24 @@ class AuditLogRepository(BaseRepository[AuditLog]):
         operation. The failure is logged with `exc_info` for visibility.
         """
         try:
-            await self.log_user_action(
-                action=action,
-                user_id=user_id,
-                tenant_id=tenant_id,
-                email=email,
-                resource_type=resource_type,
-                resource_id=resource_id,
-                **kwargs,
-            )
+            # A SAVEPOINT scopes the failure to just this insert: a plain
+            # `session.rollback()` here would also discard whatever the
+            # caller already flushed earlier in the same transaction (e.g.
+            # a password change), silently undoing the operation this
+            # method is supposed to leave unaffected. Without any rollback
+            # at all, a failed flush leaves the session unusable until one
+            # happens, so the *next* unrelated DB access on this session
+            # raises `PendingRollbackError` instead.
+            async with self.session.begin_nested():
+                await self.log_user_action(
+                    action=action,
+                    user_id=user_id,
+                    tenant_id=tenant_id,
+                    email=email,
+                    resource_type=resource_type,
+                    resource_id=resource_id,
+                    **kwargs,
+                )
         except Exception:
             logger.warning(
                 "audit_log_write_failed",
