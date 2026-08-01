@@ -19,6 +19,7 @@ from jose import ExpiredSignatureError
 from jose import JWTError
 
 from app.core.logging import get_logger
+from app.core.rate_limit import check_auth_rate_limit
 from app.core.security import decode_token
 from app.core.security import verify_email_verification_token
 from app.dependencies import AccessTokenDependency
@@ -67,6 +68,7 @@ INVALID_VERIFICATION_TOKEN = "Invalid or expired verification token."
     status_code=status.HTTP_201_CREATED,
     summary="Register a new user",
     description="Create a new user account and return access tokens.",
+    dependencies=[Depends(check_auth_rate_limit)],
 )
 async def register(
     data: RegisterRequest,
@@ -97,6 +99,7 @@ async def register(
         "Authenticate with email and password. "
         "Returns tokens directly, or a 2FA challenge if the account has 2FA enabled."
     ),
+    dependencies=[Depends(check_auth_rate_limit)],
 )
 async def login(
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
@@ -520,6 +523,7 @@ async def verify_email(
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Request password reset",
     description="Send a password reset link to the given email address.",
+    dependencies=[Depends(check_auth_rate_limit)],
 )
 async def forgot_password(
     data: PasswordResetRequest,
@@ -711,6 +715,7 @@ async def webauthn_login_complete(
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Request magic link",
     description="Send a passwordless login link to the given email address.",
+    dependencies=[Depends(check_auth_rate_limit)],
 )
 async def request_magic_link(
     data: MagicLinkRequest,
