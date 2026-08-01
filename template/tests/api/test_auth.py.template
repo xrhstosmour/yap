@@ -903,3 +903,45 @@ class TestAuthRateLimit:
 
         assert response.status_code == 429
         assert response.headers["retry-after"] == "30"
+
+
+class TestWebSocketTicket:
+    """Tests for POST /auth/ws-ticket."""
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_returns_ticket_bound_to_current_user(
+        self, client: AsyncClient, session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Should mint a ticket bound to the authenticated user via create_ws_ticket."""
+        auth_service = _auth_service(session)
+        user = await auth_service.register(
+            RegisterRequest(email="wsticket@{{ project_slug }}.com", password="password123")
+        )
+        access_token = create_access_token(subject=user.id)
+
+        captured: dict[str, str] = {}
+
+        async def _fake_create_ws_ticket(user_id: str) -> str:
+            captured["user_id"] = user_id
+            return "fake-ticket"
+
+        monkeypatch.setattr(
+            "app.api.v1.auth.create_ws_ticket", _fake_create_ws_ticket
+        )
+
+        response = await client.post(
+            "/api/v1/auth/ws-ticket",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["ticket"] == "fake-ticket"
+        assert data["expires_in"] == 30
+        assert captured["user_id"] == str(user.id)
+
+    async def test_requires_authentication(self, client: AsyncClient) -> None:
+        """Without a bearer token the request should be rejected."""
+        response = await client.post("/api/v1/auth/ws-ticket")
+
+        assert response.status_code in (401, 403)
