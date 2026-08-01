@@ -110,7 +110,7 @@ class TestCreate:
             key_prefix=full_key[:12],
         )
         service.apikey_repository.create = AsyncMock(return_value=mock_created)
-        service.audit_repository.log_user_action = AsyncMock()
+        service.audit_repository.log_user_action_safe = AsyncMock()
 
         with (
             patch(
@@ -127,7 +127,7 @@ class TestCreate:
         assert result.name == "Expiring Key"
         assert raw_key == full_key
         service.apikey_repository.create.assert_awaited_once()
-        service.audit_repository.log_user_action.assert_awaited_once()
+        service.audit_repository.log_user_action_safe.assert_awaited_once()
 
         # Verify expires_at is approximately 30 days from now.
         call_args = service.apikey_repository.create.call_args[0][0]
@@ -136,6 +136,29 @@ class TestCreate:
         assert isinstance(expires, datetime)
         delta = expires - datetime.now(UTC)
         assert timedelta(days=29) < delta < timedelta(days=31)
+
+    @pytest.mark.asyncio
+    async def test_create_succeeds_when_audit_log_write_fails(
+        self,
+        service: APIKeyService,
+    ) -> None:
+        """Should create the key even if the audit-log write fails."""
+        from app.repositories.audit_repository import AuditLogRepository
+
+        user_id = uuid4()
+        tenant_id = uuid4()
+        data = _make_create_data(name="My Key")
+
+        mock_created = _make_api_key_mock(name="My Key")
+        service.apikey_repository.create = AsyncMock(return_value=mock_created)
+        service.audit_repository = AuditLogRepository(MagicMock())
+        service.audit_repository.log_user_action = AsyncMock(
+            side_effect=Exception("db unavailable")
+        )
+
+        result, _ = await service.create(user_id, tenant_id, data)
+
+        assert result.name == "My Key"
 
     @pytest.mark.asyncio
     async def test_create_with_expiry_zero_raises(
@@ -183,7 +206,7 @@ class TestCreate:
             expires_at=None,
         )
         service.apikey_repository.create = AsyncMock(return_value=mock_created)
-        service.audit_repository.log_user_action = AsyncMock()
+        service.audit_repository.log_user_action_safe = AsyncMock()
 
         with (
             patch(
@@ -222,7 +245,7 @@ class TestCreate:
             key_prefix=full_key[:12],
         )
         service.apikey_repository.create = AsyncMock(return_value=mock_created)
-        service.audit_repository.log_user_action = AsyncMock()
+        service.audit_repository.log_user_action_safe = AsyncMock()
 
         with (
             patch(
@@ -412,7 +435,7 @@ class TestUpdate:
 
         service.apikey_repository.get = AsyncMock(return_value=existing)
         service.apikey_repository.update = AsyncMock(return_value=updated)
-        service.audit_repository.log_user_action = AsyncMock()
+        service.audit_repository.log_user_action_safe = AsyncMock()
 
         data = APIKeyUpdate.model_construct(name="New Name")
 
@@ -422,7 +445,7 @@ class TestUpdate:
         service.apikey_repository.update.assert_awaited_once_with(
             key_id, {"name": "New Name"}
         )
-        service.audit_repository.log_user_action.assert_awaited_once()
+        service.audit_repository.log_user_action_safe.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_update_key_not_found(
@@ -442,7 +465,7 @@ class TestUpdate:
 
         assert result is None
         service.apikey_repository.update.assert_not_called()
-        service.audit_repository.log_user_action.assert_not_called()
+        service.audit_repository.log_user_action_safe.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_update_no_changes_skips_persistence(
@@ -456,7 +479,7 @@ class TestUpdate:
 
         existing = _make_api_key_mock(id=key_id)
         service.apikey_repository.get = AsyncMock(return_value=existing)
-        service.audit_repository.log_user_action = AsyncMock()
+        service.audit_repository.log_user_action_safe = AsyncMock()
 
         # All fields None — nothing to update.
         data = APIKeyUpdate.model_construct()
@@ -465,7 +488,7 @@ class TestUpdate:
 
         assert result is existing
         service.apikey_repository.update.assert_not_called()
-        service.audit_repository.log_user_action.assert_not_called()
+        service.audit_repository.log_user_action_safe.assert_not_called()
 
 
 # Revoke
@@ -487,7 +510,7 @@ class TestRevoke:
         existing = _make_api_key_mock(id=key_id, is_active=True)
         service.apikey_repository.get = AsyncMock(return_value=existing)
         service.apikey_repository.update = AsyncMock()
-        service.audit_repository.log_user_action = AsyncMock()
+        service.audit_repository.log_user_action_safe = AsyncMock()
 
         result = await service.revoke(key_id, user_id, tenant_id)
 
@@ -495,7 +518,7 @@ class TestRevoke:
         service.apikey_repository.update.assert_awaited_once_with(
             key_id, {"is_active": False}
         )
-        service.audit_repository.log_user_action.assert_awaited_once()
+        service.audit_repository.log_user_action_safe.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_revoke_key_not_found(
@@ -513,7 +536,7 @@ class TestRevoke:
 
         assert result is False
         service.apikey_repository.update.assert_not_called()
-        service.audit_repository.log_user_action.assert_not_called()
+        service.audit_repository.log_user_action_safe.assert_not_called()
 
 
 # Delete
@@ -535,13 +558,13 @@ class TestDelete:
         existing = _make_api_key_mock(id=key_id)
         service.apikey_repository.get = AsyncMock(return_value=existing)
         service.apikey_repository.delete = AsyncMock(return_value=True)
-        service.audit_repository.log_user_action = AsyncMock()
+        service.audit_repository.log_user_action_safe = AsyncMock()
 
         result = await service.delete(key_id, user_id, tenant_id)
 
         assert result is True
         service.apikey_repository.delete.assert_awaited_once_with(key_id)
-        service.audit_repository.log_user_action.assert_awaited_once()
+        service.audit_repository.log_user_action_safe.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_delete_key_not_found(
@@ -559,4 +582,4 @@ class TestDelete:
 
         assert result is False
         service.apikey_repository.delete.assert_not_called()
-        service.audit_repository.log_user_action.assert_not_called()
+        service.audit_repository.log_user_action_safe.assert_not_called()

@@ -200,7 +200,7 @@ def test_create_triggers_audit_log(service: TenantService) -> None:
         service.create(TenantCreate(name="Acme", slug="acme"), created_by=created_by)
     )
     assert result is mock_tenant
-    service.audit_repository.log_user_action.assert_awaited_once_with(
+    service.audit_repository.log_user_action_safe.assert_awaited_once_with(
         action=AuditAction.TENANT_CREATE,
         user_id=created_by,
         tenant_id=mock_tenant.id,
@@ -209,6 +209,29 @@ def test_create_triggers_audit_log(service: TenantService) -> None:
         resource_id=str(mock_tenant.id),
         metadata={"name": "Acme", "slug": "acme"},
     )
+
+
+def test_create_succeeds_when_audit_log_write_fails(service: TenantService) -> None:
+    from app.models.tenant import Tenant
+    from app.repositories.audit_repository import AuditLogRepository
+
+    mock_tenant = Tenant(
+        id=UUID("00000000-0000-0000-0000-000000000001"),
+        name="Acme",
+        slug="acme",
+    )
+
+    service.tenant_repository.slug_exists = AsyncMock(return_value=False)
+    service.tenant_repository.create_tenant = AsyncMock(return_value=mock_tenant)
+    service.audit_repository = AuditLogRepository(MagicMock())
+    service.audit_repository.log_user_action = AsyncMock(
+        side_effect=Exception("db unavailable")
+    )
+
+    import asyncio
+
+    result = asyncio.run(service.create(TenantCreate(name="Acme", slug="acme")))
+    assert result is mock_tenant
 
 
 def test_update_triggers_audit_log(service: TenantService) -> None:
@@ -235,7 +258,7 @@ def test_update_triggers_audit_log(service: TenantService) -> None:
         )
     )
     assert result is updated_tenant
-    service.audit_repository.log_user_action.assert_awaited_once_with(
+    service.audit_repository.log_user_action_safe.assert_awaited_once_with(
         action=AuditAction.TENANT_UPDATE,
         user_id=updated_by,
         tenant_id=tenant_id,
@@ -281,7 +304,7 @@ def test_delete_triggers_audit_log(service: TenantService) -> None:
 
     result = asyncio.run(service.delete(tenant_id, deleted_by=deleted_by))
     assert result is True
-    service.audit_repository.log_user_action.assert_awaited_once_with(
+    service.audit_repository.log_user_action_safe.assert_awaited_once_with(
         action=AuditAction.TENANT_DELETE,
         user_id=deleted_by,
         tenant_id=tenant_id,

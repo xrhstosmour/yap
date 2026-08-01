@@ -261,7 +261,7 @@ class AuthService:
             raise UserInactiveError("User account is inactive")
 
         # Log successful login.
-        await self.audit_repository.log_user_action(
+        await self.audit_repository.log_user_action_safe(
             action=AuditAction.LOGIN,
             user_id=user.id,
             tenant_id=user.tenant_id or SYSTEM_TENANT_ID,
@@ -391,7 +391,7 @@ class AuthService:
                 raise AuthenticationError("Invalid refresh token") from error
 
         tenant_id = user.tenant_id or SYSTEM_TENANT_ID
-        await self.audit_repository.log_user_action(
+        await self.audit_repository.log_user_action_safe(
             action=AuditAction.LOGOUT,
             user_id=user.id,
             tenant_id=tenant_id,
@@ -426,7 +426,7 @@ class AuthService:
         await self._update_password_and_invalidate(user, new_password)
 
         # Log password change.
-        await self.audit_repository.log_user_action(
+        await self.audit_repository.log_user_action_safe(
             action=AuditAction.PASSWORD_CHANGE,
             user_id=user.id,
             tenant_id=user.tenant_id or SYSTEM_TENANT_ID,
