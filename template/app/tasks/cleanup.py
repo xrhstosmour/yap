@@ -137,22 +137,55 @@ def purge_graveyard(self, retention_days: int = 30) -> dict:
 
 @celery_app.task(bind=True, name="app.tasks.cleanup.generate_reports")
 def generate_reports(self) -> dict:
-    """Generate periodic reports.
+    """Generate periodic usage reports.
 
-    Runs daily to generate usage and activity reports.
+    Runs daily and logs counts of users, files, and audit log entries
+    created in the last 24 hours.
 
     Returns:
-        Result dictionary
+        Result dictionary with the report counts
     """
     logger.info("report_generation_started", task_id=self.request.id)
 
     try:
-        # Placeholder for report generation.
-        logger.info("report_generation_completed", task_id=self.request.id)
+        import asyncio
+        from datetime import UTC
+        from datetime import datetime
+        from datetime import timedelta
+
+        from sqlmodel import func
+        from sqlmodel import select
+
+        from app.database import async_session_factory
+        from app.models.audit_log import AuditLog
+        from app.models.file import File
+        from app.models.user import User
+
+        async def _run() -> dict[str, int]:
+            cutoff = datetime.now(UTC) - timedelta(days=1)
+            async with async_session_factory() as session:
+                counts: dict[str, int] = {}
+                for label, model in (
+                    ("new_users", User),
+                    ("new_files", File),
+                    ("audit_events", AuditLog),
+                ):
+                    result = await session.execute(
+                        select(func.count())
+                        .select_from(model)
+                        .where(model.created_at >= cutoff)
+                    )
+                    counts[label] = result.scalar() or 0
+                return counts
+
+        counts = asyncio.run(_run())
+
+        logger.info("report_generation_completed", task_id=self.request.id, **counts)
 
         return {
             "status": "completed",
             "task_id": self.request.id,
+            **counts,
         }
 
     except Exception as e:
