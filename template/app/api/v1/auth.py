@@ -22,6 +22,8 @@ from app.core.logging import get_logger
 from app.core.rate_limit import check_auth_rate_limit
 from app.core.security import decode_token
 from app.core.security import verify_email_verification_token
+from app.core.ws_ticket import WS_TICKET_TTL_SECONDS
+from app.core.ws_ticket import create_ws_ticket
 from app.dependencies import AccessTokenDependency
 from app.dependencies import CurrentUser
 from app.dependencies import SessionDependency
@@ -48,6 +50,7 @@ from app.schemas.auth import WebAuthnLoginCompleteRequest
 from app.schemas.auth import WebAuthnRegisterBeginResponse
 from app.schemas.auth import WebAuthnRegisterCompleteRequest
 from app.schemas.auth import WebAuthnRegisterCompleteResponse
+from app.schemas.auth import WSTicketResponse
 from app.schemas.user import UserResponse
 from app.services.auth_service import AuthenticationError
 from app.services.auth_service import AuthService
@@ -447,6 +450,27 @@ async def get_me(current_user: CurrentUser) -> UserResponse:
     such as hashed_password.
     """
     return UserResponse.model_validate(current_user)
+
+
+@router.post(
+    "/ws-ticket",
+    response_model=WSTicketResponse,
+    summary="Mint a WebSocket auth ticket",
+    description=(
+        "Issue a short-lived, single-use ticket for authenticating a "
+        "WebSocket connection. WebSocket handshakes cannot carry an "
+        "Authorization header, so this avoids passing the JWT itself as a "
+        "URL query parameter."
+    ),
+)
+async def create_websocket_ticket(current_user: CurrentUser) -> WSTicketResponse:
+    """Mint a WebSocket auth ticket for the current user.
+
+    Pass the returned ticket as the `ticket` query parameter when opening
+    a `/ws/*` connection. Expires in `WS_TICKET_TTL_SECONDS` if unused.
+    """
+    ticket = await create_ws_ticket(str(current_user.id))
+    return WSTicketResponse(ticket=ticket, expires_in=WS_TICKET_TTL_SECONDS)
 
 
 @router.post(

@@ -165,6 +165,22 @@ class GoogleCallbackRequest(BaseSchema):
     )
 
 
+class WSTicketResponse(BaseSchema):
+    """WebSocket authentication ticket response.
+
+    Returned by `POST /auth/ws-ticket`. The ticket is opaque, single-use,
+    and must be presented as the `ticket` query parameter when opening a
+    WebSocket connection, in place of a JWT.
+
+    Attributes:
+        ticket: Opaque single-use ticket string.
+        expires_in: Seconds until the ticket expires if unused.
+    """
+
+    ticket: str = Field(description="Opaque single-use WebSocket auth ticket")
+    expires_in: int = Field(description="Seconds until the ticket expires")
+
+
 class LoginResponse(BaseSchema):
     """Login response — either JWT tokens or a 2FA challenge.
 

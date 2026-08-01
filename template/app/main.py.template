@@ -27,6 +27,8 @@ from starlette.middleware.gzip import GZipMiddleware
 from app.api.idempotency import IdempotencyMiddleware
 from app.api.request_id import RequestIDMiddleware
 from app.api.v1.router import router as api_v1_router
+from app.api.v1.websocket import start_broadcast_relay
+from app.api.v1.websocket import stop_broadcast_relay
 from app.core.cache import close_redis
 from app.core.cache import init_redis
 from app.core.logging import get_logger
@@ -120,6 +122,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         await init_redis()
         logger.info("redis_initialized")
+        await start_broadcast_relay()
     except Exception as e:
         logger.error("redis_init_failed", error=str(e))
 
@@ -129,6 +132,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # Shutdown.
     logger.info("application_shutting_down")
+    await stop_broadcast_relay()
     await close_db()
     await close_redis()
     logger.info("application_shutdown_complete")

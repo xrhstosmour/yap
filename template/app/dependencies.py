@@ -27,6 +27,7 @@ from app.core.rate_limit import check_user_rate_limit
 from app.core.security import decode_token
 from app.core.security import is_token_blacklisted
 from app.core.tenant import set_current_tenant_id
+from app.core.ws_ticket import consume_ws_ticket
 from app.database import get_async_session
 from app.models.api_key import APIKey
 from app.models.user import User
@@ -168,64 +169,41 @@ SuperuserUser = Annotated[User, Depends(get_current_superuser)]
 
 async def get_current_user_ws(
     session: SessionDependency,
-    token: Annotated[str | None, Query()] = None,
+    ticket: Annotated[str | None, Query()] = None,
 ) -> User:
-    """Authenticate a WebSocket connection from a JWT access token.
+    """Authenticate a WebSocket connection from a single-use ticket.
 
     WebSocket handshakes have no equivalent of the ``Authorization`` header
-    dependency used by ``get_current_user``, so the token travels as a
-    ``token`` query parameter instead. Validation otherwise mirrors
-    ``get_current_user`` (JWT decode, blacklist check, active-user check).
-    Failures raise ``WebSocketException``, which FastAPI turns into a
-    policy-violation close before the connection is ever accepted.
+    dependency used by ``get_current_user``, and passing the JWT itself as a
+    ``?token=`` query parameter would leak it into server/proxy access logs.
+    Instead the client first mints a short-lived, single-use ticket via
+    ``POST /auth/ws-ticket`` (see ``app.core.ws_ticket``) and passes that as
+    ``ticket`` here. Failures raise ``WebSocketException``, which FastAPI
+    turns into a policy-violation close before the connection is accepted.
 
     Args:
         session: Database session
-        token: JWT access token passed as a query parameter
+        ticket: Single-use ticket minted by ``POST /auth/ws-ticket``
 
     Returns:
         Authenticated User
 
     Raises:
-        WebSocketException: If the token is missing, invalid, or the user
-            cannot be validated
+        WebSocketException: If the ticket is missing, invalid/expired, or
+            the user cannot be validated
     """
-    if not token:
+    if not ticket:
         raise WebSocketException(
             code=status.WS_1008_POLICY_VIOLATION,
-            reason="Missing authentication token",
+            reason="Missing authentication ticket",
         )
 
-    try:
-        payload = decode_token(token)
-
-        if payload.get("type") != "access":
-            raise WebSocketException(
-                code=status.WS_1008_POLICY_VIOLATION,
-                reason="Invalid token type",
-            )
-
-        user_id = payload.get("sub")
-        if not user_id:
-            raise WebSocketException(
-                code=status.WS_1008_POLICY_VIOLATION,
-                reason="Invalid token",
-            )
-
-        token_identifier = payload.get("jti")
-        if isinstance(token_identifier, str) and await is_token_blacklisted(
-            token_identifier
-        ):
-            raise WebSocketException(
-                code=status.WS_1008_POLICY_VIOLATION,
-                reason="Could not validate credentials",
-            )
-
-    except (JWTError, ExpiredSignatureError) as e:
+    user_id = await consume_ws_ticket(ticket)
+    if not user_id:
         raise WebSocketException(
             code=status.WS_1008_POLICY_VIOLATION,
-            reason="Could not validate credentials",
-        ) from e
+            reason="Invalid or expired ticket",
+        )
 
     user_repository = UserRepository(session)
     user = await user_repository.get(UUID(user_id))
@@ -240,14 +218,6 @@ async def get_current_user_ws(
         raise WebSocketException(
             code=status.WS_1008_POLICY_VIOLATION,
             reason="User account is inactive",
-        )
-
-    # Reject access tokens issued before the last password change or reset.
-    token_version = payload.get("token_version")
-    if token_version is not None and int(token_version) != user.token_version:
-        raise WebSocketException(
-            code=status.WS_1008_POLICY_VIOLATION,
-            reason="Could not validate credentials",
         )
 
     if user.tenant_id:
