@@ -158,7 +158,7 @@ class UserService:
             metadata={"created_by": str(created_by) if created_by else None},
         )
 
-        logger.info("user_created", user_id=str(user.id), email=user.email)
+        logger.info("user_created", user_id=str(user.id))
 
         return user
 
