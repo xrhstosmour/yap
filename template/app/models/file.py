@@ -22,6 +22,15 @@ class File(BaseModel, table=True):
     hash, ``reference_count`` is incremented instead of uploading
     duplicates. The storage backend object is deleted when
     ``reference_count`` reaches zero.
+
+    Intentionally has no ``tenant_id``: identical content is deduplicated
+    globally across tenants (see ``content_hash``), so
+    ``BaseRepository._apply_tenant_filter`` silently no-ops for this model.
+    Ownership is ``uploaded_by``, not tenant membership. Never call
+    ``FileRepository.get()`` directly for a caller-facing read or write;
+    use ``get_owned()`` (or an explicit ``resource_id``/``resource_type``
+    ownership check, as the public business-media endpoints do) so one
+    tenant's private files can't be reached by ID from another tenant.
     """
 
     __tablename__ = "files"  # pyright: ignore[reportAssignmentType]
