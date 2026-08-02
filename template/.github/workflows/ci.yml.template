@@ -1,5 +1,8 @@
 name: Backend CI
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
@@ -177,9 +180,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scan-ref: {% if nested %}{{ _folder_name }}{% else %}.{% endif %}
           severity: CRITICAL,HIGH
           exit-code: 1
+      - name: Report medium-severity findings
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: {% if nested %}{{ _folder_name }}{% else %}.{% endif %}
+          severity: MEDIUM
+          exit-code: 0

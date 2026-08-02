@@ -53,8 +53,9 @@ template/               # Scaffolded application (Jinja2 suffix: .template)
 2. **test**: Renders the template (with tasks), sources `.env`, runs
    `pytest tests/ -v --tb=short --cov=app --cov-report=xml`.
    Minimum coverage: 82%.
-3. **security**: Trivy filesystem scan on `template/` for CRITICAL/HIGH/MEDIUM
-   vulnerabilities.
+3. **security**: Trivy filesystem scan on `template/` for CRITICAL/HIGH
+   vulnerabilities, which fails the build, plus a non-blocking second scan
+   that reports MEDIUM findings for periodic review.
 
 All three jobs run on `ubuntu-latest`. Lint must pass before test and security run.
 
