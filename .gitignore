@@ -50,6 +50,3 @@ Thumbs.db
 # Keys
 *.pem
 *.key
-
-# Lock files.
-uv.lock
