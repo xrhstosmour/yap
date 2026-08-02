@@ -9,11 +9,15 @@ from unittest.mock import patch
 import pytest
 from botocore.exceptions import ClientError
 
+from app.core.storage import _build_thumbnail
 from app.core.storage import _ensure_bucket
 from app.core.storage import _s3_client
 from app.core.storage import delete_object
+from app.core.storage import download_object
 from app.core.storage import get_download_url
+from app.core.storage import is_thumbnailable
 from app.core.storage import upload_file
+from app.core.storage import upload_object
 
 
 def _client_error(code: str, operation_name: str = "HeadBucket") -> ClientError:
@@ -45,9 +49,8 @@ class TestUploadFile:
     ) -> None:
         """Should upload content and return object key with hash."""
         content = b"hello world"
-        object_key, content_hash, *_ = await upload_file(
+        object_key, content_hash = await upload_file(
             content=content,
-            filename="test.txt",
             mimetype="text/plain",
         )
 
@@ -65,7 +68,7 @@ class TestUploadFile:
         """Should create bucket on first upload."""
         mock_s3_client.head_bucket.side_effect = _client_error("404")
 
-        await upload_file(content=b"test", filename="t.txt", mimetype="text/plain")
+        await upload_file(content=b"test", mimetype="text/plain")
 
         mock_s3_client.create_bucket.assert_called_once()
 
@@ -155,73 +158,91 @@ class TestEnsureBucket:
         mock_client.create_bucket.assert_not_called()
 
 
-class TestUploadFileImage:
-    """Tests for upload_file() with image content."""
+class TestIsThumbnailable:
+    """Tests for is_thumbnailable()."""
 
-    @pytest.mark.asyncio
-    async def test_image_upload_creates_thumbnail(
-        self, mock_s3_client: MagicMock
-    ) -> None:
-        """Should generate a thumbnail when uploading an image."""
+    def test_png_is_thumbnailable(self) -> None:
+        assert is_thumbnailable("image/png") is True
+
+    def test_jpeg_is_thumbnailable(self) -> None:
+        assert is_thumbnailable("image/jpeg") is True
+
+    def test_gif_is_not_thumbnailable(self) -> None:
+        """GIFs are excluded from thumbnail generation."""
+        assert is_thumbnailable("image/gif") is False
+
+    def test_non_image_is_not_thumbnailable(self) -> None:
+        assert is_thumbnailable("text/plain") is False
+
+
+class TestBuildThumbnail:
+    """Tests for _build_thumbnail()."""
+
+    def test_builds_thumbnail_from_image(self) -> None:
+        """Should return source dimensions and resized thumbnail bytes."""
         mock_img = MagicMock()
         mock_img.size = (1920, 1080)
         mock_img.copy.return_value = mock_img
 
         with patch("PIL.Image.open", return_value=mock_img):
-            object_key, content_hash, width, height, thumb_key = await upload_file(
-                content=b"fake-image-data",
-                filename="photo.png",
-                mimetype="image/png",
+            width, height, thumbnail_bytes = _build_thumbnail(
+                b"fake-image-data", "image/png"
             )
 
         assert width == 1920
         assert height == 1080
-        assert thumb_key is not None
-        assert thumb_key.startswith("thumbnails/")
+        assert isinstance(thumbnail_bytes, bytes)
+        mock_img.thumbnail.assert_called_once()
 
-        # Should have two put_object calls: original + thumbnail.
-        assert mock_s3_client.put_object.call_count == 2
-
-    @pytest.mark.asyncio
-    async def test_gif_images_skip_thumbnail(self, mock_s3_client: MagicMock) -> None:
-        """Should NOT generate a thumbnail for GIF images."""
-        mock_img = MagicMock()
-        mock_img.size = (320, 240)
-
-        with patch("PIL.Image.open", return_value=mock_img):
-            object_key, content_hash, width, height, thumb_key = await upload_file(
-                content=b"fake-gif-data",
-                filename="anim.gif",
-                mimetype="image/gif",
-            )
-
-        # GIF is excluded from thumbnail generation.
-        assert thumb_key is None
-        # Only one put_object call (original only).
-        assert mock_s3_client.put_object.call_count == 1
-
-    @pytest.mark.asyncio
-    async def test_unprocessable_image_logs_warning(
-        self, mock_s3_client: MagicMock
-    ) -> None:
-        """Should log a warning when thumbnail generation fails."""
+    def test_unprocessable_image_raises(self) -> None:
+        """Should propagate the decode error for the caller to handle."""
         with (
             patch("PIL.Image.open", side_effect=OSError("cannot identify image")),
-            patch("app.core.storage.logger") as mock_logger,
+            pytest.raises(OSError, match="cannot identify image"),
         ):
-            object_key, content_hash, width, height, thumb_key = await upload_file(
-                content=b"not-actually-an-image",
-                filename="broken.png",
-                mimetype="image/png",
-            )
+            _build_thumbnail(b"not-actually-an-image", "image/png")
 
-        assert thumb_key is None
-        assert width is None
-        assert height is None
-        mock_logger.warning.assert_called_once()
-        arguments, keyword_arguments = mock_logger.warning.call_args
-        assert arguments[0] == "thumbnail_generation_failed"
-        assert keyword_arguments.get("exc_info") is True
+
+class TestUploadObject:
+    """Tests for upload_object()."""
+
+    @pytest.mark.asyncio
+    async def test_uploads_bytes_under_given_key(
+        self, mock_s3_client: MagicMock
+    ) -> None:
+        await upload_object("thumbnails/abc123", b"thumb-bytes", "image/png")
+
+        mock_s3_client.put_object.assert_called_once_with(
+            Bucket=ANY,
+            Key="thumbnails/abc123",
+            Body=b"thumb-bytes",
+            ContentType="image/png",
+        )
+
+    @pytest.mark.asyncio
+    async def test_creates_bucket_if_missing(self, mock_s3_client: MagicMock) -> None:
+        mock_s3_client.head_bucket.side_effect = _client_error("404")
+
+        await upload_object("key", b"data", "text/plain")
+
+        mock_s3_client.create_bucket.assert_called_once()
+
+
+class TestDownloadObject:
+    """Tests for download_object()."""
+
+    @pytest.mark.asyncio
+    async def test_returns_object_bytes(self, mock_s3_client: MagicMock) -> None:
+        mock_body = MagicMock()
+        mock_body.read.return_value = b"original-bytes"
+        mock_s3_client.get_object.return_value = {"Body": mock_body}
+
+        content = await download_object("uploads/abc123")
+
+        assert content == b"original-bytes"
+        mock_s3_client.get_object.assert_called_once_with(
+            Bucket=ANY, Key="uploads/abc123"
+        )
 
 
 class TestDeleteObject:

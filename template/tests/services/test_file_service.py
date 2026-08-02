@@ -73,7 +73,7 @@ class TestUpload:
         with (
             patch("app.services.file_service.upload_file") as mock_upload,
         ):
-            mock_upload.return_value = ("uploads/abc123", "abc123", None, None, None)
+            mock_upload.return_value = ("uploads/abc123", "abc123")
             record = await service.upload(mock_file, user)
 
         assert record.filename == "test.txt"
@@ -140,13 +140,83 @@ class TestUpload:
             patch("app.services.file_service.upload_file") as mock_upload,
             patch("app.services.file_service.delete_object") as mock_delete,
         ):
-            mock_upload.return_value = ("uploads/loser", "loser-hash", None, None, None)
+            mock_upload.return_value = ("uploads/loser", "loser-hash")
             record = await service.upload(mock_file, user)
 
         assert record is winner
         mock_delete.assert_called_once_with(
             object_key="uploads/loser", bucket=settings.STORAGE_BUCKET
         )
+
+    @pytest.mark.asyncio
+    async def test_dispatches_thumbnail_task_for_new_image(
+        self, service: FileService
+    ) -> None:
+        """Should dispatch generate_thumbnail_task for a newly created image file."""
+        user = make_user()
+        mock_file = MagicMock()
+        mock_file.filename = "photo.png"
+        mock_file.content_type = "image/png"
+        mock_file.read = AsyncMock(side_effect=[b"image bytes", b""])
+
+        service.file_repository.get_by_content_hash = AsyncMock(return_value=None)
+        new_record = File(
+            filename="photo.png",
+            mimetype="image/png",
+            size=11,
+            content_hash="dummy",
+            bucket="default",
+            object_key="uploads/abc123",
+            reference_count=1,
+            uploaded_by=user.id,
+        )
+        service.file_repository.create_or_increment = AsyncMock(
+            return_value=(new_record, True)
+        )
+
+        with (
+            patch("app.services.file_service.upload_file") as mock_upload,
+            patch("app.tasks.storage.generate_thumbnail_task") as mock_task,
+        ):
+            mock_upload.return_value = ("uploads/abc123", "abc123")
+            await service.upload(mock_file, user)
+
+        mock_task.delay.assert_called_once_with(file_id=str(new_record.id))
+
+    @pytest.mark.asyncio
+    async def test_skips_thumbnail_task_for_non_image(
+        self, service: FileService
+    ) -> None:
+        """Should not dispatch generate_thumbnail_task for a non-image file."""
+        user = make_user()
+        mock_file = MagicMock()
+        mock_file.filename = "test.txt"
+        mock_file.content_type = "text/plain"
+        mock_file.read = AsyncMock(side_effect=[b"unique content", b""])
+
+        service.file_repository.get_by_content_hash = AsyncMock(return_value=None)
+        new_record = File(
+            filename="test.txt",
+            mimetype="text/plain",
+            size=15,
+            content_hash="dummy",
+            bucket="default",
+            object_key="uploads/abc123",
+            reference_count=1,
+            uploaded_by=user.id,
+        )
+        service.file_repository.create_or_increment = AsyncMock(
+            return_value=(new_record, True)
+        )
+
+        with (
+            patch("app.services.file_service.upload_file") as mock_upload,
+            patch("app.tasks.storage.generate_thumbnail_task") as mock_task,
+        ):
+            mock_upload.return_value = ("uploads/abc123", "abc123")
+            await service.upload(mock_file, user)
+
+        mock_task.delay.assert_not_called()
 
 
 class TestDelete:

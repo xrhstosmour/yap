@@ -47,9 +47,9 @@ class TestFileUpload:
         token = create_access_token(subject=user.id)
 
         # Mock blob storage to avoid S3 credentials.
-        async def _fake_upload(content, filename, mimetype, bucket=None):
+        async def _fake_upload(content, mimetype, bucket=None):
             content_hash = hashlib.sha256(content).hexdigest()
-            return f"uploads/{content_hash}", content_hash, None, None, None
+            return f"uploads/{content_hash}", content_hash
 
         monkeypatch.setattr(
             "app.services.file_service.upload_file",
