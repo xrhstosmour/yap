@@ -29,6 +29,7 @@ celery_app = Celery(
         "app.tasks.cache",
         "app.tasks.cleanup",
         "app.tasks.outbox",
+        "app.tasks.storage",
     ],
 )
 

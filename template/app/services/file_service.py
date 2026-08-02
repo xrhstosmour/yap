@@ -13,6 +13,7 @@ from app.core.logging import get_logger
 from app.core.settings import settings
 from app.core.storage import delete_object
 from app.core.storage import get_download_url
+from app.core.storage import is_thumbnailable
 from app.core.storage import upload_file
 from app.models.file import File
 from app.models.user import User
@@ -98,12 +99,9 @@ class FileService:
             )
             return existing
 
-        # Upload to blob storage.
-        object_key, _, image_width, image_height, thumbnail_key = await upload_file(
-            content=content,
-            filename=safe_filename,
-            mimetype=mimetype,
-        )
+        # Upload to blob storage. Thumbnails are generated afterward by a
+        # Celery task, not inline, so this doesn't hold the request open.
+        object_key, _ = await upload_file(content=content, mimetype=mimetype)
 
         record, created = await self.file_repository.create_or_increment(
             {
@@ -113,9 +111,9 @@ class FileService:
                 "content_hash": content_hash,
                 "bucket": settings.STORAGE_BUCKET,
                 "object_key": object_key,
-                "thumbnail_object_key": thumbnail_key,
-                "image_width": image_width,
-                "image_height": image_height,
+                "thumbnail_object_key": None,
+                "image_width": None,
+                "image_height": None,
                 "is_public": is_public,
                 "reference_count": 1,
                 "uploaded_by": user.id,
@@ -128,16 +126,20 @@ class FileService:
             # Lost the race: another upload of identical content committed
             # first. Discard the blob we just wrote so it does not leak.
             await delete_object(object_key=object_key, bucket=settings.STORAGE_BUCKET)
-            if thumbnail_key:
-                await delete_object(
-                    object_key=thumbnail_key, bucket=settings.STORAGE_BUCKET
-                )
             logger.info(
                 "file_upload_dedup_race",
                 content_hash=content_hash[:16],
                 reference_count=record.reference_count,
             )
             return record
+
+        if is_thumbnailable(mimetype):
+            from app.tasks.storage import generate_thumbnail_task
+
+            try:
+                generate_thumbnail_task.delay(file_id=str(record.id))
+            except Exception:
+                logger.warning("thumbnail_task_dispatch_failed", file_id=str(record.id))
 
         logger.info(
             "file_uploaded",
