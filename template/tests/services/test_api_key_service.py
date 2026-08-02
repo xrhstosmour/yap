@@ -430,8 +430,8 @@ class TestUpdate:
         user_id = uuid4()
         tenant_id = uuid4()
 
-        existing = _make_api_key_mock(name="Old Name", id=key_id)
-        updated = _make_api_key_mock(name="New Name", id=key_id)
+        existing = _make_api_key_mock(name="Old Name", id=key_id, user_id=user_id)
+        updated = _make_api_key_mock(name="New Name", id=key_id, user_id=user_id)
 
         service.apikey_repository.get = AsyncMock(return_value=existing)
         service.apikey_repository.update = AsyncMock(return_value=updated)
@@ -477,7 +477,7 @@ class TestUpdate:
         user_id = uuid4()
         tenant_id = uuid4()
 
-        existing = _make_api_key_mock(id=key_id)
+        existing = _make_api_key_mock(id=key_id, user_id=user_id)
         service.apikey_repository.get = AsyncMock(return_value=existing)
         service.audit_repository.log_user_action_safe = AsyncMock()
 
@@ -487,6 +487,29 @@ class TestUpdate:
         result = await service.update(key_id, user_id, tenant_id, data)
 
         assert result is existing
+        service.apikey_repository.update.assert_not_called()
+        service.audit_repository.log_user_action_safe.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_update_key_owned_by_other_user_returns_none(
+        self,
+        service: APIKeyService,
+    ) -> None:
+        """Should return None when the key belongs to a different user."""
+        key_id = uuid4()
+        owner_id = uuid4()
+        other_user_id = uuid4()
+        tenant_id = uuid4()
+
+        existing = _make_api_key_mock(id=key_id, user_id=owner_id)
+        service.apikey_repository.get = AsyncMock(return_value=existing)
+        service.audit_repository.log_user_action_safe = AsyncMock()
+
+        data = APIKeyUpdate.model_construct(name="Won't Work")
+
+        result = await service.update(key_id, other_user_id, tenant_id, data)
+
+        assert result is None
         service.apikey_repository.update.assert_not_called()
         service.audit_repository.log_user_action_safe.assert_not_called()
 
@@ -507,7 +530,7 @@ class TestRevoke:
         user_id = uuid4()
         tenant_id = uuid4()
 
-        existing = _make_api_key_mock(id=key_id, is_active=True)
+        existing = _make_api_key_mock(id=key_id, is_active=True, user_id=user_id)
         service.apikey_repository.get = AsyncMock(return_value=existing)
         service.apikey_repository.update = AsyncMock()
         service.audit_repository.log_user_action_safe = AsyncMock()
@@ -538,6 +561,28 @@ class TestRevoke:
         service.apikey_repository.update.assert_not_called()
         service.audit_repository.log_user_action_safe.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_revoke_key_owned_by_other_user_returns_false(
+        self,
+        service: APIKeyService,
+    ) -> None:
+        """Should return False when the key belongs to a different user."""
+        key_id = uuid4()
+        owner_id = uuid4()
+        other_user_id = uuid4()
+        tenant_id = uuid4()
+
+        existing = _make_api_key_mock(id=key_id, is_active=True, user_id=owner_id)
+        service.apikey_repository.get = AsyncMock(return_value=existing)
+        service.apikey_repository.update = AsyncMock()
+        service.audit_repository.log_user_action_safe = AsyncMock()
+
+        result = await service.revoke(key_id, other_user_id, tenant_id)
+
+        assert result is False
+        service.apikey_repository.update.assert_not_called()
+        service.audit_repository.log_user_action_safe.assert_not_called()
+
 
 # Delete
 
@@ -555,7 +600,7 @@ class TestDelete:
         user_id = uuid4()
         tenant_id = uuid4()
 
-        existing = _make_api_key_mock(id=key_id)
+        existing = _make_api_key_mock(id=key_id, user_id=user_id)
         service.apikey_repository.get = AsyncMock(return_value=existing)
         service.apikey_repository.delete = AsyncMock(return_value=True)
         service.audit_repository.log_user_action_safe = AsyncMock()
@@ -579,6 +624,28 @@ class TestDelete:
         service.apikey_repository.get = AsyncMock(return_value=None)
 
         result = await service.delete(key_id, user_id, tenant_id)
+
+        assert result is False
+        service.apikey_repository.delete.assert_not_called()
+        service.audit_repository.log_user_action_safe.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_delete_key_owned_by_other_user_returns_false(
+        self,
+        service: APIKeyService,
+    ) -> None:
+        """Should return False when the key belongs to a different user."""
+        key_id = uuid4()
+        owner_id = uuid4()
+        other_user_id = uuid4()
+        tenant_id = uuid4()
+
+        existing = _make_api_key_mock(id=key_id, user_id=owner_id)
+        service.apikey_repository.get = AsyncMock(return_value=existing)
+        service.apikey_repository.delete = AsyncMock(return_value=True)
+        service.audit_repository.log_user_action_safe = AsyncMock()
+
+        result = await service.delete(key_id, other_user_id, tenant_id)
 
         assert result is False
         service.apikey_repository.delete.assert_not_called()

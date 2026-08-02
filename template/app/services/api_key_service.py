@@ -192,7 +192,7 @@ class APIKeyService:
             Updated APIKey or None
         """
         api_key = await self.apikey_repository.get(key_id)
-        if not api_key:
+        if not api_key or api_key.user_id != user_id:
             return None
 
         # Build update dict.
@@ -241,7 +241,7 @@ class APIKeyService:
             True if revoked
         """
         api_key = await self.apikey_repository.get(key_id)
-        if not api_key:
+        if not api_key or api_key.user_id != user_id:
             return False
 
         await self.apikey_repository.update(key_id, {"is_active": False})
@@ -279,7 +279,7 @@ class APIKeyService:
             True if deleted
         """
         api_key = await self.apikey_repository.get(key_id)
-        if not api_key:
+        if not api_key or api_key.user_id != user_id:
             return False
 
         await self.apikey_repository.delete(key_id)
