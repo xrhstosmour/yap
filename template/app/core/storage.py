@@ -1,7 +1,8 @@
 """Blob storage service for MinIO / S3-compatible object storage.
 
 Provides upload, download, delete, and presigned URL generation.
-Image files get automatic thumbnail generation and dimension extraction.
+Image files get a thumbnail and dimensions generated asynchronously
+after upload by ``app.tasks.storage.generate_thumbnail_task``.
 """
 
 from __future__ import annotations
@@ -90,36 +91,28 @@ def _build_thumbnail(content: bytes, mimetype: str) -> tuple[int, int, bytes]:
     return width, height, thumb_buffer.getvalue()
 
 
-async def upload_file(
+def is_thumbnailable(mimetype: str) -> bool:
+    """Whether a mimetype is an image type that gets a generated thumbnail."""
+    return mimetype.startswith("image/") and mimetype != "image/gif"
+
+
+async def upload_object(
+    object_key: str,
     content: bytes,
-    filename: str,
     mimetype: str,
     bucket: str | None = None,
-) -> tuple[str, str, int | None, int | None, str | None]:
-    """Upload file bytes to blob storage.
-
-    Computes the SHA-256 hash, uploads to MinIO/S3, and extracts
-    image dimensions. If the file is an image, a thumbnail is also
-    generated.
+) -> None:
+    """Upload raw bytes to blob storage under the given key.
 
     Args:
-        content: Raw file bytes.
-        filename: Original filename (used for content-type).
-        mimetype: MIME type of the file.
+        object_key: The object key to store the content under.
+        content: Raw bytes to upload.
+        mimetype: MIME type of the content.
         bucket: Storage bucket. Defaults to ``settings.STORAGE_BUCKET``.
-
-    Returns:
-        Tuple of (object_key, content_hash, image_width, image_height,
-        thumbnail_object_key).
     """
     bucket = bucket or settings.STORAGE_BUCKET
     await _ensure_bucket(bucket)
     client = _s3_client()
-
-    content_hash = hashlib.sha256(content).hexdigest()
-    object_key = f"uploads/{content_hash}"
-
-    # Upload original.
     await asyncio.to_thread(
         client.put_object,
         Bucket=bucket,
@@ -128,34 +121,50 @@ async def upload_file(
         ContentType=mimetype,
     )
 
-    image_width: int | None = None
-    image_height: int | None = None
-    thumbnail_object_key: str | None = None
 
-    if mimetype.startswith("image/") and mimetype != "image/gif":
-        try:
-            image_width, image_height, thumb_bytes = await asyncio.to_thread(
-                _build_thumbnail, content, mimetype
-            )
+async def download_object(object_key: str, bucket: str | None = None) -> bytes:
+    """Download raw bytes from blob storage.
 
-            thumbnail_object_key = f"thumbnails/{content_hash}"
-            await asyncio.to_thread(
-                client.put_object,
-                Bucket=bucket,
-                Key=thumbnail_object_key,
-                Body=thumb_bytes,
-                ContentType=mimetype,
-            )
-        except Exception:
-            # Non-image or unprocessable. Thumbnails not critical.
-            logger.warning(
-                "thumbnail_generation_failed",
-                exc_info=True,
-                filename=filename,
-                mimetype=mimetype,
-            )
+    Args:
+        object_key: The object key to fetch.
+        bucket: Storage bucket. Defaults to ``settings.STORAGE_BUCKET``.
 
-    return object_key, content_hash, image_width, image_height, thumbnail_object_key
+    Returns:
+        Raw object bytes.
+    """
+    bucket = bucket or settings.STORAGE_BUCKET
+    client = _s3_client()
+    response = await asyncio.to_thread(client.get_object, Bucket=bucket, Key=object_key)
+    return await asyncio.to_thread(response["Body"].read)
+
+
+async def upload_file(
+    content: bytes,
+    mimetype: str,
+    bucket: str | None = None,
+) -> tuple[str, str]:
+    """Upload file bytes to blob storage.
+
+    Computes the SHA-256 hash and uploads the original to MinIO/S3.
+    Image thumbnails and dimensions are generated afterward by
+    ``app.tasks.storage.generate_thumbnail_task``, not inline, so this
+    call doesn't hold the request open for the resize.
+
+    Args:
+        content: Raw file bytes.
+        mimetype: MIME type of the file.
+        bucket: Storage bucket. Defaults to ``settings.STORAGE_BUCKET``.
+
+    Returns:
+        Tuple of (object_key, content_hash).
+    """
+    bucket = bucket or settings.STORAGE_BUCKET
+    content_hash = hashlib.sha256(content).hexdigest()
+    object_key = f"uploads/{content_hash}"
+
+    await upload_object(object_key, content, mimetype, bucket=bucket)
+
+    return object_key, content_hash
 
 
 async def get_download_url(
