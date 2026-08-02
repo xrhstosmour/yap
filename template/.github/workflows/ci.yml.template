@@ -28,7 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - run: uv sync --extra dev
+      - run: uv sync --frozen --extra dev
       - run: uv run ruff check app/ tests/
       - run: uv run ruff format --check app/ tests/
       - run: uv run mypy app/ --config-file mypy-ci.toml
@@ -113,7 +113,7 @@ jobs:
           echo "CRYPTO_KEY=$(python3 -c 'import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())')" >> $GITHUB_ENV
           echo "RABBITMQ_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')" >> $GITHUB_ENV
           echo "FIRST_SUPERUSER_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')" >> $GITHUB_ENV
-      - run: uv sync --extra dev
+      - run: uv sync --frozen --extra dev
       - run: uv run alembic upgrade head
         env:
           POSTGRESQL_SERVER: localhost
