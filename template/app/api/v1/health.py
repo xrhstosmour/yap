@@ -18,6 +18,7 @@ from app.core.cache import RedisDependency
 from app.core.logging import get_logger
 from app.database import async_engine
 from app.dependencies import SessionDependency
+from app.dependencies import SuperuserUser
 from app.schemas.base import HealthResponse
 from app.schemas.base import MessageResponse
 
@@ -153,16 +154,19 @@ async def liveness_check() -> MessageResponse:
     response_model=MetricsResponse,
     status_code=status.HTTP_200_OK,
     summary="System metrics",
-    description="Get database pool and cache statistics for monitoring.",
+    description="Get database pool and cache statistics for monitoring. Admin only.",
 )
 async def get_metrics(
+    current_user: SuperuserUser,
     session: SessionDependency,
     redis_client: RedisDependency,
 ) -> MetricsResponse:
-    """Get system performance metrics.
+    """Get system performance metrics (admin only).
 
     Returns database connection pool stats and cache stats
-    for monitoring and capacity planning.
+    for monitoring and capacity planning. Requires an authenticated
+    superuser since this exposes internal DB connection-pool state,
+    matching the ``ws/metrics`` WebSocket endpoint.
     """
     pool = cast(Any, async_engine.pool)
     pool_stats = PoolStats(
@@ -193,12 +197,14 @@ async def get_metrics(
     response_model=WorkerStats,
     status_code=status.HTTP_200_OK,
     summary="Worker status",
-    description="Get Celery worker statistics for monitoring.",
+    description="Get Celery worker statistics for monitoring. Admin only.",
 )
-async def get_worker_stats() -> WorkerStats:
-    """Get Celery worker monitoring stats.
+async def get_worker_stats(current_user: SuperuserUser) -> WorkerStats:
+    """Get Celery worker monitoring stats (admin only).
 
     Returns active/scheduled task counts and active queue names.
+    Requires an authenticated superuser since this exposes internal
+    task queue state.
     """
     try:
         from app.celery_app import celery_app

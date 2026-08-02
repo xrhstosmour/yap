@@ -1,9 +1,17 @@
 """Tests for health check and metrics endpoints."""
 
+from collections.abc import Generator
+from typing import Any
+from typing import Literal
+
 import pytest
 from fastapi.testclient import TestClient
+from httpx import ASGITransport
+from httpx import AsyncClient
 
 from app.main import app
+from app.models.user import User
+from app.models.user import UserRole
 
 
 @pytest.fixture
@@ -12,6 +20,18 @@ def client() -> TestClient:
     from fastapi.testclient import TestClient
 
     return TestClient(app)
+
+
+@pytest.fixture
+def anyio_backend() -> Literal["asyncio"]:
+    return "asyncio"
+
+
+@pytest.fixture
+async def async_client() -> Generator[AsyncClient, Any]:
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
 
 
 def test_liveness_check(client) -> None:
@@ -28,9 +48,58 @@ def test_health_check_requires_db(client) -> None:
     assert response.status_code in (200, 503)
 
 
-def test_metrics_endpoint(client) -> None:
-    """GET /api/v1/metrics returns pool and cache stats."""
+def test_metrics_endpoint_requires_authentication(client) -> None:
+    """GET /api/v1/metrics should reject unauthenticated callers."""
     response = client.get("/api/v1/metrics")
+    assert response.status_code == 401
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("override_get_async_session")
+async def test_metrics_endpoint_requires_superuser(
+    async_client: AsyncClient, session
+) -> None:
+    """GET /api/v1/metrics should reject a non-superuser caller."""
+    from app.schemas.auth import RegisterRequest
+    from app.services.auth_service import AuthService
+
+    service = AuthService(session)
+    user = await service.register(
+        RegisterRequest(email="metrics-test@example.com", password="password123")
+    )
+    tokens = service.create_tokens(user)
+    await session.commit()
+
+    response = await async_client.get(
+        "/api/v1/metrics",
+        headers={"Authorization": f"Bearer {tokens.access_token}"},
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("override_get_async_session")
+async def test_metrics_endpoint_returns_stats_for_superuser(
+    async_client: AsyncClient, session
+) -> None:
+    """GET /api/v1/metrics returns pool and cache stats for a superuser."""
+    from app.services.auth_service import AuthService
+
+    service = AuthService(session)
+    admin = User(
+        email="admin-metrics@example.com",
+        hashed_password="hash",
+        role=UserRole.SUPERUSER,
+        is_active=True,
+    )
+    session.add(admin)
+    await session.commit()
+    tokens = service.create_tokens(admin)
+
+    response = await async_client.get(
+        "/api/v1/metrics",
+        headers={"Authorization": f"Bearer {tokens.access_token}"},
+    )
     assert response.status_code in (200, 500)
 
 
@@ -57,9 +126,58 @@ def test_readiness_check_returns_ready(client) -> None:
         assert data["message"] == "Ready"
 
 
-def test_workers_endpoint_returns_stats(client) -> None:
-    """GET /api/v1/workers should return Celery worker stats."""
+def test_workers_endpoint_requires_authentication(client) -> None:
+    """GET /api/v1/workers should reject unauthenticated callers."""
     response = client.get("/api/v1/workers")
+    assert response.status_code == 401
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("override_get_async_session")
+async def test_workers_endpoint_requires_superuser(
+    async_client: AsyncClient, session
+) -> None:
+    """GET /api/v1/workers should reject a non-superuser caller."""
+    from app.schemas.auth import RegisterRequest
+    from app.services.auth_service import AuthService
+
+    service = AuthService(session)
+    user = await service.register(
+        RegisterRequest(email="workers-test@example.com", password="password123")
+    )
+    tokens = service.create_tokens(user)
+    await session.commit()
+
+    response = await async_client.get(
+        "/api/v1/workers",
+        headers={"Authorization": f"Bearer {tokens.access_token}"},
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("override_get_async_session")
+async def test_workers_endpoint_returns_stats_for_superuser(
+    async_client: AsyncClient, session
+) -> None:
+    """GET /api/v1/workers should return Celery worker stats for a superuser."""
+    from app.services.auth_service import AuthService
+
+    service = AuthService(session)
+    admin = User(
+        email="admin-workers@example.com",
+        hashed_password="hash",
+        role=UserRole.SUPERUSER,
+        is_active=True,
+    )
+    session.add(admin)
+    await session.commit()
+    tokens = service.create_tokens(admin)
+
+    response = await async_client.get(
+        "/api/v1/workers",
+        headers={"Authorization": f"Bearer {tokens.access_token}"},
+    )
     assert response.status_code == 200
     data = response.json()
     assert "active" in data
