@@ -15,8 +15,8 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException
 from fastapi import status
-from jose import ExpiredSignatureError
-from jose import JWTError
+from jwt import ExpiredSignatureError
+from jwt import InvalidTokenError
 
 from app.dependencies import get_api_key_auth
 from app.dependencies import get_current_superuser
@@ -110,13 +110,13 @@ class TestGetCurrentUser:
 
     @pytest.mark.asyncio
     async def test_invalid_token_raises_403(self) -> None:
-        """Should raise 403 when token is invalid (JWTError)."""
+        """Should raise 403 when token is invalid (InvalidTokenError)."""
         request = _mock_request()
         session = AsyncMock()
 
         with patch(
             "app.dependencies.decode_token",
-            side_effect=JWTError("bad signature"),
+            side_effect=InvalidTokenError("bad signature"),
         ):
             with pytest.raises(HTTPException) as exc_info:
                 await get_current_user(
@@ -330,7 +330,7 @@ class TestGetOptionalCurrentUser:
 
         with patch(
             "app.dependencies.decode_token",
-            side_effect=JWTError("bad"),
+            side_effect=InvalidTokenError("bad"),
         ):
             result = await get_optional_current_user(
                 session=session,
