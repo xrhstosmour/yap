@@ -15,7 +15,6 @@ module = [
     "celery.*",
     "sentry_sdk.*",
     "passlib.*",
-    "jose.*",
     "pyotp.*",
     "qrcode.*",
     "PIL.*",

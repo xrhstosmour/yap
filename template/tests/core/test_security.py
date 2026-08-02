@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock
 from unittest.mock import patch
 from uuid import uuid4
 
+import jwt
 import pytest
-from jose import JWTError
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
@@ -509,27 +509,27 @@ class TestJWTEdgeCases:
     """Edge case tests for JWT token decoding."""
 
     def test_decode_expired_token_raises_jwt_error(self) -> None:
-        """Expired token should raise JWTError."""
+        """Expired token should raise InvalidTokenError."""
         token = create_access_token(
             subject="user123", expires_delta=timedelta(seconds=-1)
         )
 
-        with pytest.raises(JWTError):
+        with pytest.raises(jwt.InvalidTokenError):
             decode_token(token)
 
     def test_decode_invalid_signature_raises_jwt_error(self) -> None:
-        """Tampered token should raise JWTError."""
+        """Tampered token should raise InvalidTokenError."""
         token = create_access_token(subject="user123")
         # Modify the payload section to break the signature.
         parts = token.split(".")
         tampered = parts[0] + "." + parts[1][:-1] + "X" + "." + parts[2]
 
-        with pytest.raises(JWTError):
+        with pytest.raises(jwt.InvalidTokenError):
             decode_token(tampered)
 
     def test_decode_invalid_payload_raises_jwt_error(self) -> None:
-        """Garbage token should raise JWTError."""
-        with pytest.raises(JWTError):
+        """Garbage token should raise InvalidTokenError."""
+        with pytest.raises(jwt.InvalidTokenError):
             decode_token("not.a.valid.jwt")
 
 

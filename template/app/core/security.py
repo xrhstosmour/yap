@@ -15,14 +15,13 @@ from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
 from typing import Any
-from typing import cast
 from uuid import UUID
 
 import bcrypt
+import jwt
 import pyotp
 import qrcode
 import qrcode.constants
-from jose import jwt
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
@@ -126,11 +125,7 @@ def create_access_token(
     if additional_claims:
         to_encode.update(additional_claims)
 
-    encoded_jwt = cast(
-        str,
-        jwt.encode(to_encode, settings.SECRET_KEY, algorithm=ALGORITHM),
-    )
-    return encoded_jwt
+    return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=ALGORITHM)
 
 
 def create_refresh_token(
@@ -167,11 +162,7 @@ def create_refresh_token(
     if additional_claims:
         to_encode.update(additional_claims)
 
-    encoded_jwt = cast(
-        str,
-        jwt.encode(to_encode, settings.SECRET_KEY, algorithm=ALGORITHM),
-    )
-    return encoded_jwt
+    return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=ALGORITHM)
 
 
 def decode_token(token: str) -> dict[str, Any]:
@@ -190,11 +181,7 @@ def decode_token(token: str) -> dict[str, Any]:
         jwt.ExpiredSignatureError: If token has expired
         jwt.InvalidTokenError: If token is invalid
     """
-    payload = cast(
-        dict[str, Any],
-        jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM]),
-    )
-    return payload
+    return jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
 
 
 async def blacklist_token(token_identifier: str, expires_at: datetime) -> None:

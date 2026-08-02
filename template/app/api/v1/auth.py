@@ -15,8 +15,8 @@ from fastapi import HTTPException
 from fastapi import Query
 from fastapi import status
 from fastapi.security import OAuth2PasswordRequestForm
-from jose import ExpiredSignatureError
-from jose import JWTError
+from jwt import ExpiredSignatureError
+from jwt import InvalidTokenError
 
 from app.core.logging import get_logger
 from app.core.rate_limit import check_auth_rate_limit
@@ -387,7 +387,7 @@ async def logout(
     """Logout current user by blacklisting token identifiers."""
     try:
         payload = decode_token(access_token)
-    except (JWTError, ExpiredSignatureError) as error:
+    except (InvalidTokenError, ExpiredSignatureError) as error:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid access token",

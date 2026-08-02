@@ -13,8 +13,8 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from jose import ExpiredSignatureError
-from jose import JWTError
+from jwt import ExpiredSignatureError
+from jwt import InvalidTokenError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import SYSTEM_TENANT_ID
@@ -349,7 +349,7 @@ class AuthService:
             return token_response
 
         except (
-            JWTError,
+            InvalidTokenError,
             ExpiredSignatureError,
             UserNotFoundError,
             UserInactiveError,
@@ -387,7 +387,7 @@ class AuthService:
                     raise AuthenticationError("Invalid refresh token")
 
                 await self._blacklist_payload_token(refresh_payload)
-            except (JWTError, ExpiredSignatureError, ValueError) as error:
+            except (InvalidTokenError, ExpiredSignatureError, ValueError) as error:
                 raise AuthenticationError("Invalid refresh token") from error
 
         tenant_id = user.tenant_id or SYSTEM_TENANT_ID
