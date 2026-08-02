@@ -29,6 +29,7 @@ _stub_modules = {
     "app.tasks.cache": MagicMock(),
     "app.tasks.cleanup": MagicMock(),
     "app.tasks.outbox": MagicMock(),
+    "app.tasks.storage": MagicMock(),
     "app.core.settings": MagicMock(settings=_mock_settings),
 }
 
