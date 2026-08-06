@@ -222,6 +222,38 @@ class TestSettingsValidationProduction:
                 SECRET_KEY="your-secret-key-here",
             )
 
+    def test_stripe_webhook_secret_not_required_when_stripe_disabled(self) -> None:
+        """STRIPE_WEBHOOK_SECRET is only required once STRIPE_API_KEY is set."""
+        from app.core.settings import Settings
+
+        Settings(
+            _env_file=None,
+            ENVIRONMENT="production",
+            SECRET_KEY="test-key",
+            POSTGRESQL_PASSWORD="test",
+            FIRST_SUPERUSER_PASSWORD="test",
+            RABBITMQ_PASSWORD="test",
+            CRYPTO_KEY="dGVzdC1rZXktMzItYnl0ZXMtbG9uZw==",
+        )
+
+    def test_production_raises_on_empty_stripe_webhook_secret_when_stripe_enabled(
+        self,
+    ) -> None:
+        """STRIPE_WEBHOOK_SECRET is required in production once STRIPE_API_KEY is set."""
+        from app.core.settings import Settings
+
+        with pytest.raises(ValueError, match="STRIPE_WEBHOOK_SECRET is not set"):
+            Settings(
+                _env_file=None,
+                ENVIRONMENT="production",
+                SECRET_KEY="test-key",
+                POSTGRESQL_PASSWORD="test",
+                FIRST_SUPERUSER_PASSWORD="test",
+                RABBITMQ_PASSWORD="test",
+                CRYPTO_KEY="dGVzdC1rZXktMzItYnl0ZXMtbG9uZw==",
+                STRIPE_API_KEY="sk_live_x",
+            )
+
 
 class TestParseCors:
     """Tests for the parse_cors helper."""

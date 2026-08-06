@@ -54,7 +54,15 @@ def custom_generate_unique_id(route: APIRoute) -> str:
 # Keys whose values are redacted from Sentry events, in addition to the
 # `send_default_pii=False` SDK setting, as defense in depth against PII/secret
 # leakage via exception stack frame locals, request data, and extra context.
-SENTRY_SENSITIVE_KEYS = ("password", "token", "secret", "authorization")
+# `api_key` covers `STRIPE_API_KEY` (and `X-API-Key`); `secret` already
+# covers `STRIPE_WEBHOOK_SECRET`.
+SENTRY_SENSITIVE_KEYS = (
+    "password",
+    "token",
+    "secret",
+    "authorization",
+    "api_key",
+)
 
 
 def _scrub_sensitive_data(data: Any) -> Any:  # noqa: ANN401
