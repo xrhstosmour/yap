@@ -52,6 +52,25 @@ class SubscriptionRepository(BaseRepository[Subscription]):
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
+    async def get_most_recent_for_tenant(
+        self, tenant_id: UUID
+    ) -> Subscription | None:
+        """The tenant's most recently created subscription, terminal or not.
+
+        Used by the access-gating dependency, which must be able to see
+        an `expired` row (excluded from `get_active_for_tenant`, which
+        only ever returns non-terminal rows) in order to enforce the
+        hard cutoff.
+        """
+        query = (
+            select(Subscription)
+            .where(Subscription.tenant_id == tenant_id)  # type: ignore[arg-type]
+            .order_by(Subscription.created_at.desc())  # type: ignore[attr-defined]
+            .limit(1)
+        )
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
+
     async def get_by_stripe_customer_id(
         self, stripe_customer_id: str
     ) -> Subscription | None:
