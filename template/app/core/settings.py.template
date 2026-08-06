@@ -343,6 +343,26 @@ class Settings(BaseSettings):
     # Password reset token TTL in seconds (default: 1 hour).
     PASSWORD_RESET_TOKEN_TTL_SECONDS: int = 3600
 
+    # Billing (Stripe).
+    STRIPE_API_KEY: str = ""
+    STRIPE_WEBHOOK_SECRET: str = ""
+
+    # Default trial length for a new tenant, in days. Overridable per `Plan`.
+    DEFAULT_TRIAL_DAYS: int = 14
+
+    # Grace period after trial end / payment lapse before hard access cutoff.
+    BILLING_GRACE_PERIOD_DAYS: int = 5
+
+    # Behavior during the grace period: full product access, or read-only.
+    BILLING_GRACE_PERIOD_MODE: Literal["full_access", "read_only"] = "full_access"
+
+    # Rate limit for the coupon-validate endpoint, a code-guessing target.
+    RATE_LIMIT_PER_MINUTE_COUPON_VALIDATE: int = 5
+
+    # How often the billing lifecycle sweep (trial/grace-period expiry,
+    # stale coupon redemption cleanup) runs, in minutes.
+    BILLING_SWEEP_INTERVAL_MINUTES: int = 15
+
     __placeholder_patterns = frozenset(
         {"your-", "change_me", "change_this", "example", "placeholder"}
     )

@@ -58,6 +58,9 @@ class User(BaseModel, table=True):
         hashed_password: Bcrypt hash of the password
         is_active: Whether the user can log in
         role: User role for access control (superuser, user)
+        is_tenant_owner: Whether the user may manage their tenant's billing
+            (checkout, cancel, payment methods). Distinct from `role`, which
+            is global superuser/user and unrelated to tenant billing authority.
         is_verified: Whether email has been verified
         is_2fa_enabled: Whether TOTP 2FA is enabled
         totp_secret_encrypted: Encrypted TOTP secret for 2FA enrollment/login
@@ -138,6 +141,8 @@ class User(BaseModel, table=True):
     is_verified: bool = Field(default=False, nullable=False)
 
     token_version: int = Field(default=1, nullable=False)
+
+    is_tenant_owner: bool = Field(default=False, nullable=False)
 
     is_2fa_enabled: bool = Field(default=False, nullable=False)
 
