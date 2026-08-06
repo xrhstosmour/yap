@@ -25,6 +25,7 @@ celery_app = Celery(
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
     include=[
+        "app.tasks.billing",
         "app.tasks.email",
         "app.tasks.cache",
         "app.tasks.cleanup",
@@ -88,6 +89,10 @@ celery_app.conf.beat_schedule = {
         "task": "app.tasks.outbox.process_outbox",
         "schedule": 10.0,
     },
+    "sweep-billing-lifecycle": {
+        "task": "app.tasks.billing.sweep_billing_lifecycle",
+        "schedule": crontab(minute=f"*/{settings.BILLING_SWEEP_INTERVAL_MINUTES}"),
+    },
 }
 
 # Telemetry.
@@ -96,6 +101,7 @@ celery_app.conf.task_routes = {
     "app.tasks.cache.*": {"queue": "cache"},
     "app.tasks.cleanup.*": {"queue": "cleanup"},
     "app.tasks.outbox.*": {"queue": "events"},
+    "app.tasks.billing.*": {"queue": "billing"},
 }
 
 
