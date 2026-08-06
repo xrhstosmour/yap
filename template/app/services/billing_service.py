@@ -650,6 +650,14 @@ class BillingService:
                 subscription.id, {"cancel_at_period_end": True}
             )
             assert updated is not None
+            await self._log_audit(
+                action=AuditAction.SUBSCRIPTION_STATUS_CHANGED,
+                tenant_id=tenant_id,
+                resource_type="subscription",
+                resource_id=str(subscription.id),
+                metadata={"cancel_at_period_end": True, "source": "portal"},
+                actor_id=actor_id,
+            )
             return updated
 
         return await self.subscription_service.transition(
