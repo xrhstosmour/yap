@@ -368,7 +368,7 @@ async def get_optional_current_user(
         ):
             return None
 
-    except (InvalidTokenError, ExpiredSignatureError):
+    except InvalidTokenError, ExpiredSignatureError:
         return None
 
     user_repository = UserRepository(session)

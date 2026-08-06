@@ -9,9 +9,11 @@ from uuid import UUID
 
 import pytest
 
+from app.models.invoice import Invoice
 from app.models.subscription import Subscription
 from app.models.subscription import SubscriptionStatus
 from app.services.billing_service import ALLOWED_TRANSITIONS
+from app.services.billing_service import BillingService
 from app.services.billing_service import IllegalSubscriptionTransitionError
 from app.services.billing_service import SubscriptionNotFoundError
 from app.services.billing_service import SubscriptionService
@@ -59,17 +61,19 @@ class TestAllowedTransitionsTable:
 
 
 class TestTransition:
-    def test_legal_transition_updates_status(self, service: SubscriptionService) -> None:
+    def test_legal_transition_updates_status(
+        self, service: SubscriptionService
+    ) -> None:
         current = _subscription(SubscriptionStatus.TRIALING)
         updated = _subscription(SubscriptionStatus.ACTIVE)
-        service.subscription_repository.get_for_update = AsyncMock(
-            return_value=current
-        )
+        service.subscription_repository.get_for_update = AsyncMock(return_value=current)
         service.subscription_repository.update = AsyncMock(return_value=updated)
 
         result = asyncio.run(
             service.transition(
-                SUBSCRIPTION_ID, SubscriptionStatus.ACTIVE, source="checkout.session.completed"
+                SUBSCRIPTION_ID,
+                SubscriptionStatus.ACTIVE,
+                source="checkout.session.completed",
             )
         )
 
@@ -81,9 +85,7 @@ class TestTransition:
 
     def test_illegal_transition_raises(self, service: SubscriptionService) -> None:
         current = _subscription(SubscriptionStatus.EXPIRED)
-        service.subscription_repository.get_for_update = AsyncMock(
-            return_value=current
-        )
+        service.subscription_repository.get_for_update = AsyncMock(return_value=current)
 
         with pytest.raises(IllegalSubscriptionTransitionError):
             asyncio.run(
@@ -96,9 +98,7 @@ class TestTransition:
     def test_active_to_expired_is_illegal(self, service: SubscriptionService) -> None:
         """`active -> expired` skips the grace-period sweep step and is not allowed."""
         current = _subscription(SubscriptionStatus.ACTIVE)
-        service.subscription_repository.get_for_update = AsyncMock(
-            return_value=current
-        )
+        service.subscription_repository.get_for_update = AsyncMock(return_value=current)
 
         with pytest.raises(IllegalSubscriptionTransitionError):
             asyncio.run(
@@ -111,9 +111,7 @@ class TestTransition:
         self, service: SubscriptionService
     ) -> None:
         current = _subscription(SubscriptionStatus.ACTIVE)
-        service.subscription_repository.get_for_update = AsyncMock(
-            return_value=current
-        )
+        service.subscription_repository.get_for_update = AsyncMock(return_value=current)
         service.subscription_repository.update = AsyncMock()
 
         result = asyncio.run(
@@ -138,9 +136,7 @@ class TestTransition:
     def test_cancel_sets_canceled_at(self, service: SubscriptionService) -> None:
         current = _subscription(SubscriptionStatus.ACTIVE)
         updated = _subscription(SubscriptionStatus.CANCELED)
-        service.subscription_repository.get_for_update = AsyncMock(
-            return_value=current
-        )
+        service.subscription_repository.get_for_update = AsyncMock(return_value=current)
         service.subscription_repository.update = AsyncMock(return_value=updated)
 
         asyncio.run(
@@ -157,9 +153,7 @@ class TestTransition:
     ) -> None:
         current = _subscription(SubscriptionStatus.TRIALING)
         updated = _subscription(SubscriptionStatus.ACTIVE)
-        service.subscription_repository.get_for_update = AsyncMock(
-            return_value=current
-        )
+        service.subscription_repository.get_for_update = AsyncMock(return_value=current)
         service.subscription_repository.update = AsyncMock(return_value=updated)
 
         asyncio.run(
@@ -191,3 +185,50 @@ class TestStartTrial:
         assert call_kwargs["status"] == SubscriptionStatus.TRIALING
         assert call_kwargs["trial_ends_at"] is not None
         assert call_kwargs["grace_period_ends_at"] > call_kwargs["trial_ends_at"]
+
+
+class TestHandleInvoicePaid:
+    @pytest.fixture
+    def billing_service(self, mock_session: MagicMock) -> BillingService:
+        billing_service = BillingService(mock_session, AsyncMock())
+        billing_service.invoice_repository = MagicMock()
+        billing_service.payment_repository = MagicMock()
+        billing_service.subscription_repository = MagicMock()
+        billing_service.subscription_service = MagicMock()
+        billing_service._log_invoice_issued_audit = AsyncMock()  # noqa: SLF001
+        return billing_service
+
+    def test_duplicate_stripe_invoice_id_is_ignored(
+        self, billing_service: BillingService
+    ) -> None:
+        """A second event mapping to the same Stripe invoice (a manual
+        replay, or a future event type covering the same invoice) must
+        not mint a second sequential invoice number or duplicate the
+        `Payment` ledger row.
+
+        Regression test: `handle_invoice_paid` used to dedup only on the
+        Stripe *event* ID (at the webhook-route layer), never on the
+        Stripe *invoice* ID itself — `InvoiceRepository.
+        get_by_stripe_invoice_id` existed but was never called.
+        """
+        billing_service.invoice_repository.get_by_stripe_invoice_id = AsyncMock(
+            return_value=Invoice(
+                invoice_number="INV-2026-000001",
+                status="paid",
+                issue_date="2026-01-01",
+                amount_due_cents=2900,
+                stripe_invoice_id="in_test123",
+            )
+        )
+        billing_service.invoice_repository.issue_invoice = AsyncMock()
+        billing_service.payment_repository.create = AsyncMock()
+
+        asyncio.run(
+            billing_service.handle_invoice_paid(
+                {"id": "in_test123", "subscription": "sub_test123"}
+            )
+        )
+
+        billing_service.invoice_repository.issue_invoice.assert_not_awaited()
+        billing_service.payment_repository.create.assert_not_awaited()
+        billing_service.subscription_repository.get_by_stripe_subscription_id.assert_not_called()

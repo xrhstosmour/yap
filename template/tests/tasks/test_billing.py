@@ -28,10 +28,15 @@ class TestSweepBillingLifecycleLock:
 
         with (
             patch("app.core.idempotency.idempotency_service") as mock_service,
-            patch("app.tasks.billing._sweep", new=AsyncMock(return_value={
-                "transitioned": 3,
-                "reclaimed_coupons": 1,
-            })) as mock_sweep,
+            patch(
+                "app.tasks.billing._sweep",
+                new=AsyncMock(
+                    return_value={
+                        "transitioned": 3,
+                        "reclaimed_coupons": 1,
+                    }
+                ),
+            ) as mock_sweep,
         ):
             mock_service.try_lock = AsyncMock(return_value=True)
             mock_service.release_lock = AsyncMock()

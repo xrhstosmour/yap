@@ -75,8 +75,7 @@ class CouponRepository(BaseRepository[Coupon]):
             update(Coupon)
             .where(Coupon.id == coupon_id)  # type: ignore[arg-type]
             .values(
-                redemption_count=Coupon.redemption_count
-                - 1  # type: ignore[operator]
+                redemption_count=Coupon.redemption_count - 1  # type: ignore[operator]
             )
         )
         await self.session.execute(statement)
@@ -114,9 +113,9 @@ class CouponRedemptionRepository(BaseRepository[CouponRedemption]):
             {"subscription_id": subscription_id, "redeemed_at": datetime.now(UTC)},
         )
 
-    async def list_abandoned(self, older_than: datetime, limit: int = 500) -> list[
-        CouponRedemption
-    ]:
+    async def list_abandoned(
+        self, older_than: datetime, limit: int = 500
+    ) -> list[CouponRedemption]:
         """List redemptions with no attached subscription, older than a cutoff.
 
         Used by the sweep task to reclaim coupon slots from abandoned

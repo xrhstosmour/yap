@@ -95,9 +95,7 @@ class Subscription(BaseModel, table=True):
 
     stripe_customer_id: str | None = Field(default=None, max_length=255, index=True)
 
-    stripe_subscription_id: str | None = Field(
-        default=None, max_length=255, index=True
-    )
+    stripe_subscription_id: str | None = Field(default=None, max_length=255, index=True)
 
     trial_started_at: datetime | None = Field(default=None)
 

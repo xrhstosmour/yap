@@ -229,9 +229,11 @@ async def check_coupon_validate_rate_limit(user_id: str) -> None:
     Raises:
         RateLimitExceeded: If rate limit is exceeded
     """
-    allowed, remaining, retry_after = (
-        await coupon_validate_rate_limiter.check_rate_limit(user_id)
-    )
+    (
+        allowed,
+        remaining,
+        retry_after,
+    ) = await coupon_validate_rate_limiter.check_rate_limit(user_id)
 
     if not allowed:
         logger.warning(
