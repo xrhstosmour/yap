@@ -23,6 +23,7 @@ _mock_settings.CELERY_RESULT_EXPIRES_SECONDS = 86400
 _mock_settings.CELERY_CLEANUP_AUDIT_LOGS_HOUR = 3
 _mock_settings.CELERY_CACHE_WARM_HOUR = 6
 _mock_settings.CELERY_PURGE_GRAVEYARD_HOUR = 4
+_mock_settings.BILLING_SWEEP_INTERVAL_MINUTES = 15
 
 _stub_modules = {
     "app.tasks.email": MagicMock(),
@@ -30,6 +31,7 @@ _stub_modules = {
     "app.tasks.cleanup": MagicMock(),
     "app.tasks.outbox": MagicMock(),
     "app.tasks.storage": MagicMock(),
+    "app.tasks.billing": MagicMock(),
     "app.core.settings": MagicMock(settings=_mock_settings),
 }
 
@@ -138,6 +140,12 @@ class TestTaskRouting:
         assert "app.tasks.outbox.*" in routes
         assert routes["app.tasks.outbox.*"]["queue"] == "events"
 
+    def test_billing_tasks_routed_to_billing_queue(self) -> None:
+        """Billing tasks should route to the 'billing' queue."""
+        routes = celery_app.conf.task_routes
+        assert "app.tasks.billing.*" in routes
+        assert routes["app.tasks.billing.*"]["queue"] == "billing"
+
 
 @pytest.mark.skipif(
     celery_app is None, reason="celery_app module not available (template not rendered)"
@@ -185,6 +193,14 @@ class TestBeatSchedule:
         assert "process-outbox" in schedule
         entry = schedule["process-outbox"]
         assert entry["task"] == "app.tasks.outbox.process_outbox"
+        assert "schedule" in entry
+
+    def test_sweep_billing_lifecycle_scheduled(self) -> None:
+        """The sweep-billing-lifecycle periodic task should be configured."""
+        schedule = celery_app.conf.beat_schedule
+        assert "sweep-billing-lifecycle" in schedule
+        entry = schedule["sweep-billing-lifecycle"]
+        assert entry["task"] == "app.tasks.billing.sweep_billing_lifecycle"
         assert "schedule" in entry
 
 
