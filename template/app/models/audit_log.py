@@ -73,6 +73,13 @@ class AuditAction(StrEnum):
     ACCOUNT_DELETION = "account_deletion"
     DATA_EXPORT = "data_export"
 
+    # Billing.
+    SUBSCRIPTION_CREATED = "subscription_created"
+    SUBSCRIPTION_STATUS_CHANGED = "subscription_status_changed"
+    SUBSCRIPTION_CANCELED = "subscription_canceled"
+    INVOICE_ISSUED = "invoice_issued"
+    COUPON_REDEEMED = "coupon_redeemed"
+
 
 class AuditLog(BaseModel, table=True):
     """Audit log entry for tracking changes and access.
