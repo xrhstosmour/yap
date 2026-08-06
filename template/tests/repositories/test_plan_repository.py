@@ -47,7 +47,9 @@ class TestPlanRepositoryTenantBypass:
         assert fetched.id == plan.id
         assert fetched.tenant_id is None
 
-    async def test_list_visible_from_inside_active_tenant_context(self, session) -> None:
+    async def test_list_visible_from_inside_active_tenant_context(
+        self, session
+    ) -> None:
         tenant = Tenant(name="Plan Test Org 2", slug="plan-test-org-2")
         session.add(tenant)
         await session.commit()

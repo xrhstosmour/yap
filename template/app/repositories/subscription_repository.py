@@ -52,9 +52,7 @@ class SubscriptionRepository(BaseRepository[Subscription]):
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
-    async def get_most_recent_for_tenant(
-        self, tenant_id: UUID
-    ) -> Subscription | None:
+    async def get_most_recent_for_tenant(self, tenant_id: UUID) -> Subscription | None:
         """The tenant's most recently created subscription, terminal or not.
 
         Used by the access-gating dependency, which must be able to see
@@ -99,9 +97,9 @@ class SubscriptionRepository(BaseRepository[Subscription]):
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
-    async def list_due_for_sweep(self, now: datetime, limit: int = 500) -> list[
-        Subscription
-    ]:
+    async def list_due_for_sweep(
+        self, now: datetime, limit: int = 500
+    ) -> list[Subscription]:
         """Rows the lifecycle sweep should act on, locked and skip-locked.
 
         Deliberately bypasses `_apply_tenant_filter`'s no-tenant-context

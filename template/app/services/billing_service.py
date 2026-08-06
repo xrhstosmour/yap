@@ -313,7 +313,9 @@ class SubscriptionService:
         if new_status == SubscriptionStatus.CANCELED:
             update_data.setdefault("canceled_at", datetime.now(UTC))
 
-        updated = await self.subscription_repository.update(subscription_id, update_data)
+        updated = await self.subscription_repository.update(
+            subscription_id, update_data
+        )
         if updated is None:
             raise SubscriptionNotFoundError(f"Subscription {subscription_id} not found")
 
@@ -669,9 +671,7 @@ class BillingService:
 
     # -- Read-only listings ---------------------------------------------
 
-    async def get_subscription_for_tenant(
-        self, tenant_id: UUID
-    ) -> Subscription | None:
+    async def get_subscription_for_tenant(self, tenant_id: UUID) -> Subscription | None:
         return await self.subscription_repository.get_active_for_tenant(tenant_id)
 
     async def list_invoices_for_tenant(
@@ -819,8 +819,10 @@ class BillingService:
         stripe_subscription_id = data.get("subscription")
         subscription = None
         if stripe_subscription_id:
-            subscription = await self.subscription_repository.get_by_stripe_subscription_id(
-                stripe_subscription_id
+            subscription = (
+                await self.subscription_repository.get_by_stripe_subscription_id(
+                    stripe_subscription_id
+                )
             )
 
         tenant_id = subscription.tenant_id if subscription else None
@@ -832,7 +834,9 @@ class BillingService:
             return
 
         vat_fields = _extract_vat_fields(data)
-        issue_date = (_unix_to_datetime(data.get("created")) or datetime.now(UTC)).date()
+        issue_date = (
+            _unix_to_datetime(data.get("created")) or datetime.now(UTC)
+        ).date()
         series = str(issue_date.year)
 
         invoice = await self.invoice_repository.issue_invoice(
@@ -867,7 +871,9 @@ class BillingService:
             }
         )
 
-        await self._log_invoice_issued_audit(tenant_id, invoice.id, invoice.invoice_number)
+        await self._log_invoice_issued_audit(
+            tenant_id, invoice.id, invoice.invoice_number
+        )
 
         if subscription is not None:
             await self.subscription_service.transition(
@@ -881,8 +887,10 @@ class BillingService:
         stripe_subscription_id = data.get("subscription")
         subscription = None
         if stripe_subscription_id:
-            subscription = await self.subscription_repository.get_by_stripe_subscription_id(
-                stripe_subscription_id
+            subscription = (
+                await self.subscription_repository.get_by_stripe_subscription_id(
+                    stripe_subscription_id
+                )
             )
 
         tenant_id = subscription.tenant_id if subscription else None
@@ -1024,7 +1032,9 @@ class BillingService:
             default_payment_method
         )
         if default:
-            await self.payment_method_repository.update(default.id, {"is_default": True})
+            await self.payment_method_repository.update(
+                default.id, {"is_default": True}
+            )
 
     async def _log_invoice_issued_audit(
         self, tenant_id: UUID, invoice_id: UUID, invoice_number: str
@@ -1089,8 +1099,8 @@ def _extract_vat_fields(invoice_data: dict[str, Any]) -> dict[str, Any]:
     vat_amount_cents = sum(t.get("amount", 0) or 0 for t in tax_amounts)
     vat_rate = Decimal(0)
     if tax_amounts:
-        percentage = (
-            (tax_amounts[0].get("tax_rate_details") or {}).get("percentage_decimal")
+        percentage = (tax_amounts[0].get("tax_rate_details") or {}).get(
+            "percentage_decimal"
         )
         if percentage is not None:
             vat_rate = Decimal(str(percentage)) / Decimal(100)
