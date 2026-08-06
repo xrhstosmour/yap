@@ -408,6 +408,8 @@ class Settings(BaseSettings):
             self._check_secret("SMTP_PASSWORD", self.SMTP_PASSWORD)
         if self.STORAGE_BACKEND == "s3":
             self._check_secret("STORAGE_SECRET_KEY", self.STORAGE_SECRET_KEY)
+        if self.STRIPE_API_KEY:
+            self._check_secret("STRIPE_WEBHOOK_SECRET", self.STRIPE_WEBHOOK_SECRET)
 
         return self
 
