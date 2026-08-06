@@ -251,6 +251,13 @@ class SubscriptionService:
                 f"from {subscription.status.value} to {new_status.value}"
             )
 
+        # Captured before the write: `BaseRepository.update()` mutates
+        # `subscription` in place (same identity-mapped ORM object, same
+        # session) rather than returning a distinct instance, so reading
+        # `subscription.status` *after* the update would already reflect
+        # `new_status`.
+        from_status = subscription.status
+
         update_data: dict[str, Any] = {"status": new_status}
         if extra_fields:
             update_data.update(extra_fields)
@@ -271,7 +278,7 @@ class SubscriptionService:
             tenant_id=subscription.tenant_id,
             resource_id=str(subscription_id),
             metadata={
-                "from": subscription.status.value,
+                "from": from_status.value,
                 "to": new_status.value,
                 "source": source,
             },
@@ -281,7 +288,7 @@ class SubscriptionService:
         logger.info(
             "subscription_transitioned",
             subscription_id=str(subscription_id),
-            from_status=subscription.status.value,
+            from_status=from_status.value,
             to_status=new_status.value,
             source=source,
         )
