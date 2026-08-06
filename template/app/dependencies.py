@@ -167,6 +167,35 @@ async def get_current_superuser(current_user: CurrentUser) -> User:
 SuperuserUser = Annotated[User, Depends(get_current_superuser)]
 
 
+async def get_tenant_owner(current_user: CurrentUser) -> User:
+    """Get the current user if they may manage their tenant's billing.
+
+    Billing-mutation routes (checkout, cancel, manage payment method)
+    require this. Billing-read routes stay `CurrentUser`-gated — any
+    user in the tenant can see billing status/history, only the owner
+    can change it. Superusers bypass this check explicitly, matching
+    the `get_current_superuser` escape hatch used elsewhere.
+
+    Args:
+        current_user: Current authenticated user
+
+    Returns:
+        User if a tenant owner (or superuser)
+
+    Raises:
+        HTTPException: If the user is neither
+    """
+    if not current_user.is_tenant_owner and current_user.role != UserRole.SUPERUSER:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the tenant owner can manage billing",
+        )
+    return current_user
+
+
+TenantOwnerUser = Annotated[User, Depends(get_tenant_owner)]
+
+
 async def get_current_user_ws(
     session: SessionDependency,
     ticket: Annotated[str | None, Query()] = None,
