@@ -22,19 +22,29 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import SYSTEM_TENANT_ID
 from app.core.logging import get_logger
+from app.core.payment_provider import CheckoutSession
+from app.core.payment_provider import CouponApplication
 from app.core.payment_provider import PaymentProvider
 from app.core.settings import settings
 from app.models.audit_log import AuditAction
+from app.models.coupon import Coupon
+from app.models.coupon import CouponDiscountType
+from app.models.coupon import CouponRedemption
+from app.models.invoice import Invoice
 from app.models.invoice import InvoiceStatus
+from app.models.payment import Payment
+from app.models.payment import PaymentMethod
 from app.models.payment import PaymentMethodType
 from app.models.payment import PaymentStatus
 from app.models.subscription import Subscription
 from app.models.subscription import SubscriptionStatus
 from app.repositories.audit_repository import AuditLogRepository
 from app.repositories.coupon_repository import CouponRedemptionRepository
+from app.repositories.coupon_repository import CouponRepository
 from app.repositories.invoice_repository import InvoiceRepository
 from app.repositories.payment_repository import PaymentMethodRepository
 from app.repositories.payment_repository import PaymentRepository
+from app.repositories.plan_repository import PlanRepository
 from app.repositories.subscription_repository import SubscriptionRepository
 
 logger = get_logger("services.billing")
@@ -48,8 +58,47 @@ class IllegalSubscriptionTransitionError(BillingServiceError):
     """Raised when a requested status transition is not in `ALLOWED_TRANSITIONS`."""
 
 
+class PlanNotFoundError(BillingServiceError):
+    """Raised when a `Plan` cannot be found or is not active."""
+
+
+class NoActiveSubscriptionError(BillingServiceError):
+    """Raised when an operation requires a subscription that doesn't exist."""
+
+
+class CouponNotFoundError(BillingServiceError):
+    """Raised when a `Coupon` code doesn't exist or isn't active."""
+
+
+class CouponExpiredError(BillingServiceError):
+    """Raised when a `Coupon` is outside its `valid_from`/`valid_until` window."""
+
+
+class CouponExhaustedError(BillingServiceError):
+    """Raised when a `Coupon` has reached `max_redemptions`."""
+
+
+class CouponNotApplicableError(BillingServiceError):
+    """Raised when a `Coupon`'s plan/tenant allow-list excludes this redemption."""
+
+
+class CouponAlreadyRedeemedError(BillingServiceError):
+    """Raised when the tenant already has an active redemption of this `Coupon`."""
+
+
 class SubscriptionNotFoundError(BillingServiceError):
     """Raised when a subscription cannot be found."""
+
+
+# Bounded window for the placeholder `Subscription` row `start_checkout`
+# creates when a tenant has no non-terminal subscription (first-ever
+# checkout racing ahead of provisioning, or resubscribing after
+# `expired`/`canceled`). Matches Stripe Checkout Session's own default
+# expiry — long enough to complete checkout, short enough that an
+# abandoned attempt doesn't grant indefinite free access: the sweep
+# picks it up via `trial_ends_at` like any other trial, so it still
+# passes through `grace_period` before `expired`, never stalling open.
+_CHECKOUT_PENDING_HOURS = 24
 
 
 # Explicit allowed-transitions table for `SubscriptionStatus`. Terminal
@@ -326,7 +375,315 @@ class BillingService:
         self.invoice_repository = InvoiceRepository(session)
         self.payment_repository = PaymentRepository(session)
         self.payment_method_repository = PaymentMethodRepository(session)
+        self.plan_repository = PlanRepository(session)
+        self.coupon_repository = CouponRepository(session)
         self.coupon_redemption_repository = CouponRedemptionRepository(session)
+
+    # -- Coupon validation / redemption ------------------------------------
+
+    async def validate_coupon(
+        self, code: str, tenant_id: UUID, plan_id: UUID
+    ) -> Coupon:
+        """Validate a coupon code without redeeming it.
+
+        Used by `POST /billing/coupons/validate` so the frontend can
+        show "code applied" before committing to checkout. Validates in
+        order, failing fast with typed errors: active + within
+        `valid_from`/`valid_until`, under `max_redemptions`,
+        plan/tenant allow-lists satisfied, no existing redemption for
+        this tenant.
+        """
+        coupon = await self.coupon_repository.get_by_code(code)
+        if coupon is None or not coupon.is_active:
+            raise CouponNotFoundError(f"Coupon '{code}' not found")
+
+        now = datetime.now(UTC)
+        if coupon.valid_from is not None and now < coupon.valid_from:
+            raise CouponExpiredError(f"Coupon '{code}' is not yet valid")
+        if coupon.valid_until is not None and now > coupon.valid_until:
+            raise CouponExpiredError(f"Coupon '{code}' has expired")
+
+        if (
+            coupon.max_redemptions is not None
+            and coupon.redemption_count >= coupon.max_redemptions
+        ):
+            raise CouponExhaustedError(f"Coupon '{code}' has been fully redeemed")
+
+        # Compared as `str` on both sides: `allowed_plan_ids`/
+        # `allowed_tenant_ids` are stored as string UUIDs (plain `JSON`
+        # columns can't serialize `UUID` directly), so comparing a
+        # `UUID` instance against the list directly always fails.
+        if coupon.allowed_plan_ids and str(plan_id) not in {
+            str(allowed_plan_id) for allowed_plan_id in coupon.allowed_plan_ids
+        }:
+            raise CouponNotApplicableError(
+                f"Coupon '{code}' is not applicable to this plan"
+            )
+        if coupon.allowed_tenant_ids and str(tenant_id) not in {
+            str(allowed_tenant_id) for allowed_tenant_id in coupon.allowed_tenant_ids
+        }:
+            raise CouponNotApplicableError(
+                f"Coupon '{code}' is not applicable to this tenant"
+            )
+
+        existing = await self.coupon_redemption_repository.get_active_for_tenant(
+            coupon.id, tenant_id
+        )
+        if existing is not None:
+            raise CouponAlreadyRedeemedError(
+                f"Coupon '{code}' has already been redeemed by this tenant"
+            )
+
+        return coupon
+
+    async def redeem_coupon(
+        self, code: str, tenant_id: UUID, plan_id: UUID, user_id: UUID
+    ) -> tuple[Coupon, CouponRedemption]:
+        """Validate and redeem a coupon, row-locking the redemption count.
+
+        `CouponRedemption.subscription_id` stays `NULL` until checkout
+        completes (`BillingService.handle_checkout_completed` finalizes
+        it via the `checkout.session.completed` webhook).
+        """
+        coupon = await self.validate_coupon(code, tenant_id, plan_id)
+
+        # Row-lock, then re-validate `max_redemptions` under the lock —
+        # `validate_coupon` above is a fast pre-check, not itself
+        # race-safe against concurrent redemptions of the last slot.
+        locked_coupon = await self.coupon_repository.get_for_update(coupon.id)
+        if locked_coupon is None:
+            raise CouponNotFoundError(f"Coupon '{code}' not found")
+        if (
+            locked_coupon.max_redemptions is not None
+            and locked_coupon.redemption_count >= locked_coupon.max_redemptions
+        ):
+            raise CouponExhaustedError(f"Coupon '{code}' has been fully redeemed")
+
+        await self.coupon_repository.increment_redemption_count(locked_coupon.id)
+        redemption = await self.coupon_redemption_repository.create(
+            {
+                "tenant_id": tenant_id,
+                "coupon_id": locked_coupon.id,
+                "redeemed_by_user_id": user_id,
+            }
+        )
+
+        await self._log_audit(
+            action=AuditAction.COUPON_REDEEMED,
+            tenant_id=tenant_id,
+            resource_type="coupon",
+            resource_id=str(locked_coupon.id),
+            metadata={"code": locked_coupon.code, "redemption_id": str(redemption.id)},
+            actor_id=user_id,
+        )
+
+        return locked_coupon, redemption
+
+    # -- Checkout / portal / cancel -----------------------------------------
+
+    async def start_checkout(
+        self,
+        tenant_id: UUID,
+        plan_id: UUID,
+        user_id: UUID,
+        user_email: str,
+        success_url: str,
+        cancel_url: str,
+        coupon_code: str | None = None,
+    ) -> CheckoutSession:
+        """Start a Stripe Checkout session for a tenant's plan subscription.
+
+        Normally attaches to the existing `Subscription` row created by
+        `SubscriptionService.start_trial` when the tenant was
+        provisioned — trial starts immediately with no Stripe object;
+        Checkout only happens when the tenant chooses to subscribe or
+        the trial is ending. If the tenant has no non-terminal
+        subscription (first-ever checkout raced ahead of provisioning,
+        or the tenant is resubscribing after `expired`/`canceled`), a
+        fresh row is created here instead of raising — per the
+        `ALLOWED_TRANSITIONS` module note, a resubscribing tenant always
+        gets a brand-new row, never a resurrected terminal one. No new
+        trial is granted: `trial_ends_at` is bounded to
+        `_CHECKOUT_PENDING_HOURS`, not a real trial length, so an
+        abandoned checkout still gets swept to `grace_period`/`expired`
+        instead of granting indefinite free access.
+        """
+        plan = await self.plan_repository.get(plan_id)
+        if plan is None or not plan.is_active:
+            raise PlanNotFoundError(f"Plan {plan_id} not found")
+
+        subscription = await self.subscription_repository.get_active_for_tenant(
+            tenant_id
+        )
+        if subscription is None:
+            checkout_deadline = datetime.now(UTC) + timedelta(
+                hours=_CHECKOUT_PENDING_HOURS
+            )
+            subscription = await self.subscription_repository.create(
+                {
+                    "tenant_id": tenant_id,
+                    "plan_id": plan_id,
+                    "status": SubscriptionStatus.TRIALING,
+                    "trial_ends_at": checkout_deadline,
+                    "grace_period_ends_at": checkout_deadline
+                    + timedelta(days=settings.BILLING_GRACE_PERIOD_DAYS),
+                }
+            )
+            await self._log_audit(
+                action=AuditAction.SUBSCRIPTION_CREATED,
+                tenant_id=tenant_id,
+                resource_type="subscription",
+                resource_id=str(subscription.id),
+                metadata={"status": subscription.status.value, "source": "checkout"},
+                actor_id=user_id,
+            )
+
+        metadata = {
+            "tenant_id": str(tenant_id),
+            "subscription_id": str(subscription.id),
+        }
+
+        coupon_application: CouponApplication | None = None
+        trial_period_days: int | None = None
+        redemption: CouponRedemption | None = None
+        coupon: Coupon | None = None
+        if coupon_code:
+            coupon, redemption = await self.redeem_coupon(
+                coupon_code, tenant_id, plan_id, user_id
+            )
+            metadata["coupon_redemption_id"] = str(redemption.id)
+            if coupon.discount_type == CouponDiscountType.FREE:
+                # A free-period coupon ("free for 14 days") is a trial
+                # extension, not a Stripe discount — Stripe coupons have
+                # no concept of "waive N days", so this maps directly
+                # onto the checkout session's own `trial_period_days`
+                # instead of `discounts`. Routing this through
+                # `_ensure_stripe_coupon` as an `amount_off=0` discount
+                # (the previous behavior) created a real but worthless
+                # Stripe coupon and charged the customer immediately —
+                # the free days were never actually granted.
+                trial_period_days = coupon.free_days or None
+            else:
+                coupon_application = CouponApplication(
+                    code=coupon.code,
+                    discount_type=coupon.discount_type.value,
+                    percent_off=coupon.percent_off,
+                    amount_off_cents=coupon.amount_off_cents,
+                    currency=plan.currency,
+                    duration=coupon.duration.value,
+                    duration_in_months=coupon.duration_in_months,
+                    stripe_coupon_id=coupon.stripe_coupon_id,
+                )
+
+        checkout_session = await self.payment_provider.create_checkout_session(
+            stripe_customer_id=subscription.stripe_customer_id,
+            customer_email=user_email,
+            price_id=plan.stripe_price_id or "",
+            success_url=success_url,
+            cancel_url=cancel_url,
+            trial_period_days=trial_period_days,
+            coupon=coupon_application,
+            metadata=metadata,
+            # Stable per subscription attempt: a network retry or a
+            # double-submitted checkout click for the same subscription
+            # returns the already-created session instead of a second
+            # one. A genuinely new attempt (after cancel/expiry) always
+            # gets a fresh `subscription.id`, so this never goes stale.
+            idempotency_key=f"checkout-session-{subscription.id}",
+        )
+
+        if coupon is not None and checkout_session.created_stripe_coupon_id:
+            await self.coupon_repository.update(
+                coupon.id,
+                {"stripe_coupon_id": checkout_session.created_stripe_coupon_id},
+            )
+
+        return checkout_session
+
+    async def create_portal_session(self, tenant_id: UUID, return_url: str) -> str:
+        """Create a Stripe Billing Portal session, returning its URL."""
+        subscription = await self.subscription_repository.get_active_for_tenant(
+            tenant_id
+        )
+        if subscription is None or subscription.stripe_customer_id is None:
+            raise NoActiveSubscriptionError(
+                f"Tenant {tenant_id} has no billable Stripe customer yet"
+            )
+
+        # Bucketed by hour rather than keyed purely on `subscription.id`:
+        # dedupes a network retry or double-click within the same
+        # request, without pinning the tenant to a single portal session
+        # (which Stripe expires relatively quickly) for longer than that.
+        hour_bucket = datetime.now(UTC).strftime("%Y%m%d%H")
+        return await self.payment_provider.create_billing_portal_session(
+            stripe_customer_id=subscription.stripe_customer_id,
+            return_url=return_url,
+            idempotency_key=f"portal-session-{subscription.id}-{hour_bucket}",
+        )
+
+    async def cancel_tenant_subscription(
+        self,
+        tenant_id: UUID,
+        actor_id: UUID,
+        at_period_end: bool = True,
+    ) -> Subscription:
+        """Cancel a tenant's subscription, immediately or at period end."""
+        subscription = await self.subscription_repository.get_active_for_tenant(
+            tenant_id
+        )
+        if subscription is None or subscription.stripe_subscription_id is None:
+            raise NoActiveSubscriptionError(
+                f"Tenant {tenant_id} has no active Stripe subscription to cancel"
+            )
+
+        await self.payment_provider.cancel_subscription(
+            stripe_subscription_id=subscription.stripe_subscription_id,
+            at_period_end=at_period_end,
+            idempotency_key=f"cancel-{subscription.stripe_subscription_id}-{at_period_end}",
+        )
+
+        if at_period_end:
+            # The subscription stays `active` until Stripe actually ends
+            # it (`customer.subscription.deleted` webhook finalizes the
+            # `canceled` transition) — only the intent is recorded now.
+            updated = await self.subscription_repository.update(
+                subscription.id, {"cancel_at_period_end": True}
+            )
+            assert updated is not None
+            return updated
+
+        return await self.subscription_service.transition(
+            subscription.id,
+            SubscriptionStatus.CANCELED,
+            source="portal",
+            actor_id=actor_id,
+        )
+
+    # -- Read-only listings ---------------------------------------------
+
+    async def get_subscription_for_tenant(
+        self, tenant_id: UUID
+    ) -> Subscription | None:
+        return await self.subscription_repository.get_active_for_tenant(tenant_id)
+
+    async def list_invoices_for_tenant(
+        self, tenant_id: UUID, skip: int = 0, limit: int = 20
+    ) -> tuple[list[Invoice], int]:
+        return await self.invoice_repository.list_for_tenant(
+            tenant_id, skip=skip, limit=limit
+        )
+
+    async def list_payments_for_tenant(
+        self, tenant_id: UUID, skip: int = 0, limit: int = 20
+    ) -> tuple[list[Payment], int]:
+        return await self.payment_repository.list_for_tenant(
+            tenant_id, skip=skip, limit=limit
+        )
+
+    async def list_payment_methods_for_tenant(
+        self, tenant_id: UUID
+    ) -> list[PaymentMethod]:
+        return await self.payment_method_repository.list_for_tenant(tenant_id)
 
     # -- Webhook event handlers -------------------------------------------
     #
@@ -664,24 +1021,49 @@ class BillingService:
     async def _log_invoice_issued_audit(
         self, tenant_id: UUID, invoice_id: UUID, invoice_number: str
     ) -> None:
+        await self._log_audit(
+            action=AuditAction.INVOICE_ISSUED,
+            tenant_id=tenant_id,
+            resource_type="invoice",
+            resource_id=str(invoice_id),
+            metadata={"invoice_number": invoice_number},
+            actor_id=None,
+        )
+
+    async def _log_audit(
+        self,
+        action: AuditAction,
+        tenant_id: UUID,
+        resource_type: str,
+        resource_id: str,
+        metadata: dict[str, Any],
+        actor_id: UUID | None,
+    ) -> None:
+        """Write an audit entry, swallowing failures (see `AuditLogRepository`).
+
+        `actor_id=None` logs as `actor_type="system"` under the
+        system-tenant fallback actor (webhook-driven writes, e.g.
+        `INVOICE_ISSUED`); a real `actor_id` logs as `actor_type="user"`
+        (user-initiated writes, e.g. `COUPON_REDEEMED`).
+        """
         if self.audit_repository is None:
             return
         try:
             async with self.session.begin_nested():
                 await self.audit_repository.log(
-                    action=AuditAction.INVOICE_ISSUED,
-                    actor_id=str(SYSTEM_TENANT_ID),
-                    actor_type="system",
+                    action=action,
+                    actor_id=str(actor_id or SYSTEM_TENANT_ID),
+                    actor_type="user" if actor_id else "system",
                     tenant_id=tenant_id,
-                    resource_type="invoice",
-                    resource_id=str(invoice_id),
-                    metadata={"invoice_number": invoice_number},
+                    resource_type=resource_type,
+                    resource_id=resource_id,
+                    metadata=metadata,
                 )
         except Exception:
             logger.warning(
                 "audit_log_write_failed",
-                action=AuditAction.INVOICE_ISSUED.value,
-                resource_id=str(invoice_id),
+                action=action.value,
+                resource_id=resource_id,
                 exc_info=True,
             )
 
@@ -697,13 +1079,13 @@ def _extract_vat_fields(invoice_data: dict[str, Any]) -> dict[str, Any]:
 
     tax_amounts = invoice_data.get("total_tax_amounts") or []
     vat_amount_cents = sum(t.get("amount", 0) or 0 for t in tax_amounts)
-    vat_rate = Decimal("0")
+    vat_rate = Decimal(0)
     if tax_amounts:
         percentage = (
             (tax_amounts[0].get("tax_rate_details") or {}).get("percentage_decimal")
         )
         if percentage is not None:
-            vat_rate = Decimal(str(percentage)) / Decimal("100")
+            vat_rate = Decimal(str(percentage)) / Decimal(100)
 
     automatic_tax = invoice_data.get("automatic_tax") or {}
     reverse_charge = automatic_tax.get("status") == "reverse_charge"

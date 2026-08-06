@@ -147,6 +147,13 @@ auth_rate_limiter = RateLimiter(
     key_prefix="ratelimit:auth",
 )
 
+# Tighter than the general per-user limit: `POST /billing/coupons/validate`
+# is a code-guessing target.
+coupon_validate_rate_limiter = RateLimiter(
+    requests_per_minute=settings.RATE_LIMIT_PER_MINUTE_COUPON_VALIDATE,
+    key_prefix="ratelimit:coupon_validate",
+)
+
 
 async def check_user_rate_limit(user_id: str) -> None:
     """Check if user has exceeded their rate limit.
@@ -208,6 +215,28 @@ async def check_auth_rate_limit(request: Request) -> None:
         logger.warning(
             "auth_rate_limit_exceeded",
             client_ip=client_ip,
+            retry_after=retry_after,
+        )
+        raise RateLimitExceeded(retry_after)
+
+
+async def check_coupon_validate_rate_limit(user_id: str) -> None:
+    """Check the tight, coupon-guessing-resistant rate limit for `/billing/coupons/validate`.
+
+    Args:
+        user_id: User identifier
+
+    Raises:
+        RateLimitExceeded: If rate limit is exceeded
+    """
+    allowed, remaining, retry_after = (
+        await coupon_validate_rate_limiter.check_rate_limit(user_id)
+    )
+
+    if not allowed:
+        logger.warning(
+            "coupon_validate_rate_limit_exceeded",
+            user_id=user_id,
             retry_after=retry_after,
         )
         raise RateLimitExceeded(retry_after)
