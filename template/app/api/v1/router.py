@@ -7,6 +7,7 @@ from fastapi import APIRouter
 
 from app.api.v1.api_keys import router as api_keys_router
 from app.api.v1.auth import router as auth_router
+from app.api.v1.billing_webhooks import router as billing_webhooks_router
 from app.api.v1.feature_flags import router as feature_flags_router
 from app.api.v1.files import router as files_router
 from app.api.v1.health import router as health_router
@@ -24,3 +25,4 @@ router.include_router(tenants_router)
 router.include_router(health_router)
 router.include_router(feature_flags_router)
 router.include_router(websocket_router)
+router.include_router(billing_webhooks_router)

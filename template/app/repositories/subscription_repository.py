@@ -52,6 +52,20 @@ class SubscriptionRepository(BaseRepository[Subscription]):
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
+    async def get_by_stripe_customer_id(
+        self, stripe_customer_id: str
+    ) -> Subscription | None:
+        """Look up by Stripe customer ID, bypassing tenant filtering.
+
+        Used by payment-method sync webhooks, which identify the
+        tenant via the Stripe customer, not the subscription.
+        """
+        query = select(Subscription).where(
+            Subscription.stripe_customer_id == stripe_customer_id  # type: ignore[arg-type]
+        )
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
+
     async def get_by_stripe_subscription_id(
         self, stripe_subscription_id: str
     ) -> Subscription | None:
