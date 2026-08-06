@@ -281,9 +281,15 @@ async def create_tables() -> None:
     # Import all models to register them with SQLModel metadata.
     from app.models import api_key  # noqa: F401
     from app.models import audit_log  # noqa: F401
+    from app.models import coupon  # noqa: F401
     from app.models import feature_flag  # noqa: F401
     from app.models import graveyard  # noqa: F401
+    from app.models import invoice  # noqa: F401
     from app.models import outbox  # noqa: F401
+    from app.models import payment  # noqa: F401
+    from app.models import payment_event  # noqa: F401
+    from app.models import plan  # noqa: F401
+    from app.models import subscription  # noqa: F401
     from app.models import tenant  # noqa: F401
     from app.models import user  # noqa: F401
 
