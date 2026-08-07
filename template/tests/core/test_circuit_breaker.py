@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from unittest.mock import MagicMock
 from unittest.mock import patch
@@ -97,7 +98,7 @@ def test_get_state_returns_open_after_tripping() -> None:
     for _ in range(2):
         try:
             breaker.call(_fail)
-        except (ValueError, pybreaker.CircuitBreakerError):
+        except ValueError, pybreaker.CircuitBreakerError:
             pass
 
     assert CircuitBreakerService.get_state("test") == CircuitState.OPEN
@@ -117,7 +118,7 @@ def test_get_state_returns_half_open_after_timeout() -> None:
     for _ in range(2):
         try:
             breaker.call(_fail)
-        except (ValueError, pybreaker.CircuitBreakerError):
+        except ValueError, pybreaker.CircuitBreakerError:
             pass
 
     # Verify it is OPEN immediately after tripping.
@@ -229,70 +230,110 @@ def test_circuit_breaker_sync_decorator_kwargs_pass_through() -> None:
 
 
 #  circuit_breaker decorator — async functions
+#
+# These exercise the real (non-mocked) pybreaker.CircuitBreaker, unlike the
+# previous version of this section: mocking breaker.success()/breaker.failure()
+# hid that neither method exists on this installed pybreaker version, so the
+# async decorator raised AttributeError on every real call. See the
+# `async_wrapper` docstring in app/core/circuit_breaker.py for the fix.
 
 
 @pytest.mark.asyncio
-async def test_circuit_breaker_async_decorator_calls_breaker_success() -> None:
-    """On success the async wrapper must call breaker.success()."""
+async def test_circuit_breaker_async_decorator_calls_function() -> None:
+    """Async decorated function returns the expected result and stays closed."""
 
     @circuit_breaker("test_async", fail_max=5)
     async def double(x: int) -> int:
         return x * 2
 
-    breaker = CircuitBreakerService._breakers["test_async"]
-
-    with patch.object(breaker, "success", create=True) as mock_success:
-        result = await double(5)
-        assert result == 10
-        mock_success.assert_called_once()
+    assert await double(5) == 10
+    assert CircuitBreakerService.get_state("test_async") == CircuitState.CLOSED
 
 
 @pytest.mark.asyncio
-async def test_circuit_breaker_async_decorator_calls_breaker_failure() -> None:
-    """On exception the async wrapper must call breaker.failure() and re-raise."""
+async def test_circuit_breaker_async_decorator_propagates_exception_below_threshold() -> (
+    None
+):
+    """Below fail_max, the original exception propagates and the circuit stays closed."""
 
     @circuit_breaker("test_async_fail", fail_max=5)
     async def failing_func() -> None:
         raise ValueError("async fail")
 
-    breaker = CircuitBreakerService._breakers["test_async_fail"]
+    with pytest.raises(ValueError, match="async fail"):
+        await failing_func()
 
-    with patch.object(breaker, "failure", create=True) as mock_failure:
-        with pytest.raises(ValueError, match="async fail"):
-            await failing_func()
-        mock_failure.assert_called_once()
-        # Verify the exception is forwarded to breaker.failure().
-        exc_arg = mock_failure.call_args[0][0]
-        assert isinstance(exc_arg, ValueError)
-        assert str(exc_arg) == "async fail"
+    assert CircuitBreakerService.get_state("test_async_fail") == CircuitState.CLOSED
 
 
 @pytest.mark.asyncio
-async def test_circuit_breaker_async_decorator_does_not_call_success_on_failure() -> (
-    None
-):
-    """breaker.success() must NOT be called when the async function raises."""
+async def test_circuit_breaker_async_decorator_trips_breaker_on_failure() -> None:
+    """After fail_max failures the circuit opens; next call raises CircuitBreakerError.
 
-    @circuit_breaker("test_async_fail2", fail_max=5)
-    async def failing_func() -> None:
-        raise RuntimeError("boom")
+    Mirrors test_circuit_breaker_sync_decorator_trips_breaker_on_failure for
+    the async path.
+    """
+    call_count = 0
 
-    breaker = CircuitBreakerService._breakers["test_async_fail2"]
+    @circuit_breaker("test_async_trip", fail_max=2)
+    async def my_func() -> None:
+        nonlocal call_count
+        call_count += 1
+        raise ValueError("fail")
 
-    # Both success and failure are mocked because pybreaker 1.x does not
-    # expose public success()/failure() helpers — only the async wrapper
-    # calls them, so we verify the wrapper logic in isolation.
-    with (
-        patch.object(breaker, "success", create=True) as mock_success,
-        patch.object(breaker, "failure", create=True) as mock_failure,
-    ):
-        with pytest.raises(RuntimeError):
-            await failing_func()
-        mock_success.assert_not_called()
-        mock_failure.assert_called_once()
-        exc_arg = mock_failure.call_args[0][0]
-        assert isinstance(exc_arg, RuntimeError)
-        assert str(exc_arg) == "boom"
+    # First call: original ValueError is propagated.
+    with pytest.raises(ValueError, match="fail"):
+        await my_func()
+
+    # Second call: this one reaches fail_max, so pybreaker wraps the
+    # ValueError in a CircuitBreakerError to signal the circuit just opened.
+    with pytest.raises(pybreaker.CircuitBreakerError):
+        await my_func()
+    assert call_count == 2
+
+    # Third call: circuit is already open, blocked without calling my_func.
+    with pytest.raises(pybreaker.CircuitBreakerError):
+        await my_func()
+
+    assert call_count == 2
+    assert CircuitBreakerService.get_state("test_async_trip") == CircuitState.OPEN
+
+
+@pytest.mark.asyncio
+async def test_circuit_breaker_async_decorator_half_open_after_timeout() -> None:
+    """After reset_timeout passes, an OPEN async breaker allows one trial call through."""
+    breaker = CircuitBreakerService.get_breaker(
+        "test_async_half_open", fail_max=1, reset_timeout=0.01
+    )
+    # success_threshold > 1 so the breaker stays HALF_OPEN after one success
+    # instead of jumping straight to CLOSED.
+    breaker.success_threshold = 2
+
+    @circuit_breaker("test_async_half_open", fail_max=1, reset_timeout=0.01)
+    async def flaky(*, should_fail: bool) -> str:
+        if should_fail:
+            raise ValueError("failure")
+        return "ok"
+
+    # Trip the breaker (fail_max=1, so a single failure opens it and
+    # pybreaker wraps it in a CircuitBreakerError instead of propagating
+    # the original ValueError).
+    with pytest.raises(pybreaker.CircuitBreakerError):
+        await flaky(should_fail=True)
+
+    assert CircuitBreakerService.get_state("test_async_half_open") == CircuitState.OPEN
+
+    # Wait longer than reset_timeout so the breaker allows the next call
+    # through the HALF_OPEN gate.
+    await asyncio.sleep(0.05)
+
+    result = await flaky(should_fail=False)
+
+    assert result == "ok"
+    assert (
+        CircuitBreakerService.get_state("test_async_half_open")
+        == CircuitState.HALF_OPEN
+    )
 
 
 @pytest.mark.asyncio
