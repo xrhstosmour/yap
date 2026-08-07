@@ -6,10 +6,13 @@ to prevent cascading failures when external services are unavailable.
 
 from __future__ import annotations
 
-import asyncio
 import functools
+import inspect
 import threading
 from collections.abc import Callable
+from datetime import UTC
+from datetime import datetime
+from datetime import timedelta
 from enum import StrEnum
 from typing import Any
 from typing import TypeVar
@@ -133,20 +136,49 @@ def circuit_breaker(name: str, **kwargs: int) -> Callable[[F], F]:
     breaker = CircuitBreakerService.get_breaker(name, **kwargs)
 
     def decorator(func: F) -> F:
-        if asyncio.iscoroutinefunction(func):
+        if inspect.iscoroutinefunction(func):
 
             @functools.wraps(func)
             async def async_wrapper(  # noqa: ANN401
                 *args: Any,  # noqa: ANN401
                 **kwargs: Any,  # noqa: ANN401
             ) -> Any:  # noqa: ANN401
+                # `pybreaker.CircuitBreaker` has no public async call path in
+                # this install: `call_async` requires the optional `tornado`
+                # dependency (not installed here) and raises `NameError` at
+                # call time, and `breaker.success()`/`breaker.failure()` used
+                # by the previous version of this wrapper don't exist on this
+                # pybreaker version at all (only ever exercised against
+                # mocks in tests — see `tests/core/test_circuit_breaker.py`).
+                # This mirrors the *synchronous* `CircuitBreakerState.call()`
+                # implementation by hand, since `func` must be awaited rather
+                # than called directly.
+                state = breaker.state
+                if isinstance(state, pybreaker.CircuitOpenState):
+                    # `CircuitOpenState.before_call` would otherwise call the
+                    # breaker's synchronous `call()` once its timeout
+                    # elapses, which can't run an async `func` correctly.
+                    # Replicate its open -> half-open transition without
+                    # going through that call-through.
+                    timeout = timedelta(seconds=breaker.reset_timeout)
+                    opened_at = breaker._state_storage.opened_at  # noqa: SLF001
+                    if opened_at and datetime.now(UTC) < opened_at + timeout:
+                        raise pybreaker.CircuitBreakerError(
+                            "Timeout not elapsed yet, circuit breaker still open"
+                        )
+                    breaker.half_open()
+                    state = breaker.state
+                else:
+                    state.before_call(func, *args, **kwargs)
+                for listener in breaker.listeners:
+                    listener.before_call(breaker, func, *args, **kwargs)
                 try:
                     result = await func(*args, **kwargs)
-                    breaker.success()  # type: ignore[attr-defined]
-                    return result
                 except Exception as e:
-                    breaker.failure(e)  # type: ignore[attr-defined]
-                    raise
+                    state._handle_error(e)  # noqa: SLF001
+                else:
+                    state._handle_success()  # noqa: SLF001
+                    return result
 
             return cast(F, async_wrapper)
         else:
