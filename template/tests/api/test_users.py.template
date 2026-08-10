@@ -184,9 +184,7 @@ class TestRevokeUserSessions:
         """Superuser should revoke all sessions for target user."""
         auth_service = _auth_service(session)
         target_user = await auth_service.register(
-            RegisterRequest(
-                email="revoke-target@{{ project_slug }}.com", password="password123"
-            )
+            RegisterRequest(email="revoke-target@{{ project_slug }}.com", password="password123")
         )
         superuser = await _create_superuser(auth_service)
         token = create_access_token(subject=superuser.id)

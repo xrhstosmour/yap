@@ -166,9 +166,7 @@ class TestAuthLogout:
         """Logout should accept refresh token and return 204."""
         auth_service = _auth_service(session)
         user = await auth_service.register(
-            RegisterRequest(
-                email="logout-refresh@{{ project_slug }}.com", password="password123"
-            )
+            RegisterRequest(email="logout-refresh@{{ project_slug }}.com", password="password123")
         )
         access_token = create_access_token(subject=user.id)
         refresh_token = create_refresh_token(subject=user.id)
@@ -188,9 +186,7 @@ class TestAuthLogout:
         """Logout should return 400 when refresh token is invalid."""
         auth_service = _auth_service(session)
         user = await auth_service.register(
-            RegisterRequest(
-                email="logout-invalid@{{ project_slug }}.com", password="password123"
-            )
+            RegisterRequest(email="logout-invalid@{{ project_slug }}.com", password="password123")
         )
         access_token = create_access_token(subject=user.id)
 
@@ -700,9 +696,7 @@ class TestMagicLink:
         """Verifying a valid magic link token should return tokens."""
         auth_service = AuthService(cast(AsyncSession, session))
         user = await auth_service.register(
-            RegisterRequest(
-                email="magic-login@{{ project_slug }}.com", password="password123"
-            )
+            RegisterRequest(email="magic-login@{{ project_slug }}.com", password="password123")
         )
 
         async def _fake_verify_token(token: str):
