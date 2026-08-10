@@ -28,5 +28,11 @@ repos:
       - id: debug-statements
       - id: detect-private-key
       - id: detect-aws-credentials
+        # Fails outright (exit 2) on machines with no AWS CLI credentials
+        # file configured, which is the common case for this project.
+        args: [--allow-missing-credentials]
       - id: check-merge-conflict
       - id: name-tests-test
+        # This project uses pytest's `test_*.py` convention, not the hook's
+        # default `*_test.py`.
+        args: [--pytest-test-first]
