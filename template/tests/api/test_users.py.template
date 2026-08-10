@@ -258,9 +258,7 @@ class TestGdprDeleteMe:
         """Deleting own account should return 204."""
         auth_service = _auth_service(session)
         user = await auth_service.register(
-            RegisterRequest(
-                email="todelete@{{ project_slug }}.com", password="password123"
-            )
+            RegisterRequest(email="todelete@{{ project_slug }}.com", password="password123")
         )
         token = create_access_token(subject=user.id)
 
@@ -289,9 +287,7 @@ class TestGdprExportMe:
         """Exporting personal data should return 200 with JSON attachment."""
         auth_service = _auth_service(session)
         user = await auth_service.register(
-            RegisterRequest(
-                email="toexport@{{ project_slug }}.com", password="password123"
-            )
+            RegisterRequest(email="toexport@{{ project_slug }}.com", password="password123")
         )
         token = create_access_token(subject=user.id)
 

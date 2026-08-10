@@ -47,7 +47,10 @@ def _stub_user_repository(monkeypatch: pytest.MonkeyPatch, user: User | None) ->
 
 
 def _stub_ws_ticket(
-    monkeypatch: pytest.MonkeyPatch, user_id: object | None, *, ticket: str = TEST_TICKET
+    monkeypatch: pytest.MonkeyPatch,
+    user_id: object | None,
+    *,
+    ticket: str = TEST_TICKET,
 ) -> None:
     """Make `consume_ws_ticket(ticket)` resolve to `user_id` without touching Redis."""
 
@@ -149,7 +152,9 @@ class TestHealthWebSocket:
         _stub_ws_ticket(monkeypatch, None)
 
         with pytest.raises(WebSocketDisconnect) as excinfo:
-            with ws_client.websocket_connect("/api/v1/ws/health?ticket=not-a-real-ticket"):
+            with ws_client.websocket_connect(
+                "/api/v1/ws/health?ticket=not-a-real-ticket"
+            ):
                 pass
         assert excinfo.value.code == 1008
 
@@ -198,7 +203,9 @@ class TestMetricsWebSocket:
         _stub_ws_ticket(monkeypatch, user.id)
 
         with pytest.raises(WebSocketDisconnect) as excinfo:
-            with ws_client.websocket_connect(f"/api/v1/ws/metrics?ticket={TEST_TICKET}"):
+            with ws_client.websocket_connect(
+                f"/api/v1/ws/metrics?ticket={TEST_TICKET}"
+            ):
                 pass
         assert excinfo.value.code == 1008
 
@@ -334,9 +341,7 @@ class TestBroadcastRelay:
         async def _fake_deliver(channel: str, message: dict[str, Any]) -> None:
             delivered.append((channel, message))
 
-        monkeypatch.setattr(
-            ws_module, "_deliver_to_local_connections", _fake_deliver
-        )
+        monkeypatch.setattr(ws_module, "_deliver_to_local_connections", _fake_deliver)
 
         await ws_module._broadcast_relay()
 

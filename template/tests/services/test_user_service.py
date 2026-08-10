@@ -259,9 +259,7 @@ class TestUpdateProfile:
         data = UserUpdateMe.model_construct(
             email="new@example.com", current_password="correct-password"
         )
-        with patch(
-            "app.services.user_service.verify_password", return_value=True
-        ):
+        with patch("app.services.user_service.verify_password", return_value=True):
             result = await mock_user_service.update_profile(user, data)
 
         assert result.email == "new@example.com"
@@ -279,11 +277,11 @@ class TestUpdateProfile:
         mock_user_service.user_repository.get = AsyncMock(return_value=updated)
 
         data = UserUpdateMe.model_construct(
-            full_name="New", email="new@example.com", current_password="correct-password"
+            full_name="New",
+            email="new@example.com",
+            current_password="correct-password",
         )
-        with patch(
-            "app.services.user_service.verify_password", return_value=True
-        ):
+        with patch("app.services.user_service.verify_password", return_value=True):
             result = await mock_user_service.update_profile(user, data)
 
         assert result.full_name == "New"
@@ -324,7 +322,9 @@ class TestUpdateProfile:
         )
 
     @pytest.mark.asyncio
-    async def test_update_phone_clears_phone(self, mock_user_service: UserService) -> None:
+    async def test_update_phone_clears_phone(
+        self, mock_user_service: UserService
+    ) -> None:
         """Should clear the phone field when phone is explicitly set to None."""
         user = _make_user_mock(phone="+306912345678")
         updated = _make_user_mock(phone=None, id=user.id)
@@ -775,9 +775,7 @@ class TestAdminUpdate:
         mock_user_service.audit_repository.log_user_action_safe.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_update_role_field(
-        self, mock_user_service: UserService
-    ) -> None:
+    async def test_update_role_field(self, mock_user_service: UserService) -> None:
         """Admin should be able to grant admin role."""
         user_id = uuid4()
         admin_id = uuid4()

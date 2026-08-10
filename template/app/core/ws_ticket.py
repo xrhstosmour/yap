@@ -46,6 +46,4 @@ async def consume_ws_ticket(ticket: str) -> str | None:
         The bound user ID, or None if the ticket is missing/expired/already used.
     """
     redis_client = await get_redis()
-    return cast(
-        "str | None", await redis_client.getdel(f"{WS_TICKET_PREFIX}{ticket}")
-    )
+    return cast("str | None", await redis_client.getdel(f"{WS_TICKET_PREFIX}{ticket}"))
