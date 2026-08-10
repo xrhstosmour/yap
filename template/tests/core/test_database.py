@@ -696,9 +696,7 @@ class TestGetAdditionalSyncSession:
         mock_ctx.__exit__ = MagicMock(return_value=None)
         mock_factory = MagicMock(return_value=mock_ctx)
 
-        with patch(
-            "app.database.additional_sync_session_factory", mock_factory
-        ):
+        with patch("app.database.additional_sync_session_factory", mock_factory):
             for session in get_additional_sync_session():
                 assert session is mock_session
 
@@ -714,9 +712,7 @@ class TestGetAdditionalSyncSession:
         mock_ctx.__exit__ = MagicMock(return_value=None)
         mock_factory = MagicMock(return_value=mock_ctx)
 
-        with patch(
-            "app.database.additional_sync_session_factory", mock_factory
-        ):
+        with patch("app.database.additional_sync_session_factory", mock_factory):
             gen = get_additional_sync_session()
             next(gen)
             with pytest.raises(ValueError, match="boom"):

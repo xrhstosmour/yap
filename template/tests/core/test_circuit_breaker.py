@@ -98,7 +98,7 @@ def test_get_state_returns_open_after_tripping() -> None:
     for _ in range(2):
         try:
             breaker.call(_fail)
-        except ValueError, pybreaker.CircuitBreakerError:
+        except (ValueError, pybreaker.CircuitBreakerError):
             pass
 
     assert CircuitBreakerService.get_state("test") == CircuitState.OPEN
@@ -118,7 +118,7 @@ def test_get_state_returns_half_open_after_timeout() -> None:
     for _ in range(2):
         try:
             breaker.call(_fail)
-        except ValueError, pybreaker.CircuitBreakerError:
+        except (ValueError, pybreaker.CircuitBreakerError):
             pass
 
     # Verify it is OPEN immediately after tripping.
