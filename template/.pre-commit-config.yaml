@@ -1,20 +1,34 @@
 repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.8.0
+  - repo: local
     hooks:
-      - id: ruff
-        args: [--fix]
+      - id: ruff-check
+        name: ruff check
+        # Runs against the project's own pinned/resolved ruff (via uv)
+        # instead of a separately pinned ruff-pre-commit rev, which drifts
+        # out of sync with pyproject.toml's unbounded `ruff>=0.8.0` and
+        # produces false failures unrelated to real code issues. Scoped to
+        # app/tests, matching CI, not the whole repo (e.g. scripts/).
+        entry: uv run ruff check --fix app/ tests/
+        language: system
+        pass_filenames: false
+        types: [python]
       - id: ruff-format
-
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.14.0
-    hooks:
+        name: ruff format
+        entry: uv run ruff format app/ tests/
+        language: system
+        pass_filenames: false
+        types: [python]
       - id: mypy
-        args: [--config-file, mypy-ci.toml]
-        additional_dependencies:
-          - pydantic>=2.6.0
-          - fastapi>=0.115.0
-          - sqlmodel>=0.0.22
+        name: mypy
+        # Same rationale as ruff above: runs against the project's real
+        # uv-managed environment instead of the isolated mirrors-mypy hook,
+        # whose additional_dependencies list can never track the full
+        # dependency graph and produced hundreds of false import-not-found
+        # errors.
+        entry: uv run mypy app/ --config-file mypy-ci.toml
+        language: system
+        pass_filenames: false
+        types: [python]
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
