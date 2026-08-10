@@ -215,9 +215,7 @@ class Settings(BaseSettings):
     @property
     def REDIS_URL(self) -> str:
         password = f":{self.REDIS_PASSWORD}" if self.REDIS_PASSWORD else ""
-        return (
-            f"redis://{password}@{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DATABASE}"
-        )
+        return f"redis://{password}@{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DATABASE}"
 
     @computed_field  # type: ignore[prop-decorator]  # pyright: ignore[reportDecoratorUsage]
     @property

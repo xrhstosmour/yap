@@ -80,7 +80,11 @@ module = [
 ignore_missing_imports = true
 
 [tool.ruff]
-target-version = "py314"
+# Pinned below the project's actual py314 minimum: ruff's formatter has an
+# open bug where target-version "py314" rewrites `except (A, B):` into the
+# unparenthesized PEP 758 form, which several ruff releases then emit
+# inconsistently. Revert to "py314" once astral-sh/ruff#23090 is fixed.
+target-version = "py313"
 exclude = ["venv", ".venv", "alembic/versions"]
 
 [tool.ruff.lint]
