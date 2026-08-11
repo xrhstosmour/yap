@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import literal
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.tenant import tenant_context
 from app.models.tenant import Tenant
 from app.models.user import User
 from app.models.user import UserRole
@@ -193,6 +194,40 @@ class TestUserRepository:
         found = await repo.get(user.id)
         assert found is not None
         assert found.token_version == 3
+
+    @pytest.mark.anyio
+    async def test_increment_token_version_does_not_cross_tenants(
+        self, session: AsyncSession
+    ) -> None:
+        """increment_token_version() must not invalidate another tenant's user.
+
+        A bare `UPDATE users SET token_version = token_version + 1 WHERE id
+        = :id` with no tenant filter would let a caller reached with an
+        unvalidated ID invalidate every JWT of a user in another tenant.
+        """
+        owning_tenant = Tenant(name="Owning Org", slug="owning-org-tv")
+        other_tenant = Tenant(name="Other Org", slug="other-org-tv")
+        session.add(owning_tenant)
+        session.add(other_tenant)
+        await session.commit()
+        await session.refresh(owning_tenant)
+        await session.refresh(other_tenant)
+
+        repo = UserRepository(session)
+        with tenant_context(owning_tenant.id):
+            user = await repo.create_user(
+                email="owned-token@example.com",
+                password_hash="hash",
+                tenant_id=owning_tenant.id,
+            )
+        assert user.token_version == 1
+
+        with tenant_context(other_tenant.id):
+            await repo.increment_token_version(user.id)
+
+        found = await repo.get(user.id)
+        assert found is not None
+        assert found.token_version == 1
 
     @pytest.mark.anyio
     async def test_search_by_name(
