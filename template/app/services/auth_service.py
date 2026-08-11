@@ -34,6 +34,7 @@ from app.models.user import UserRole
 from app.repositories.audit_repository import AuditLogRepository
 from app.repositories.oauth_account_repository import OAuthAccountRepository
 from app.repositories.user_repository import UserRepository
+from app.schemas.auth import LoginResponse
 from app.schemas.auth import RegisterRequest
 from app.schemas.auth import TokenResponse
 
@@ -304,6 +305,35 @@ class AuthService:
             refresh_token=refresh_token,
             token_type="bearer",
             expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        )
+
+    async def issue_login_response(self, user: User) -> LoginResponse:
+        """Issue tokens, or a 2FA challenge if the account requires one.
+
+        Every login path (password, magic link, OAuth, WebAuthn) must
+        route through this instead of calling `create_tokens` directly,
+        or a second factor the user configured is silently skipped.
+
+        Args:
+            user: Authenticated user.
+
+        Returns:
+            LoginResponse with tokens set, or `requires_2fa` and
+            `challenge_token` set when a second factor is required.
+        """
+        if user.is_2fa_enabled:
+            from app.services.two_factor_service import TwoFactorAuthService
+
+            totp_service = TwoFactorAuthService(self.session)
+            challenge_token = await totp_service.issue_challenge(user)
+            return LoginResponse(requires_2fa=True, challenge_token=challenge_token)
+
+        tokens = self.create_tokens(user)
+        return LoginResponse(
+            access_token=tokens.access_token,
+            refresh_token=tokens.refresh_token,
+            token_type=tokens.token_type,
+            expires_in=tokens.expires_in,
         )
 
     async def refresh_tokens(self, refresh_token: str) -> TokenResponse:
@@ -580,7 +610,7 @@ class AuthService:
 
     async def google_login(
         self, code: str, state: str, redirect_uri: str
-    ) -> TokenResponse:
+    ) -> LoginResponse:
         """Authenticate or register a user via Google OAuth.
 
         Validates the CSRF state token, exchanges the authorization code
@@ -595,7 +625,8 @@ class AuthService:
                 authorization request.
 
         Returns:
-            TokenResponse with access and refresh tokens.
+            LoginResponse with tokens, or a 2FA challenge if the linked
+            account has 2FA enabled.
 
         Raises:
             AuthenticationError: If state is invalid, Google token
@@ -706,7 +737,7 @@ class AuthService:
             raise UserInactiveError("User account is inactive.")
 
         logger.info("google_login_success", user_id=str(user.id))
-        return self.create_tokens(user)
+        return await self.issue_login_response(user)
 
     async def send_magic_link(self, email: str) -> None:
         """Queue a passwordless login link email if the account exists.
@@ -733,7 +764,7 @@ class AuthService:
         )
         logger.info("magic_link_sent", user_id=str(user.id))
 
-    async def verify_magic_link(self, token: str) -> TokenResponse:
+    async def verify_magic_link(self, token: str) -> LoginResponse:
         """Verify a magic link token and issue JWT tokens.
 
         Validates and consumes the single-use token, then returns
@@ -743,7 +774,8 @@ class AuthService:
             token: Opaque magic link token from the email.
 
         Returns:
-            TokenResponse with access and refresh tokens.
+            LoginResponse with tokens, or a 2FA challenge if the
+            account has 2FA enabled.
 
         Raises:
             AuthenticationError: If the token is invalid or expired.
@@ -761,4 +793,4 @@ class AuthService:
             raise UserInactiveError("User account is inactive.")
 
         logger.info("magic_link_verified", user_id=str(user.id))
-        return self.create_tokens(user)
+        return await self.issue_login_response(user)
