@@ -37,11 +37,11 @@ def generate_thumbnail_task(self, file_id: str) -> dict:
     from app.core.storage import _build_thumbnail
     from app.core.storage import download_object
     from app.core.storage import upload_object
-    from app.database import async_session_factory
+    from app.database import celery_session_factory
     from app.repositories.file_repository import FileRepository
 
     async def _run() -> dict:
-        async with async_session_factory() as session:
+        async with celery_session_factory() as session:
             repository = FileRepository(session)
             record = await repository.get(file_id)
             if record is None:
