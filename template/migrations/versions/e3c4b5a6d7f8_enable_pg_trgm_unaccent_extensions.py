@@ -28,13 +28,21 @@ def upgrade() -> None:
     # Create an IMMUTABLE wrapper around unaccent so it can be used in
     # functional indexes. PostgreSQL's built-in unaccent is STABLE, not
     # IMMUTABLE, which prevents it from appearing in index expressions.
+    #
+    # Both the function and its dictionary argument are schema-qualified.
+    # PostgreSQL inlines this body while building the index, and index
+    # expressions are evaluated under a restricted search path, so an
+    # unqualified `unaccent($1)` fails with "function unaccent(text) does not
+    # exist" even though the extension is installed. The single-argument form
+    # also resolves its dictionary through the search path, hence the explicit
+    # `regdictionary` cast.
     op.execute(
         """
         CREATE OR REPLACE FUNCTION public.immutable_unaccent(text)
         RETURNS text
         IMMUTABLE PARALLEL SAFE STRICT
         LANGUAGE SQL
-        AS $$ SELECT unaccent($1) $$
+        AS $$ SELECT public.unaccent('public.unaccent'::regdictionary, $1) $$
         """
     )
 
