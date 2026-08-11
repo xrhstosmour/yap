@@ -61,3 +61,6 @@ Thumbs.db
 # Reconstructed at sync time from .env and project files.
 # Must never be committed because it may contain secrets.
 .copier/.answers.yml
+
+# Celery beat local schedule database, written when beat runs locally.
+celerybeat-schedule
