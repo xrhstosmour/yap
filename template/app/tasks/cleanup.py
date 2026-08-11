@@ -29,11 +29,11 @@ def cleanup_old_audit_logs(self, days: int = 365) -> dict:
     try:
         import asyncio
 
-        from app.database import async_session_factory
+        from app.database import celery_session_factory
         from app.repositories.audit_repository import AuditLogRepository
 
         async def _run() -> int:
-            async with async_session_factory() as session:
+            async with celery_session_factory() as session:
                 repository = AuditLogRepository(session)
                 count = await repository.cleanup_old_logs(days=days)
                 await session.commit()
@@ -66,11 +66,11 @@ def cleanup_expired_api_keys(self) -> dict:
     try:
         import asyncio
 
-        from app.database import async_session_factory
+        from app.database import celery_session_factory
         from app.repositories.api_key_repository import APIKeyRepository
 
         async def _run() -> int:
-            async with async_session_factory() as session:
+            async with celery_session_factory() as session:
                 repository = APIKeyRepository(session)
                 count = await repository.deactivate_expired_keys()
                 await session.commit()
@@ -110,11 +110,11 @@ def purge_graveyard(self, retention_days: int = 30) -> dict:
     try:
         import asyncio
 
-        from app.database import async_session_factory
+        from app.database import celery_session_factory
         from app.repositories.graveyard_repository import GraveyardRepository
 
         async def _run() -> int:
-            async with async_session_factory() as session:
+            async with celery_session_factory() as session:
                 repository = GraveyardRepository(session)
                 count = await repository.purge(retention_days=retention_days)
                 await session.commit()
@@ -156,14 +156,14 @@ def generate_reports(self) -> dict:
         from sqlmodel import func
         from sqlmodel import select
 
-        from app.database import async_session_factory
+        from app.database import celery_session_factory
         from app.models.audit_log import AuditLog
         from app.models.file import File
         from app.models.user import User
 
         async def _run() -> dict[str, int]:
             cutoff = datetime.now(UTC) - timedelta(days=1)
-            async with async_session_factory() as session:
+            async with celery_session_factory() as session:
                 counts: dict[str, int] = {}
                 for label, model in (
                     ("new_users", User),

@@ -26,6 +26,7 @@ from collections.abc import Generator
 from contextvars import ContextVar
 
 from sqlalchemy import Engine
+from sqlalchemy import NullPool
 from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -69,6 +70,28 @@ async_engine = create_async_engine(
 
 async_session_factory = async_sessionmaker(
     async_engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+    autocommit=False,
+    autoflush=False,
+)
+
+# Celery engine: unpooled, for use inside worker tasks only. Each task wraps
+# its body in `asyncio.run()`, which creates and destroys an event loop per
+# task. `async_engine` above pools connections for the process's lifetime;
+# a connection checked out under one task's loop and returned to the pool
+# is unusable once that loop closes, since asyncpg/psycopg bind an async
+# connection to the loop that created it. `NullPool` opens a fresh
+# connection per checkout instead of reusing one across loops, at the cost
+# of a new connection per task, an acceptable trade for background work.
+celery_engine = create_async_engine(
+    async_database_url,
+    echo=settings.ENVIRONMENT == "local",
+    poolclass=NullPool,
+)
+
+celery_session_factory = async_sessionmaker(
+    celery_engine,
     class_=AsyncSession,
     expire_on_commit=False,
     autocommit=False,
