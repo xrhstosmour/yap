@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.tenant import tenant_context
 from app.models.graveyard import Graveyard
 from app.models.tenant import Tenant
 from app.repositories.graveyard_repository import GraveyardRepository
@@ -164,6 +165,65 @@ class TestGraveyardRepository:
         )
 
         assert entry.reason is None
+
+    @pytest.mark.anyio
+    async def test_recover_returns_data_within_same_tenant(
+        self, session: AsyncSession
+    ) -> None:
+        """recover() returns the snapshot when called within the owning tenant."""
+        tenant = await self._create_tenant(session)
+        repo = GraveyardRepository(session)
+        record_id = uuid4()
+        await repo.bury(
+            model_name="users",
+            record_id=record_id,
+            data={"email": "alice@example.com"},
+            tenant_id=tenant.id,
+        )
+
+        with tenant_context(tenant.id):
+            data = await repo.recover(record_id)
+
+        assert data == {"email": "alice@example.com"}
+
+    @pytest.mark.anyio
+    async def test_recover_returns_none_for_a_different_tenant(
+        self, session: AsyncSession
+    ) -> None:
+        """recover() must not return another tenant's graveyard snapshot.
+
+        A graveyard entry holds every column of the original row, PII and
+        secret hashes included. Without tenant scoping, one tenant could
+        recover another tenant's deleted record by guessing its UUID.
+        """
+        owning_tenant = await self._create_tenant(session, slug="owning-org")
+        other_tenant = await self._create_tenant(session, slug="other-org")
+        repo = GraveyardRepository(session)
+        record_id = uuid4()
+        await repo.bury(
+            model_name="users",
+            record_id=record_id,
+            data={"email": "alice@example.com"},
+            tenant_id=owning_tenant.id,
+        )
+
+        with tenant_context(other_tenant.id):
+            data = await repo.recover(record_id)
+
+        assert data is None
+
+    @pytest.mark.anyio
+    async def test_recover_returns_none_for_unknown_record(
+        self, session: AsyncSession
+    ) -> None:
+        """recover() returns None when no graveyard entry matches."""
+        tenant = await self._create_tenant(session)
+        repo = GraveyardRepository(session)
+
+        with tenant_context(tenant.id):
+            data = await repo.recover(uuid4())
+
+        assert data is None
 
     @pytest.mark.anyio
     async def test_purge_removes_old_records(self, session: AsyncSession) -> None:

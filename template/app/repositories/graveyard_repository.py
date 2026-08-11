@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
 from app.core.logging import get_logger
+from app.core.tenant import get_current_tenant_id
 from app.models.graveyard import DEFAULT_RETENTION_DAYS
 from app.models.graveyard import Graveyard
 
@@ -96,18 +97,26 @@ class GraveyardRepository:
     async def recover(self, record_id: UUID) -> dict[str, Any] | None:
         """Retrieve a graveyard entry for potential recovery.
 
+        Scoped to the active tenant: a graveyard snapshot holds every
+        column of the original row, including PII and secret hashes, so
+        an unscoped lookup would let one tenant recover another tenant's
+        deleted record by guessing its `record_id`.
+
         Args:
             record_id: UUID of the deleted record.
 
         Returns:
             Record data dict or None.
         """
+        tenant_id = get_current_tenant_id()
         query = (
             select(Graveyard)
             .where(Graveyard.record_id == record_id)  # type: ignore[arg-type]
             .order_by(Graveyard.record_deleted_at.desc())  # type: ignore[attr-defined]
             .limit(1)
         )
+        if tenant_id is not None:
+            query = query.where(Graveyard.tenant_id == tenant_id)  # type: ignore[arg-type]
         result = await self.session.execute(query)
         entry = result.scalar_one_or_none()
         return entry.data if entry else None
