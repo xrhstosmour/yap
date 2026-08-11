@@ -162,6 +162,50 @@ class TestIdempotencyMiddleware:
         assert resp.status_code == 409
         assert "already in progress" in resp.text.lower()
 
+    def test_anonymous_requests_scoped_by_client_address(
+        self,
+        app_with_middleware: TestClient,
+        mock_service: IdempotencyService,
+    ) -> None:
+        """Anonymous callers are scoped by client address, not one shared bucket.
+
+        Previously every unauthenticated caller collapsed into the literal
+        scope "anon", so two different anonymous clients presenting the same
+        idempotency key (a plausible collision on a login/register endpoint,
+        the key format permits something as guessable as "00000000") would
+        replay each other's cached response, including any tokens it
+        contained.
+        """
+        app_with_middleware.post(
+            "/echo",
+            json={"x": 1},
+            headers={"X-Idempotency-Key": "test-key-anon"},
+        )
+
+        called_key = mock_service.get.await_args.args[0]
+
+        assert called_key != "anon:POST:/echo:test-key-anon"
+        assert called_key == "anon:testclient:POST:/echo:test-key-anon"
+
+    def test_api_key_request_not_scoped_as_anonymous(
+        self,
+        app_with_middleware: TestClient,
+        mock_service: IdempotencyService,
+    ) -> None:
+        """A caller authenticated via X-API-Key is not lumped into the anon bucket."""
+        app_with_middleware.post(
+            "/echo",
+            json={"x": 1},
+            headers={
+                "X-Idempotency-Key": "test-key-apikey",
+                "X-API-Key": "sk_test_abcdefgh",
+            },
+        )
+
+        called_key = mock_service.get.await_args.args[0]
+
+        assert not called_key.startswith("anon:")
+
     def test_server_error_not_cached(
         self,
         mock_service: IdempotencyService,
