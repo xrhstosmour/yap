@@ -65,6 +65,12 @@ class UserRepository(SearchMixin, BaseRepository[User]):
     async def email_exists(self, email: str) -> bool:
         """Check if email is already registered.
 
+        Ignores soft-deleted rows, matching `get_by_email`. Otherwise a
+        user who self-deletes their account (Article 17 erasure) could
+        never re-register with the same address: `email_exists` would
+        keep reporting it taken while `get_by_email` reports no user,
+        blocking both registration and login.
+
         Args:
             email: Email to check
 
@@ -74,7 +80,12 @@ class UserRepository(SearchMixin, BaseRepository[User]):
         query = (
             select(func.count())
             .select_from(User)
-            .where(User.email_hash == crypto.hash_for_search(email))  # type: ignore[arg-type]
+            .where(
+                and_(
+                    User.email_hash == crypto.hash_for_search(email),  # type: ignore[arg-type]
+                    User.deleted_at.is_(None),  # type: ignore[union-attr]
+                )
+            )
         )
         result = await self.session.execute(query)
         return (result.scalar() or 0) > 0
