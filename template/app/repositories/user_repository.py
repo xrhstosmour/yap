@@ -16,6 +16,7 @@ from sqlmodel import select
 
 from app.core.encryption import crypto
 from app.core.logging import get_logger
+from app.core.tenant import get_current_tenant_id
 from app.models.user import User
 from app.models.user import UserRole
 from app.repositories.base import BaseRepository
@@ -182,12 +183,22 @@ class UserRepository(SearchMixin, BaseRepository[User]):
     async def increment_token_version(self, user_id: UUID | str) -> None:
         """Increment token version for user.
 
+        Scoped to the active tenant and to non-deleted rows, matching
+        every other write in this repository, so a caller that reaches
+        this with an unvalidated ID cannot invalidate another tenant's
+        user's sessions.
+
         Args:
             user_id: User's UUID
         """
+        tenant_id = get_current_tenant_id()
+        conditions = [User.id == user_id, User.deleted_at.is_(None)]  # type: ignore[arg-type,union-attr]
+        if tenant_id is not None:
+            conditions.append(User.tenant_id == tenant_id)  # type: ignore[arg-type]
+
         statement = (
             update(User)
-            .where(User.id == user_id)  # type: ignore[arg-type]
+            .where(and_(*conditions))
             .values(token_version=User.token_version + 1)
         )
         await self.session.execute(statement)
