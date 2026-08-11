@@ -207,6 +207,50 @@ class TestAsyncSessionFactory:
         assert async_session_factory.kw["autoflush"] is False
 
 
+# CelerySessionFactory
+
+
+class TestCelerySessionFactory:
+    """Tests for the celery_session_factory/celery_engine configuration.
+
+    Celery tasks run each unit of work inside its own `asyncio.run()`, a
+    fresh event loop per task. A pooled connection checked out under one
+    loop is unusable once that loop closes, so the Celery engine must use
+    `NullPool` instead of the app's pooled `async_engine`.
+    """
+
+    def test_celery_engine_uses_null_pool(self) -> None:
+        """celery_engine does not pool connections across event loops."""
+        from sqlalchemy.pool import NullPool
+
+        from app.database import celery_engine
+
+        assert isinstance(celery_engine.pool, NullPool)
+
+    def test_celery_session_factory_uses_async_session_class(self) -> None:
+        """celery_session_factory is configured with class_=AsyncSession."""
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        from app.database import celery_session_factory
+
+        assert celery_session_factory.class_ is AsyncSession
+
+    def test_celery_session_factory_expire_on_commit_is_false(self) -> None:
+        """celery_session_factory does not expire objects on commit."""
+        from app.database import celery_session_factory
+
+        assert celery_session_factory.kw["expire_on_commit"] is False
+
+    def test_celery_session_factory_bound_to_celery_engine(self) -> None:
+        """celery_session_factory is bound to celery_engine, not async_engine."""
+        from app.database import async_engine
+        from app.database import celery_engine
+        from app.database import celery_session_factory
+
+        assert celery_session_factory.kw["bind"] is celery_engine
+        assert celery_session_factory.kw["bind"] is not async_engine
+
+
 # Pool timeout configuration
 # --------------------------
 

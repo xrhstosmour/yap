@@ -39,7 +39,7 @@ def mock_session_factory(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     async def _factory() -> Any:
         yield mock_session
 
-    monkeypatch.setattr("app.database.async_session_factory", _factory)
+    monkeypatch.setattr("app.database.celery_session_factory", _factory)
     return mock_session
 
 

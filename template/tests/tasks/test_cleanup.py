@@ -35,7 +35,7 @@ class _FakeCountResult:
 
 @pytest.fixture
 def mock_session_factory(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
-    """Patch async_session_factory to yield a session with scripted count results.
+    """Patch celery_session_factory to yield a session with scripted count results.
 
     generate_reports() queries users, files, and audit_log counts in that
     order, so the three scripted results line up positionally.
@@ -49,7 +49,7 @@ def mock_session_factory(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     async def _factory() -> Any:
         yield mock_session
 
-    monkeypatch.setattr("app.database.async_session_factory", _factory)
+    monkeypatch.setattr("app.database.celery_session_factory", _factory)
     return mock_session
 
 
@@ -82,7 +82,7 @@ def test_generate_reports_defaults_missing_count_to_zero(
     async def _factory() -> Any:
         yield mock_session
 
-    monkeypatch.setattr("app.database.async_session_factory", _factory)
+    monkeypatch.setattr("app.database.celery_session_factory", _factory)
 
     result = generate_reports.apply()
 
