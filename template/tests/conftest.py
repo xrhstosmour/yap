@@ -196,6 +196,9 @@ def disable_token_blacklist_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("app.dependencies.is_token_blacklisted", _not_blacklisted)
     monkeypatch.setattr("app.core.security.blacklist_token", _noop_blacklist)
     monkeypatch.setattr("app.services.auth_service.blacklist_token", _noop_blacklist)
+    monkeypatch.setattr(
+        "app.services.auth_service.is_token_blacklisted", _not_blacklisted
+    )
 
 
 @pytest.fixture(name="override_get_redis", autouse=True)

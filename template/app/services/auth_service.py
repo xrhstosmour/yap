@@ -25,6 +25,7 @@ from app.core.security import create_access_token
 from app.core.security import create_refresh_token
 from app.core.security import decode_token
 from app.core.security import generate_password_hash
+from app.core.security import is_token_blacklisted
 from app.core.security import verify_password
 from app.core.settings import settings
 from app.models.audit_log import AuditAction
@@ -323,6 +324,16 @@ class AuthService:
             # Verify it's a refresh token.
             if payload.get("type") != "refresh":
                 raise AuthenticationError("Invalid token type")
+
+            # Reject a refresh token already blacklisted by a prior
+            # logout or rotation. Without this check, blacklisting on
+            # logout is decorative: a captured refresh token keeps
+            # minting fresh token pairs indefinitely.
+            token_identifier = payload.get("jti")
+            if isinstance(token_identifier, str) and await is_token_blacklisted(
+                token_identifier
+            ):
+                raise AuthenticationError("Refresh token has been revoked")
 
             user_id = payload.get("sub")
             if not user_id:
