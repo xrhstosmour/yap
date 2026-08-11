@@ -238,7 +238,7 @@ elif command -v docker >/dev/null 2>&1; then
     if docker compose ps -q 2>/dev/null | grep -q .; then
         warn "Stopping any existing containers, volumes preserved..."
     fi
-    docker compose down -v 2>/dev/null || true
+    docker compose down 2>/dev/null || true
 
     # Pull images first, with retries, to avoid transient Docker Hub failures.
     info "Pulling container images..."
