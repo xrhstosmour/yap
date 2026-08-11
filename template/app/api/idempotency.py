@@ -58,9 +58,23 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
                 },
             )
 
-        # Derive user scope from auth token to prevent cross-user collisions.
+        # Derive user scope from the caller's credential to prevent
+        # cross-user collisions. API-key auth is included alongside bearer
+        # tokens, and unauthenticated callers are scoped by client address
+        # rather than a single shared "anon" bucket, or two different
+        # anonymous clients presenting the same key (trivially guessable,
+        # since the format allows something like "00000000") would each
+        # replay the other's cached response, including any tokens it
+        # contains (e.g. on /auth/login, /auth/register).
         auth = request.headers.get("Authorization")
-        user_scope = hashlib.sha256(auth.encode()).hexdigest() if auth else "anon"
+        api_key = request.headers.get("X-API-Key")
+        if auth:
+            user_scope = hashlib.sha256(auth.encode()).hexdigest()
+        elif api_key:
+            user_scope = hashlib.sha256(api_key.encode()).hexdigest()
+        else:
+            client_host = request.client.host if request.client else "unknown"
+            user_scope = f"anon:{client_host}"
         scoped_key = f"{user_scope}:{request.method}:{request.url.path}:{raw_key}"
 
         cached = await idempotency_service.get(scoped_key)
