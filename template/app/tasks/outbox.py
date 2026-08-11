@@ -22,14 +22,14 @@ def process_outbox(self) -> dict:
         import asyncio
         import json
 
-        from app.database import async_session_factory
+        from app.database import celery_session_factory
         from app.models.outbox import Outbox
 
         async def _run() -> tuple[int, int]:
             processed = 0
             failed = 0
 
-            async with async_session_factory() as session:
+            async with celery_session_factory() as session:
                 outbox = Outbox(session)
                 events = await outbox.get_pending(limit=100)
 
