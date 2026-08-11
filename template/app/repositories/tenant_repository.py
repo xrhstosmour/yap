@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +19,17 @@ class TenantRepository(BaseRepository[Tenant]):
 
     def __init__(self, session: AsyncSession) -> None:
         super().__init__(session, Tenant)
+
+    def _apply_tenant_filter(self, query: Any) -> Any:  # noqa: ANN401
+        """Tenant rows are not scoped by another tenant, no-op.
+
+        `Tenant` inherits `BaseModel.tenant_id` for column-shape
+        consistency, but the column is never populated: a tenant is not
+        owned by another tenant. Filtering on it would make every
+        `get`/`update`/`delete`/`exists` inherited from `BaseRepository`
+        match nothing.
+        """
+        return query
 
     async def get_by_slug(self, slug: str) -> Tenant | None:
         result = await self.session.execute(
