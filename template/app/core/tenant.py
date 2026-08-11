@@ -81,19 +81,19 @@ class TenantContext:
     occurs during the context scope.
     """
 
-    __slots__ = ("token",)
+    __slots__ = ("tenant_id", "token")
 
     def __init__(self, tenant_id: UUID | None) -> None:
-        """Initialize with tenant ID to set.
+        """Store the tenant ID to set on entry.
 
         Args:
             tenant_id: UUID of the tenant for this context
         """
-        self.token = _current_tenant_id.set(tenant_id)
+        self.tenant_id = tenant_id
 
     def __enter__(self) -> None:
-        """Enter the tenant context."""
-        pass
+        """Enter the tenant context, setting the context variable."""
+        self.token = _current_tenant_id.set(self.tenant_id)
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         """Exit the tenant context, restoring previous state."""
