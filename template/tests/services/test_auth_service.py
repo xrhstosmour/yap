@@ -224,6 +224,29 @@ class TestAuthService:
         mock_blacklist_token.assert_awaited_once_with(ANY, ANY)
 
     @pytest.mark.asyncio
+    async def test_refresh_tokens_rejects_blacklisted_refresh_token(
+        self, session: AsyncSession
+    ) -> None:
+        """A refresh token already blacklisted (e.g. by logout) must not
+        be honoured to mint a fresh token pair.
+        """
+        auth_service = _auth_service(session)
+        user = await auth_service.register(
+            RegisterRequest(
+                email="refresh-revoked@example.com",
+                password="password123",
+            )
+        )
+        tokens = auth_service.create_tokens(user)
+
+        with patch(
+            "app.services.auth_service.is_token_blacklisted",
+            AsyncMock(return_value=True),
+        ):
+            with pytest.raises(AuthenticationError):
+                await auth_service.refresh_tokens(tokens.refresh_token)
+
+    @pytest.mark.asyncio
     async def test_logout_blacklists_access_and_refresh_token(
         self, session: AsyncSession
     ) -> None:
