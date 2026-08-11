@@ -87,15 +87,15 @@ def test_tenant_context_accepts_none_for_system_context() -> None:
 
 
 def test_tenant_context_returns_tenant_context_instance() -> None:
-    """tenant_context() should return a TenantContext instance."""
+    """tenant_context() should return a TenantContext instance.
+
+    Construction alone must not touch the ContextVar: the value is only
+    applied on __enter__, so simply not entering the `with` block leaves
+    no state to tear down here.
+    """
     result = tenant_context(uuid4())
-    try:
-        assert isinstance(result, TenantContext)
-    finally:
-        # TenantContext.__init__ eagerly sets the ContextVar (before
-        # __enter__), so it must be torn down even though this test never
-        # enters the `with` block, or it leaks into later tests.
-        result.__exit__(None, None, None)
+    assert isinstance(result, TenantContext)
+    assert get_current_tenant_id() is None
 
 
 @pytest.mark.asyncio

@@ -155,10 +155,13 @@ class BaseRepository[T: SQLModel]:
         Returns:
             Created model instance
         """
-        # Add tenant_id if model has it and not already set.
+        # Add tenant_id if model has it and not already set. Treat an
+        # explicit `None` the same as absent: callers that default an
+        # optional `tenant_id` parameter to `None` (rather than omitting
+        # the key) must not defeat auto-fill from the active context.
         tenant_id = get_current_tenant_id()
         if tenant_id and hasattr(self.model, "tenant_id"):
-            if "tenant_id" not in data:
+            if data.get("tenant_id") is None:
                 data["tenant_id"] = tenant_id
 
         # Set timestamps.
