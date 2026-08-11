@@ -703,18 +703,19 @@ async def webauthn_login_begin(
 
 @router.post(
     "/webauthn/login/complete",
-    response_model=TokenResponse,
+    response_model=LoginResponse,
     summary="Complete WebAuthn login",
     description="Verify a WebAuthn assertion and return access tokens.",
 )
 async def webauthn_login_complete(
     data: WebAuthnLoginCompleteRequest,
     session: SessionDependency,
-) -> TokenResponse:
+) -> LoginResponse:
     """Complete WebAuthn passkey login.
 
     Verifies the assertion signature and issues JWT tokens for the
-    authenticated user.
+    authenticated user, or a 2FA challenge if the account also has
+    TOTP 2FA enabled.
     """
     from app.services.webauthn_service import WebAuthnError
     from app.services.webauthn_service import WebAuthnService
@@ -731,7 +732,7 @@ async def webauthn_login_complete(
         ) from exc
 
     auth_service = AuthService(session)
-    return auth_service.create_tokens(user)
+    return await auth_service.issue_login_response(user)
 
 
 @router.post(
@@ -756,17 +757,18 @@ async def request_magic_link(
 
 @router.post(
     "/magic-link/verify",
-    response_model=TokenResponse,
+    response_model=LoginResponse,
     summary="Verify magic link",
-    description="Exchange a magic link token for access tokens.",
+    description="Exchange a magic link token for access tokens, or a 2FA challenge.",
 )
 async def verify_magic_link(
     data: MagicLinkVerifyRequest,
     session: SessionDependency,
-) -> TokenResponse:
+) -> LoginResponse:
     """Verify a magic link token and return JWT tokens.
 
-    Consumes the single-use token and issues a token pair.
+    Consumes the single-use token and issues a token pair, or a 2FA
+    challenge if the account has 2FA enabled.
     Returns 400 if the token is invalid or expired.
     """
     service = AuthService(session)
@@ -781,19 +783,20 @@ async def verify_magic_link(
 
 @router.post(
     "/google/callback",
-    response_model=TokenResponse,
+    response_model=LoginResponse,
     summary="Google OAuth callback",
     description="Exchange a Google authorization code for YAP access tokens.",
 )
 async def google_callback(
     data: GoogleCallbackRequest,
     session: SessionDependency,
-) -> TokenResponse:
+) -> LoginResponse:
     """Complete the Google OAuth login flow.
 
     Validates the CSRF state, exchanges the authorization code for a
     Google access token, fetches the user profile, then finds or
-    creates a local account. Returns YAP JWT tokens on success.
+    creates a local account. Returns YAP JWT tokens on success, or a
+    2FA challenge if the linked account has 2FA enabled.
     Returns 400 if the state is invalid or the code exchange fails.
     Returns 403 if the account is inactive.
 
