@@ -155,26 +155,6 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # CORS middleware.
-    # NOTE: Deploy behind a reverse proxy (nginx/Caddy) that validates Host headers
-    # and adds X-Forwarded-* headers. The proxy also provides TrustedHost filtering
-    # which Starlette's TrustedHostMiddleware would otherwise handle.
-    if settings.all_cors_origins:
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=settings.all_cors_origins,
-            allow_credentials=True,
-            allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
-            allow_headers=[
-                "Authorization",
-                "Content-Type",
-                "X-Idempotency-Key",
-                "X-API-Key",
-                "X-Request-ID",
-                "Accept",
-            ],
-        )
-
     # Compression middleware, for performance.
     app.add_middleware(GZipMiddleware, minimum_size=1000)
 
@@ -250,6 +230,36 @@ def create_app() -> FastAPI:
         )
 
         return response
+
+    # CORS middleware. Registered last (outermost), so it wraps every other
+    # middleware and the exception handlers below. Starlette runs
+    # `add_middleware` calls in LIFO order: the last one added is the
+    # outermost layer and the last to touch the response on the way out.
+    # Registered earlier, a response that another middleware returns
+    # directly without calling `call_next` (e.g. IdempotencyMiddleware's
+    # 409/422, or the 400 from database_mode_middleware) never passes back
+    # through CORS, so a browser sees an opaque network failure instead of
+    # that response.
+    #
+    # NOTE: Deploy behind a reverse proxy (nginx/Caddy) that validates Host
+    # headers and adds X-Forwarded-* headers. The proxy also provides
+    # TrustedHost filtering which Starlette's TrustedHostMiddleware would
+    # otherwise handle.
+    if settings.all_cors_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.all_cors_origins,
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
+            allow_headers=[
+                "Authorization",
+                "Content-Type",
+                "X-Idempotency-Key",
+                "X-API-Key",
+                "X-Request-ID",
+                "Accept",
+            ],
+        )
 
     # Token rate limit handler.
     @app.exception_handler(TokenRateLimitError)
