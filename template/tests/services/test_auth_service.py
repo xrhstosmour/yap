@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import decode_token
 from app.core.security import generate_password_hash
+from app.core.tenant import system_context
 from app.models.user import UserRole
 from app.schemas.auth import RegisterRequest
 from app.services.auth_service import AuthenticationError
@@ -114,7 +115,8 @@ class TestAuthService:
                 password="password123",
             )
         )
-        await auth_service.user_repository.update(user.id, {"is_active": False})
+        with system_context():
+            await auth_service.user_repository.update(user.id, {"is_active": False})
 
         with pytest.raises(UserInactiveError):
             await auth_service.authenticate(
@@ -194,7 +196,9 @@ class TestAuthService:
 
         await auth_service.verify_user(user.id)
 
-        reloaded = await auth_service.user_repository.get(user.id)
+        with system_context():
+            reloaded = await auth_service.user_repository.get(user.id)
+
         assert reloaded is not None
         assert reloaded.is_verified is True
 
@@ -736,12 +740,13 @@ class TestGoogleLogin:
         auth_service = _auth_service(session)
 
         # Create an inactive user.
-        inactive = await auth_service.user_repository.create_user(
-            email="inactive@example.com",
-            password_hash=generate_password_hash("doesntmatter"),
-            is_verified=True,
-        )
-        await auth_service.user_repository.update(inactive.id, {"is_active": False})
+        with system_context():
+            inactive = await auth_service.user_repository.create_user(
+                email="inactive@example.com",
+                password_hash=generate_password_hash("doesntmatter"),
+                is_verified=True,
+            )
+            await auth_service.user_repository.update(inactive.id, {"is_active": False})
 
         mock_async_client = self._setup_httpx_mock(
             self._make_token_response(),
@@ -839,11 +844,12 @@ class TestMagicLink:
     async def test_verify_magic_link_inactive_user(self, session: AsyncSession) -> None:
         """Token pointing to inactive user should raise UserInactiveError."""
         auth_service = _auth_service(session)
-        user = await auth_service.user_repository.create_user(
-            email="inactive@example.com",
-            password_hash=generate_password_hash("doesntmatter"),
-        )
-        await auth_service.user_repository.update(user.id, {"is_active": False})
+        with system_context():
+            user = await auth_service.user_repository.create_user(
+                email="inactive@example.com",
+                password_hash=generate_password_hash("doesntmatter"),
+            )
+            await auth_service.user_repository.update(user.id, {"is_active": False})
 
         with patch(
             "app.core.security.verify_magic_link_token",

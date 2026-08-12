@@ -10,6 +10,7 @@ from uuid import UUID
 import pytest
 from sqlalchemy import literal
 
+from app.core.tenant import system_context
 from app.core.tenant import tenant_context
 from app.models.user import User
 from app.repositories.base import BaseRepository
@@ -205,10 +206,11 @@ class TestSearchMixin:
         await session.commit()
 
         repository = RepositoryUnderTest(session)
-        records, total = await repository.search_fts(
-            query_str="user",
-            fields=["email", "full_name"],
-        )
+        with system_context():
+            records, total = await repository.search_fts(
+                query_str="user",
+                fields=["email", "full_name"],
+            )
 
         assert total == 1
         assert len(records) == 1
@@ -248,12 +250,13 @@ class TestSearchMixin:
         await session.commit()
 
         repository = RepositoryUnderTest(session)
-        records, total = await repository.search_fts(
-            query_str="user",
-            fields=["email", "full_name"],
-            skip=1,
-            limit=2,
-        )
+        with system_context():
+            records, total = await repository.search_fts(
+                query_str="user",
+                fields=["email", "full_name"],
+                skip=1,
+                limit=2,
+            )
 
         assert total == 5
         assert len(records) == 2

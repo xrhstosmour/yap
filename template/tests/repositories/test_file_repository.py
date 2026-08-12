@@ -168,15 +168,16 @@ class TestFileRepository:
         Returns:
             None.
         """
-        await self._create_tenant(session)
+        tenant = await self._create_tenant(session)
         user = await self._create_user(session)
         repo = FileRepository(session)
 
-        await repo.create(
-            self._file_data(uploaded_by=user.id, content_hash="unique-hash-001")
-        )
+        with tenant_context(tenant.id):
+            await repo.create(
+                self._file_data(uploaded_by=user.id, content_hash="unique-hash-001")
+            )
 
-        found = await repo.get_by_content_hash("unique-hash-001")
+            found = await repo.get_by_content_hash("unique-hash-001")
 
         assert found is not None
         assert found.content_hash == "unique-hash-001"
@@ -315,19 +316,21 @@ class TestFileRepository:
         Returns:
             None.
         """
-        await self._create_tenant(session)
+        tenant = await self._create_tenant(session)
         user = await self._create_user(session)
         repo = FileRepository(session)
 
-        file_record = await repo.create(
-            self._file_data(uploaded_by=user.id, content_hash="hash-to-inc")
-        )
-        assert file_record.reference_count == 1
+        with tenant_context(tenant.id):
+            file_record = await repo.create(
+                self._file_data(uploaded_by=user.id, content_hash="hash-to-inc")
+            )
+            assert file_record.reference_count == 1
 
-        await repo.increment_reference_count("hash-to-inc")
+            await repo.increment_reference_count("hash-to-inc")
 
-        # Refresh to get updated count.
-        updated = await repo.get(file_record.id)
+            # Refresh to get updated count.
+            updated = await repo.get(file_record.id)
+
         assert updated is not None
         assert updated.reference_count == 2
 
@@ -341,20 +344,22 @@ class TestFileRepository:
         Returns:
             None.
         """
-        await self._create_tenant(session)
+        tenant = await self._create_tenant(session)
         user = await self._create_user(session)
         repo = FileRepository(session)
 
-        file_record = await repo.create(
-            self._file_data(uploaded_by=user.id, content_hash="hash-to-dec")
-        )
-        # Increment first so we have room to decrement.
-        await repo.increment_reference_count("hash-to-dec")
+        with tenant_context(tenant.id):
+            file_record = await repo.create(
+                self._file_data(uploaded_by=user.id, content_hash="hash-to-dec")
+            )
+            # Increment first so we have room to decrement.
+            await repo.increment_reference_count("hash-to-dec")
 
-        new_count = await repo.decrement_reference_count(file_record.id)
+            new_count = await repo.decrement_reference_count(file_record.id)
 
-        assert new_count == 1
-        updated = await repo.get(file_record.id)
+            assert new_count == 1
+            updated = await repo.get(file_record.id)
+
         assert updated is not None
         assert updated.reference_count == 1
 
@@ -370,24 +375,27 @@ class TestFileRepository:
         Returns:
             None.
         """
-        await self._create_tenant(session)
+        tenant = await self._create_tenant(session)
         user = await self._create_user(session)
         repo = FileRepository(session)
 
-        file_record = await repo.create(
-            self._file_data(uploaded_by=user.id, content_hash="hash-min")
-        )
-        assert file_record.reference_count == 1
+        with tenant_context(tenant.id):
+            file_record = await repo.create(
+                self._file_data(uploaded_by=user.id, content_hash="hash-min")
+            )
+            assert file_record.reference_count == 1
 
-        new_count = await repo.decrement_reference_count(file_record.id)
+            new_count = await repo.decrement_reference_count(file_record.id)
 
-        assert new_count == 0
-        updated = await repo.get(file_record.id)
-        assert updated is not None
-        assert updated.reference_count == 0
+            assert new_count == 0
+            updated = await repo.get(file_record.id)
 
-        # Decrement again should stay at 0.
-        new_count = await repo.decrement_reference_count(file_record.id)
+            assert updated is not None
+            assert updated.reference_count == 0
+
+            # Decrement again should stay at 0.
+            new_count = await repo.decrement_reference_count(file_record.id)
+
         assert new_count == 0
 
     @pytest.mark.anyio
@@ -404,18 +412,20 @@ class TestFileRepository:
         user = await self._create_user(session)
         repo = FileRepository(session)
 
-        file_record = await repo.create(
-            self._file_data(uploaded_by=user.id, tenant_id=tenant.id)
-        )
+        with tenant_context(tenant.id):
+            file_record = await repo.create(
+                self._file_data(uploaded_by=user.id, tenant_id=tenant.id)
+            )
 
-        result = await repo.delete(file_record.id, hard=False)
+            result = await repo.delete(file_record.id, hard=False)
 
-        assert result is True
+            assert result is True
 
-        # File should not appear in list() but should still exist.
-        records, total = await repo.list()
-        assert total == 0
+            # File should not appear in list() but should still exist.
+            records, total = await repo.list()
+            assert total == 0
 
-        found = await repo.get(file_record.id, include_deleted=True)
+            found = await repo.get(file_record.id, include_deleted=True)
+
         assert found is not None
         assert found.deleted_at is not None

@@ -21,12 +21,14 @@ from jwt import ExpiredSignatureError
 from jwt import InvalidTokenError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import SYSTEM_TENANT_ID
 from app.core.logging import get_logger
 from app.core.rate_limit import check_api_key_rate_limit
 from app.core.rate_limit import check_user_rate_limit
 from app.core.security import decode_token
 from app.core.security import is_token_blacklisted
 from app.core.tenant import set_current_tenant_id
+from app.core.tenant import system_context
 from app.core.ws_ticket import consume_ws_ticket
 from app.database import get_async_session
 from app.models.api_key import APIKey
@@ -107,7 +109,10 @@ async def get_current_user(
         ) from e
 
     user_repository = UserRepository(session)
-    user = await user_repository.get(UUID(user_id))
+    # Bootstrapping identity from a signed token's user ID: the tenant isn't
+    # known yet, that's what this lookup exists to establish.
+    with system_context():
+        user = await user_repository.get(UUID(user_id))
 
     if not user:
         raise HTTPException(
@@ -129,9 +134,13 @@ async def get_current_user(
             detail="Could not validate credentials",
         )
 
-    if user.tenant_id:
-        set_current_tenant_id(user.tenant_id)
-        request.state.tenant_id = user.tenant_id
+    # A user with no tenant (e.g. an OAuth signup, see auth_service.py) still
+    # needs a real tenant context, or every tenant-scoped query for the rest
+    # of this request would have none either. Falls back to the same
+    # well-known system tenant already used for their audit log entries.
+    tenant_id = user.tenant_id or SYSTEM_TENANT_ID
+    set_current_tenant_id(tenant_id)
+    request.state.tenant_id = tenant_id
 
     request.state.user_id = user.id
     request.state.user = user
@@ -206,7 +215,10 @@ async def get_current_user_ws(
         )
 
     user_repository = UserRepository(session)
-    user = await user_repository.get(UUID(user_id))
+    # Bootstrapping identity from the ticket's user ID: the tenant isn't
+    # known yet, that's what this lookup exists to establish.
+    with system_context():
+        user = await user_repository.get(UUID(user_id))
 
     if not user:
         raise WebSocketException(
@@ -220,8 +232,8 @@ async def get_current_user_ws(
             reason="User account is inactive",
         )
 
-    if user.tenant_id:
-        set_current_tenant_id(user.tenant_id)
+    # See get_current_user() for why this falls back rather than skipping.
+    set_current_tenant_id(user.tenant_id or SYSTEM_TENANT_ID)
 
     return user
 
@@ -343,7 +355,10 @@ async def get_optional_current_user(
         return None
 
     user_repository = UserRepository(session)
-    user = await user_repository.get(UUID(user_id))
+    # Bootstrapping identity from a signed token's user ID: the tenant isn't
+    # known yet, that's what this lookup exists to establish.
+    with system_context():
+        user = await user_repository.get(UUID(user_id))
 
     if not user or not user.is_active:
         return None
@@ -353,9 +368,10 @@ async def get_optional_current_user(
     if token_version is not None and int(token_version) != user.token_version:
         return None
 
-    if user.tenant_id:
-        set_current_tenant_id(user.tenant_id)
-        request.state.tenant_id = user.tenant_id
+    # See get_current_user() for why this falls back rather than skipping.
+    tenant_id = user.tenant_id or SYSTEM_TENANT_ID
+    set_current_tenant_id(tenant_id)
+    request.state.tenant_id = tenant_id
 
     request.state.user_id = user.id
     request.state.user = user

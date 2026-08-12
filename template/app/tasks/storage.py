@@ -37,39 +37,45 @@ def generate_thumbnail_task(self, file_id: str) -> dict:
     from app.core.storage import _build_thumbnail
     from app.core.storage import download_object
     from app.core.storage import upload_object
+    from app.core.tenant import system_context
     from app.database import celery_session_factory
     from app.repositories.file_repository import FileRepository
 
     async def _run() -> dict:
         async with celery_session_factory() as session:
             repository = FileRepository(session)
-            record = await repository.get(file_id)
-            if record is None:
-                return {"status": "skipped", "reason": "file_not_found"}
+            # The caller already resolved ownership (this task only runs
+            # right after that caller's own upload), and this task has no
+            # tenant context of its own to filter by: it is handed a
+            # `file_id` uploaded by an unknown tenant.
+            with system_context():
+                record = await repository.get(file_id)
+                if record is None:
+                    return {"status": "skipped", "reason": "file_not_found"}
 
-            content = await download_object(record.object_key, bucket=record.bucket)
-            width, height, thumbnail_bytes = await asyncio.to_thread(
-                _build_thumbnail, content, record.mimetype
-            )
+                content = await download_object(record.object_key, bucket=record.bucket)
+                width, height, thumbnail_bytes = await asyncio.to_thread(
+                    _build_thumbnail, content, record.mimetype
+                )
 
-            thumbnail_object_key = f"thumbnails/{record.content_hash}"
-            await upload_object(
-                thumbnail_object_key,
-                thumbnail_bytes,
-                record.mimetype,
-                bucket=record.bucket,
-            )
+                thumbnail_object_key = f"thumbnails/{record.content_hash}"
+                await upload_object(
+                    thumbnail_object_key,
+                    thumbnail_bytes,
+                    record.mimetype,
+                    bucket=record.bucket,
+                )
 
-            await repository.update(
-                record.id,
-                {
-                    "thumbnail_object_key": thumbnail_object_key,
-                    "image_width": width,
-                    "image_height": height,
-                },
-            )
-            await session.commit()
-            return {"status": "completed", "file_id": file_id}
+                await repository.update(
+                    record.id,
+                    {
+                        "thumbnail_object_key": thumbnail_object_key,
+                        "image_width": width,
+                        "image_height": height,
+                    },
+                )
+                await session.commit()
+                return {"status": "completed", "file_id": file_id}
 
     try:
         return asyncio.run(_run())
