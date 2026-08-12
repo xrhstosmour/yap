@@ -275,7 +275,14 @@ class UserService:
                 generate_password_hash,
                 data.new_password,  # type: ignore[arg-type]
             )
-            update_data["token_version"] = user.token_version + 1
+            # `User.token_version + 1` (the class attribute, a SQL expression)
+            # rather than `user.token_version + 1` (the loaded instance's
+            # possibly-stale Python value): a concurrent request bumping the
+            # same counter from the same starting value would otherwise lose
+            # one of the two increments, and token_version exists specifically
+            # to invalidate every outstanding session on a password change, so
+            # an under-count there is a stale-token bug, not just a cosmetic one.
+            update_data["token_version"] = User.token_version + 1
 
         if update_data:
             updated_user = await self.user_repository.update(user.id, update_data)
