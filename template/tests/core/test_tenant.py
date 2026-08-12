@@ -10,10 +10,13 @@ from uuid import uuid4
 
 import pytest
 
+from app.core.tenant import SystemContext
 from app.core.tenant import TenantContext
 from app.core.tenant import TenantContextMiddleware
 from app.core.tenant import get_current_tenant_id
+from app.core.tenant import is_system_access
 from app.core.tenant import set_current_tenant_id
+from app.core.tenant import system_context
 from app.core.tenant import tenant_context
 
 
@@ -135,6 +138,80 @@ def test_copy_context_isolates_tenant_id() -> None:
     assert result == tenant_id
     # The original (current) context must be unaffected by the copy's mutation.
     assert get_current_tenant_id() is None
+
+
+def test_is_system_access_defaults_to_false() -> None:
+    """With no system_context() block active, is_system_access() is False."""
+    assert is_system_access() is False
+
+
+def test_system_context_sets_flag_within_block() -> None:
+    """system_context() should make is_system_access() True inside the block."""
+    with system_context():
+        assert is_system_access() is True
+
+
+def test_system_context_restores_previous_state_on_exit() -> None:
+    """system_context() should restore False after the block exits."""
+    assert is_system_access() is False
+
+    with system_context():
+        pass
+
+    assert is_system_access() is False
+
+
+def test_system_context_restores_state_on_exception() -> None:
+    """system_context() should restore prior state even if the block raises."""
+    with pytest.raises(ValueError, match="boom"):
+        with system_context():
+            raise ValueError("boom")
+
+    assert is_system_access() is False
+
+
+def test_system_context_supports_nesting() -> None:
+    """A nested system_context() should not break the outer block's state."""
+    with system_context():
+        assert is_system_access() is True
+
+        with system_context():
+            assert is_system_access() is True
+
+        assert is_system_access() is True
+
+    assert is_system_access() is False
+
+
+def test_system_context_returns_system_context_instance() -> None:
+    """system_context() should return a SystemContext instance.
+
+    Construction alone must not touch the ContextVar: the value is only
+    applied on __enter__, so simply not entering the `with` block leaves
+    no state to tear down here.
+    """
+    result = system_context()
+    assert isinstance(result, SystemContext)
+    assert is_system_access() is False
+
+
+def test_system_context_independent_of_tenant_context() -> None:
+    """system_context() and tenant_context() are separate flags.
+
+    Entering one must not implicitly set or clear the other: a caller
+    that wraps a bootstrap lookup in system_context() while a real
+    tenant is already set (e.g. re-entrant code within an authenticated
+    request) must not lose that tenant_id.
+    """
+    tenant_id = uuid4()
+
+    with tenant_context(tenant_id):
+        with system_context():
+            assert get_current_tenant_id() == tenant_id
+            assert is_system_access() is True
+
+        assert is_system_access() is False
+        assert get_current_tenant_id() == tenant_id
 
 
 class TestTenantContextMiddleware:

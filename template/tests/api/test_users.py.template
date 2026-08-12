@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import create_access_token
 from app.core.security import generate_password_hash
+from app.core.tenant import system_context
 from app.main import app
 from app.models.user import UserRole
 from app.schemas.auth import RegisterRequest
@@ -198,7 +199,9 @@ class TestRevokeUserSessions:
 
         assert response.status_code == 204
 
-        refreshed_user = await auth_service.user_repository.get(target_user.id)
+        with system_context():
+            refreshed_user = await auth_service.user_repository.get(target_user.id)
+
         assert refreshed_user is not None
         assert refreshed_user.token_version == original_token_version + 1
 

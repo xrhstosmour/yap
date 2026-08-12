@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import literal
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.tenant import system_context
 from app.core.tenant import tenant_context
 from app.models.tenant import Tenant
 from app.models.user import User
@@ -155,11 +156,16 @@ class TestUserRepository:
         unusable and unrecoverable.
         """
         repo = UserRepository(session)
-        user = await repo.create_user(email="deleted@example.com", password_hash="hash")
+        with system_context():
+            user = await repo.create_user(
+                email="deleted@example.com", password_hash="hash"
+            )
 
-        await repo.delete(user.id)
+            await repo.delete(user.id)
 
-        assert await repo.email_exists("deleted@example.com") is False
+            exists = await repo.email_exists("deleted@example.com")
+
+        assert exists is False
 
     @pytest.mark.anyio
     async def test_update_password(self, session: AsyncSession) -> None:
@@ -172,17 +178,19 @@ class TestUserRepository:
             None.
         """
         repo = UserRepository(session)
-        user = await repo.create_user(
-            email="charlie@example.com", password_hash="old_hash"
-        )
+        with system_context():
+            user = await repo.create_user(
+                email="charlie@example.com", password_hash="old_hash"
+            )
 
-        updated = await repo.update_password(user.id, "new_hash")
+            updated = await repo.update_password(user.id, "new_hash")
 
-        assert updated is not None
-        assert updated.hashed_password == "new_hash"
+            assert updated is not None
+            assert updated.hashed_password == "new_hash"
 
-        # Verify persisted.
-        found = await repo.get(user.id)
+            # Verify persisted.
+            found = await repo.get(user.id)
+
         assert found is not None
         assert found.hashed_password == "new_hash"
 
@@ -197,19 +205,23 @@ class TestUserRepository:
             None.
         """
         repo = UserRepository(session)
-        user = await repo.create_user(email="token@example.com", password_hash="hash")
-        assert user.token_version == 1
+        with system_context():
+            user = await repo.create_user(
+                email="token@example.com", password_hash="hash"
+            )
+            assert user.token_version == 1
 
-        await repo.increment_token_version(user.id)
+            await repo.increment_token_version(user.id)
 
-        # Refresh and check.
-        found = await repo.get(user.id)
-        assert found is not None
-        assert found.token_version == 2
+            # Refresh and check.
+            found = await repo.get(user.id)
+            assert found is not None
+            assert found.token_version == 2
 
-        # Increment again.
-        await repo.increment_token_version(user.id)
-        found = await repo.get(user.id)
+            # Increment again.
+            await repo.increment_token_version(user.id)
+            found = await repo.get(user.id)
+
         assert found is not None
         assert found.token_version == 3
 
@@ -243,7 +255,9 @@ class TestUserRepository:
         with tenant_context(other_tenant.id):
             await repo.increment_token_version(user.id)
 
-        found = await repo.get(user.id)
+        with tenant_context(owning_tenant.id):
+            found = await repo.get(user.id)
+
         assert found is not None
         assert found.token_version == 1
 
@@ -297,38 +311,39 @@ class TestUserRepository:
         )
 
         repo = UserRepository(session)
-        await repo.create_user(
-            email="alice@example.com",
-            password_hash="hash",
-            full_name="Alice Smith",
-        )
-        await repo.create_user(
-            email="bob@example.com",
-            password_hash="hash",
-            full_name="Bob Jones",
-        )
-        await repo.create_user(
-            email="carol@example.com",
-            password_hash="hash",
-            full_name="Carol Smith",
-        )
+        with system_context():
+            await repo.create_user(
+                email="alice@example.com",
+                password_hash="hash",
+                full_name="Alice Smith",
+            )
+            await repo.create_user(
+                email="bob@example.com",
+                password_hash="hash",
+                full_name="Bob Jones",
+            )
+            await repo.create_user(
+                email="carol@example.com",
+                password_hash="hash",
+                full_name="Carol Smith",
+            )
 
-        # Search for "Smith" by name.
-        users, total = await repo.search("Smith")
+            # Search for "Smith" by name.
+            users, total = await repo.search("Smith")
 
-        assert total == 2
-        assert len(users) == 2
-        names = {u.full_name for u in users}
-        assert names == {"Alice Smith", "Carol Smith"}
+            assert total == 2
+            assert len(users) == 2
+            names = {u.full_name for u in users}
+            assert names == {"Alice Smith", "Carol Smith"}
 
-        # Search for "Bob" by name.
-        users, total = await repo.search("Bob")
+            # Search for "Bob" by name.
+            users, total = await repo.search("Bob")
 
-        assert total == 1
-        assert users[0].full_name == "Bob Jones"
+            assert total == 1
+            assert users[0].full_name == "Bob Jones"
 
-        # Email is not searchable: a matching email substring finds nothing.
-        users, total = await repo.search("bob@example.com")
+            # Email is not searchable: a matching substring finds nothing.
+            users, total = await repo.search("bob@example.com")
 
         assert total == 0
         assert users == []
@@ -345,11 +360,13 @@ class TestUserRepository:
         Returns:
             None.
         """
-        await self._create_tenant(session)
         repo = UserRepository(session)
-        user = await repo.create_user(email="gone@example.com", password_hash="hash")
-        await repo.delete(user.id, hard=False)
+        with system_context():
+            user = await repo.create_user(
+                email="gone@example.com", password_hash="hash"
+            )
+            await repo.delete(user.id, hard=False)
 
-        found = await repo.get_by_email("gone@example.com")
+            found = await repo.get_by_email("gone@example.com")
 
         assert found is None

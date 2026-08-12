@@ -14,6 +14,7 @@ from uuid import uuid7
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.tenant import system_context
 from app.models.user import User
 from app.models.user import UserRole
 from app.schemas.user import UserCreate
@@ -91,8 +92,9 @@ class TestUserServiceGet:
         )
 
         user_service = _user_service(session)
-        created = await user_service.create(user_create)
-        retrieved = await user_service.get_by_id(created.id)
+        with system_context():
+            created = await user_service.create(user_create)
+            retrieved = await user_service.get_by_id(created.id)
 
         assert retrieved is not None
         assert retrieved.id == created.id
@@ -101,7 +103,8 @@ class TestUserServiceGet:
     async def test_get_by_id_not_found(self, session: AsyncSession) -> None:
         """Non-existent ID should return None."""
         user_service = _user_service(session)
-        retrieved = await user_service.get_by_id(uuid7())
+        with system_context():
+            retrieved = await user_service.get_by_id(uuid7())
 
         assert retrieved is None
 
@@ -141,10 +144,13 @@ class TestUserServiceUpdate:
         )
 
         user_service = _user_service(session)
-        created = await user_service.create(user_create)
+        with system_context():
+            created = await user_service.create(user_create)
 
-        update_data = UserUpdate(full_name="Updated Name")
-        updated = await user_service.update(created.id, update_data, updated_by=uuid7())
+            update_data = UserUpdate(full_name="Updated Name")
+            updated = await user_service.update(
+                created.id, update_data, updated_by=uuid7()
+            )
 
         assert updated is not None
         assert updated.full_name == "Updated Name"
@@ -155,7 +161,11 @@ class TestUserServiceUpdate:
         user_service = _user_service(session)
         update_data = UserUpdate(full_name="Updated Name")
 
-        updated = await user_service.update(uuid7(), update_data, updated_by=uuid7())
+        with system_context():
+            updated = await user_service.update(
+                uuid7(), update_data, updated_by=uuid7()
+            )
+
         assert updated is None
 
 
@@ -171,12 +181,14 @@ class TestUserServiceDelete:
         )
 
         user_service = _user_service(session)
-        created = await user_service.create(user_create)
+        with system_context():
+            created = await user_service.create(user_create)
 
-        await user_service.delete(created.id, deleted_by=uuid7())
+            await user_service.delete(created.id, deleted_by=uuid7())
 
-        # Should not be found after deletion.
-        retrieved = await user_service.get_by_id(created.id)
+            # Should not be found after deletion.
+            retrieved = await user_service.get_by_id(created.id)
+
         assert retrieved is None
 
 

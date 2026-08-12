@@ -17,6 +17,10 @@ _current_tenant_id: ContextVar[UUID | None] = ContextVar(
     "current_tenant_id", default=None
 )
 
+# Deliberate cross-tenant access, distinct from "nobody set a tenant". See
+# system_context() and BaseRepository._apply_tenant_filter().
+_system_access: ContextVar[bool] = ContextVar("system_access", default=False)
+
 
 def get_current_tenant_id() -> UUID | None:
     """Get the current tenant ID from context.
@@ -98,6 +102,53 @@ class TenantContext:
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         """Exit the tenant context, restoring previous state."""
         _current_tenant_id.reset(self.token)
+
+
+def is_system_access() -> bool:
+    """Whether the current context has deliberately opted into cross-tenant
+    access via `system_context()`.
+
+    Returns:
+        True inside a `system_context()` block, False otherwise.
+    """
+    return _system_access.get()
+
+
+def system_context() -> SystemContext:
+    """Context manager that marks deliberate, unscoped cross-tenant access.
+
+    `BaseRepository._apply_tenant_filter()` raises `TenantContextRequiredError`
+    when no tenant is set, unless this context is active. Without it, code
+    that runs with no tenant context (background tasks, startup scripts) has
+    no way to say "I meant to query across every tenant" versus "I forgot to
+    set a tenant", and the two used to look identical: both silently ran
+    unfiltered.
+
+    Reach for this only when cross-tenant access is actually intended, a
+    maintenance sweep, a lookup keyed by a globally unique ID the caller
+    already resolved ownership for some other way. It does not grant any
+    permission check of its own.
+
+    Example:
+        with system_context():
+            # Queries run unfiltered by tenant, deliberately.
+            record = await repository.get(known_id)
+    """
+    return SystemContext()
+
+
+class SystemContext:
+    """Context manager for `system_context()`. See its docstring."""
+
+    __slots__ = ("token",)
+
+    def __enter__(self) -> None:
+        """Enter the system-access context."""
+        self.token = _system_access.set(True)
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Exit the system-access context, restoring previous state."""
+        _system_access.reset(self.token)
 
 
 class TenantContextMiddleware:
