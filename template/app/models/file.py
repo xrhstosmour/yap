@@ -23,14 +23,20 @@ class File(BaseModel, table=True):
     duplicates. The storage backend object is deleted when
     ``reference_count`` reaches zero.
 
-    Intentionally has no ``tenant_id``: identical content is deduplicated
-    globally across tenants (see ``content_hash``), so
-    ``BaseRepository._apply_tenant_filter`` silently no-ops for this model.
-    Ownership is ``uploaded_by``, not tenant membership. Never call
-    ``FileRepository.get()`` directly for a caller-facing read or write;
-    use ``get_owned()`` (or an explicit ``resource_id``/``resource_type``
-    ownership check, as the public business-media endpoints do) so one
-    tenant's private files can't be reached by ID from another tenant.
+    Inherits ``tenant_id`` from ``BaseModel`` like every other table, but it
+    is not a reliable ownership signal here: content is deduplicated
+    globally across tenants (see ``content_hash``), so a shared row's
+    ``tenant_id`` is whichever tenant uploaded that content first, not every
+    tenant that references it. ``BaseRepository._apply_tenant_filter`` does
+    apply its usual ``WHERE tenant_id = ...`` filter for this model, it just
+    filters on a column that does not mean "who can access this row" the way
+    it does elsewhere. Ownership is ``uploaded_by``, not tenant membership.
+    Never call ``FileRepository.get()`` directly for a caller-facing read or
+    write; use ``get_owned()`` (or an explicit ``resource_id``/
+    ``resource_type`` ownership check, as the public business-media
+    endpoints do) so one tenant's private files can't be reached by ID from
+    another tenant, and so a second tenant referencing shared content isn't
+    incorrectly filtered out by the first tenant's ``tenant_id``.
     """
 
     __tablename__ = "files"  # pyright: ignore[reportAssignmentType]
