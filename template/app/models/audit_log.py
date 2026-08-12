@@ -15,6 +15,7 @@ from sqlalchemy import JSON
 from sqlalchemy import Index
 from sqlmodel import Field
 
+from app.core.encryption import EncryptedString
 from app.models.base import BaseModel
 
 if TYPE_CHECKING:
@@ -88,7 +89,11 @@ class AuditLog(BaseModel, table=True):
         action: The action that was performed
         actor_type: Type of actor (user, api_key, system)
         actor_id: ID of the actor (user_id or api_key_id)
-        actor_email: Email of the actor (for display purposes)
+        actor_email: Email of the actor (for display purposes). Encrypted
+            at rest (`EncryptedString`); reads/writes are transparent plain
+            text. No search hash: nothing looks audit logs up by actor
+            email, only `actor_id`, so unlike `User.email` there is no
+            equality-lookup need to trade off against.
         resource_type: Type of resource affected
         resource_id: ID of the affected resource
         changes: Before/after values for changes
@@ -137,7 +142,8 @@ class AuditLog(BaseModel, table=True):
 
     actor_email: str | None = Field(
         default=None,
-        max_length=255,
+        max_length=512,
+        sa_type=EncryptedString(512),  # type: ignore[call-overload]
     )
 
     # Resource information.
