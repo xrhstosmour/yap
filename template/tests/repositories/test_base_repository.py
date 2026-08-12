@@ -14,9 +14,11 @@ from sqlmodel import SQLModel
 from sqlmodel import select
 
 from app.core.pagination import MAX_PAGE_SIZE
+from app.core.tenant import system_context
 from app.core.tenant import tenant_context
 from app.models.tenant import Tenant
 from app.repositories.base import BaseRepository
+from app.repositories.base import TenantContextRequiredError
 
 
 class TestModel(SQLModel, table=True):
@@ -91,8 +93,11 @@ class TestBaseRepository:
         Returns:
             None.
         """
+        tenant = await self._create_tenant(session)
         repo: BaseRepository[TestModel] = BaseRepository(session, TestModel)
-        record = await repo.create({"name": "test-record"})
+
+        with tenant_context(tenant.id):
+            record = await repo.create({"name": "test-record"})
 
         assert isinstance(record, TestModel)
         assert record.id is not None
@@ -116,10 +121,12 @@ class TestBaseRepository:
         Returns:
             None.
         """
+        tenant = await self._create_tenant(session)
         repo: BaseRepository[TestModel] = BaseRepository(session, TestModel)
-        created = await repo.create({"name": "find-me"})
 
-        found = await repo.get(created.id)
+        with tenant_context(tenant.id):
+            created = await repo.create({"name": "find-me"})
+            found = await repo.get(created.id)
 
         assert found is not None
         assert found.id == created.id
@@ -135,9 +142,11 @@ class TestBaseRepository:
         Returns:
             None.
         """
+        tenant = await self._create_tenant(session)
         repo: BaseRepository[TestModel] = BaseRepository(session, TestModel)
 
-        found = await repo.get(uuid4())  # Non-existent ID
+        with tenant_context(tenant.id):
+            found = await repo.get(uuid4())  # Non-existent ID
 
         assert found is None
 
@@ -151,12 +160,15 @@ class TestBaseRepository:
         Returns:
             None.
         """
+        tenant = await self._create_tenant(session)
         repo: BaseRepository[TestModel] = BaseRepository(session, TestModel)
-        await repo.create({"name": "alpha"})
-        await repo.create({"name": "beta"})
-        await repo.create({"name": "gamma"})
 
-        records, total = await repo.list()
+        with tenant_context(tenant.id):
+            await repo.create({"name": "alpha"})
+            await repo.create({"name": "beta"})
+            await repo.create({"name": "gamma"})
+
+            records, total = await repo.list()
 
         assert total == 3
         assert len(records) == 3
@@ -173,11 +185,14 @@ class TestBaseRepository:
         Returns:
             None.
         """
+        tenant = await self._create_tenant(session)
         repo: BaseRepository[TestModel] = BaseRepository(session, TestModel)
-        for i in range(5):
-            await repo.create({"name": f"item-{i}"})
 
-        records, total = await repo.list(skip=1, limit=2)
+        with tenant_context(tenant.id):
+            for i in range(5):
+                await repo.create({"name": f"item-{i}"})
+
+            records, total = await repo.list(skip=1, limit=2)
 
         assert total == 5
         assert len(records) == 2
@@ -193,11 +208,14 @@ class TestBaseRepository:
         empty, list() must fall back to a plain count query rather than
         reporting 0.
         """
+        tenant = await self._create_tenant(session)
         repo: BaseRepository[TestModel] = BaseRepository(session, TestModel)
-        for i in range(3):
-            await repo.create({"name": f"item-{i}"})
 
-        records, total = await repo.list(skip=10, limit=2)
+        with tenant_context(tenant.id):
+            for i in range(3):
+                await repo.create({"name": f"item-{i}"})
+
+            records, total = await repo.list(skip=10, limit=2)
 
         assert records == []
         assert total == 3
@@ -207,9 +225,11 @@ class TestBaseRepository:
         self, session: AsyncSession
     ) -> None:
         """list() on an empty table should return no records and total=0."""
+        tenant = await self._create_tenant(session)
         repo: BaseRepository[TestModel] = BaseRepository(session, TestModel)
 
-        records, total = await repo.list()
+        with tenant_context(tenant.id):
+            records, total = await repo.list()
 
         assert records == []
         assert total == 0
@@ -224,10 +244,12 @@ class TestBaseRepository:
         Returns:
             None.
         """
+        tenant = await self._create_tenant(session)
         repo: BaseRepository[TestModel] = BaseRepository(session, TestModel)
-        created = await repo.create({"name": "original"})
 
-        updated = await repo.update(created.id, {"name": "changed"})
+        with tenant_context(tenant.id):
+            created = await repo.create({"name": "original"})
+            updated = await repo.update(created.id, {"name": "changed"})
 
         assert updated is not None
         assert updated.name == "changed"
@@ -253,15 +275,18 @@ class TestBaseRepository:
         Returns:
             None.
         """
+        tenant = await self._create_tenant(session)
         repo: BaseRepository[TestModel] = BaseRepository(session, TestModel)
-        created = await repo.create({"name": "to-delete"})
 
-        result = await repo.delete(created.id, hard=True)
+        with tenant_context(tenant.id):
+            created = await repo.create({"name": "to-delete"})
+            result = await repo.delete(created.id, hard=True)
 
-        assert result is True
+            assert result is True
 
-        # Verify it's gone.
-        found = await repo.get(created.id)
+            # Verify it's gone.
+            found = await repo.get(created.id)
+
         assert found is None
 
     @pytest.mark.anyio
@@ -281,15 +306,14 @@ class TestBaseRepository:
 
         with tenant_context(tenant.id):
             created = await repo.create({"name": "soft-delete-me"})
-
-        with tenant_context(tenant.id):
             result = await repo.delete(created.id, hard=False)
 
-        assert result is True
+            assert result is True
 
-        # Record should still exist but with deleted_at set.
-        # Use include_deleted=True to find it.
-        found = await repo.get(created.id, include_deleted=True)
+            # Record should still exist but with deleted_at set.
+            # Use include_deleted=True to find it.
+            found = await repo.get(created.id, include_deleted=True)
+
         assert found is not None
         assert found.deleted_at is not None
 
@@ -329,6 +353,88 @@ class TestBaseRepository:
         assert records[0].name == "record-b"
 
     @pytest.mark.anyio
+    async def test_get_raises_without_tenant_context(
+        self, session: AsyncSession
+    ) -> None:
+        """A tenant-scoped model with no context set should raise, not run
+        the query unfiltered.
+        """
+        repo: BaseRepository[TestModel] = BaseRepository(session, TestModel)
+
+        with pytest.raises(TenantContextRequiredError):
+            await repo.get(uuid4())
+
+    @pytest.mark.anyio
+    async def test_list_raises_without_tenant_context(
+        self, session: AsyncSession
+    ) -> None:
+        """list() on a tenant-scoped model with no context should raise."""
+        repo: BaseRepository[TestModel] = BaseRepository(session, TestModel)
+
+        with pytest.raises(TenantContextRequiredError):
+            await repo.list()
+
+    @pytest.mark.anyio
+    async def test_system_context_bypasses_the_raise(
+        self, session: AsyncSession
+    ) -> None:
+        """system_context() should allow an unfiltered, cross-tenant query."""
+        tenant_a = await self._create_tenant(session, slug="tenant-sys-a")
+        tenant_b = await self._create_tenant(session, slug="tenant-sys-b")
+        repo: BaseRepository[TestModel] = BaseRepository(session, TestModel)
+
+        with tenant_context(tenant_a.id):
+            await repo.create({"name": "sys-record-a"})
+        with tenant_context(tenant_b.id):
+            await repo.create({"name": "sys-record-b"})
+
+        with system_context():
+            records, total = await repo.list()
+
+        assert total == 2
+        names = {r.name for r in records}
+        assert names == {"sys-record-a", "sys-record-b"}
+
+    @pytest.mark.anyio
+    async def test_repository_overriding_the_filter_needs_no_context(
+        self, session: AsyncSession
+    ) -> None:
+        """A repository that opts out of tenant filtering must not require one.
+
+        `Tenant` inherits `BaseModel.tenant_id` for column-shape
+        consistency (a tenant is not itself owned by another tenant), so
+        `TenantRepository` overrides `_apply_tenant_filter()` as a no-op.
+        `BaseRepository`'s own raise must not apply once a subclass has
+        opted out this way.
+        """
+        from app.repositories.tenant_repository import TenantRepository
+
+        tenant = await self._create_tenant(session, slug="tenant-no-scope")
+        repo = TenantRepository(session)
+
+        found = await repo.get(tenant.id)
+
+        assert found is not None
+        assert found.id == tenant.id
+
+    @pytest.mark.anyio
+    async def test_create_falls_back_to_system_tenant_id(
+        self, session: AsyncSession
+    ) -> None:
+        """create() with no context and no explicit tenant_id must not
+        leave the column NULL: it should fall back to SYSTEM_TENANT_ID so
+        the row stays findable through the same tenant filter that would
+        otherwise hide it forever.
+        """
+        from app.core import SYSTEM_TENANT_ID
+
+        repo: BaseRepository[TestModel] = BaseRepository(session, TestModel)
+
+        record = await repo.create({"name": "no-context-record"})
+
+        assert record.tenant_id == SYSTEM_TENANT_ID
+
+    @pytest.mark.anyio
     async def test_max_page_size_clamp(self, session: AsyncSession) -> None:
         """list() should clamp limit to MAX_PAGE_SIZE when exceeded.
 
@@ -338,12 +444,15 @@ class TestBaseRepository:
         Returns:
             None.
         """
+        tenant = await self._create_tenant(session)
         repo: BaseRepository[TestModel] = BaseRepository(session, TestModel)
-        for i in range(5):
-            await repo.create({"name": f"item-{i}"})
 
-        # Request more than MAX_PAGE_SIZE (100) and verify limit is clamped.
-        records, total = await repo.list(limit=200)
+        with tenant_context(tenant.id):
+            for i in range(5):
+                await repo.create({"name": f"item-{i}"})
+
+            # Request more than MAX_PAGE_SIZE (100), verify limit is clamped.
+            records, total = await repo.list(limit=200)
 
         assert total == 5
         assert len(records) <= MAX_PAGE_SIZE

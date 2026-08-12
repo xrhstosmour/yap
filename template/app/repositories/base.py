@@ -28,9 +28,11 @@ from sqlmodel import and_
 from sqlmodel import func
 from sqlmodel import select
 
+from app.core import SYSTEM_TENANT_ID
 from app.core.logging import get_logger
 from app.core.pagination import MAX_PAGE_SIZE
 from app.core.tenant import get_current_tenant_id
+from app.core.tenant import is_system_access
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -39,7 +41,13 @@ logger = get_logger("repository")
 
 T = TypeVar("T", bound=SQLModel)
 
-FALLBACK_TENANT_ID = UUID("00000000-0000-0000-0000-000000000000")
+
+class TenantContextRequiredError(Exception):
+    """Raised when a tenant-scoped query runs with no tenant context and no
+    explicit `system_context()` opt-in.
+
+    See `BaseRepository._apply_tenant_filter()`.
+    """
 
 
 def _jsonable(value: Any, _depth: int = 0) -> Any:  # noqa: ANN401
@@ -104,27 +112,48 @@ class BaseRepository[T: SQLModel]:
     def _apply_tenant_filter(self, query) -> Any:  # noqa: ANN401
         """Apply tenant filter to query if model has tenant_id.
 
-        For multi-tenant models, automatically filters to only
-        return records belonging to the current tenant.
+        For multi-tenant models, automatically filters to only return
+        records belonging to the current tenant. If the model is
+        tenant-scoped but no tenant context is set, raises rather than
+        running the query unfiltered, unless `system_context()` is active:
+        an accidental missing `tenant_context(...)` and a deliberate
+        cross-tenant sweep used to look identical (both ran unfiltered),
+        which meant a forgotten tenant context silently leaked every
+        tenant's rows instead of failing loudly.
 
         Args:
             query: SQLAlchemy query to modify
 
         Returns:
             Query with tenant filter applied
-        """
-        tenant_id = get_current_tenant_id()
 
-        if tenant_id is None:
+        Raises:
+            TenantContextRequiredError: If the model is tenant-scoped, no
+                tenant context is set, and `system_context()` is not active.
+        """
+        mapper = inspect(self.model)
+        is_tenant_scoped = mapper is not None and "tenant_id" in {
+            col.key for col in mapper.columns
+        }
+        if not is_tenant_scoped:
             return query
 
-        mapper = inspect(self.model)
-        if mapper is not None and "tenant_id" in {col.key for col in mapper.columns}:
+        tenant_id = get_current_tenant_id()
+        if tenant_id is not None:
             model_tenant_id = getattr(self.model, "tenant_id", None)
             if model_tenant_id is not None:
                 return query.where(model_tenant_id == tenant_id)
+            return query
 
-        return query
+        if is_system_access():
+            return query
+
+        message = (
+            f"{self.model.__name__} is tenant-scoped, but no tenant context "
+            "is set. Set one with tenant_context(...), or wrap deliberate "
+            "cross-tenant access in system_context()."
+        )
+        raise TenantContextRequiredError(message)
 
     def _apply_soft_delete_filter(self, query, include_deleted: bool = False) -> Any:  # noqa: ANN401
         """Apply soft delete filter to query.
@@ -159,10 +188,16 @@ class BaseRepository[T: SQLModel]:
         # explicit `None` the same as absent: callers that default an
         # optional `tenant_id` parameter to `None` (rather than omitting
         # the key) must not defeat auto-fill from the active context.
-        tenant_id = get_current_tenant_id()
-        if tenant_id and hasattr(self.model, "tenant_id"):
-            if data.get("tenant_id") is None:
-                data["tenant_id"] = tenant_id
+        #
+        # Falls back to SYSTEM_TENANT_ID rather than leaving the column
+        # NULL when there is no active context either: a row written as
+        # NULL can only ever be found again by a query that also happens to
+        # run with no tenant context, which _apply_tenant_filter() no
+        # longer allows silently. SYSTEM_TENANT_ID is a real, queryable
+        # tenant (see initial_data.py), the same fallback already used for
+        # a tenant-less user's audit log entries.
+        if hasattr(self.model, "tenant_id") and data.get("tenant_id") is None:
+            data["tenant_id"] = get_current_tenant_id() or SYSTEM_TENANT_ID
 
         # Set timestamps.
         now = datetime.now(UTC)
@@ -349,7 +384,7 @@ class BaseRepository[T: SQLModel]:
 
         tenant_id = getattr(database_object, "tenant_id", None)
         if tenant_id is None:
-            tenant_id = FALLBACK_TENANT_ID
+            tenant_id = SYSTEM_TENANT_ID
         record_id = getattr(database_object, "id", id)
 
         if isinstance(record_id, str):

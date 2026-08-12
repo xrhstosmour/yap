@@ -143,11 +143,14 @@ class TestFeatureFlagRepository:
         Returns:
             None.
         """
+        tenant = await self._create_tenant(session)
         repo = FeatureFlagRepository(session)
-        await repo.create({"name": "flag_one", "state": True})
-        await repo.create({"name": "flag_two", "state": False})
 
-        flags = await repo.list_active()
+        with tenant_context(tenant.id):
+            await repo.create({"name": "flag_one", "state": True})
+            await repo.create({"name": "flag_two", "state": False})
+
+            flags = await repo.list_active()
 
         names = {flag.name for flag in flags}
         assert "flag_one" in names
@@ -163,12 +166,15 @@ class TestFeatureFlagRepository:
         Returns:
             None.
         """
+        tenant = await self._create_tenant(session)
         repo = FeatureFlagRepository(session)
-        flag = await repo.create(
-            {"name": "toggle_me", "state": False, "description": "Old"}
-        )
 
-        updated = await repo.update(flag.id, {"state": True, "description": "New"})
+        with tenant_context(tenant.id):
+            flag = await repo.create(
+                {"name": "toggle_me", "state": False, "description": "Old"}
+            )
+
+            updated = await repo.update(flag.id, {"state": True, "description": "New"})
 
         assert updated is not None
         assert updated.state is True
@@ -184,14 +190,18 @@ class TestFeatureFlagRepository:
         Returns:
             None.
         """
+        tenant = await self._create_tenant(session)
         repo = FeatureFlagRepository(session)
-        flag = await repo.create({"name": "delete_me", "state": False})
 
-        result = await repo.delete(flag.id, hard=False)
+        with tenant_context(tenant.id):
+            flag = await repo.create({"name": "delete_me", "state": False})
 
-        assert result is True
+            result = await repo.delete(flag.id, hard=False)
 
-        found = await repo.get(flag.id, include_deleted=True)
+            assert result is True
+
+            found = await repo.get(flag.id, include_deleted=True)
+
         assert found is not None
         assert found.deleted_at is not None
 
@@ -205,9 +215,12 @@ class TestFeatureFlagRepository:
         fallback tier, so an unfiltered lookup here means deleting a
         flag has no effect on its runtime evaluation.
         """
+        tenant = await self._create_tenant(session)
         repo = FeatureFlagRepository(session)
-        flag = await repo.create({"name": "soon_deleted", "state": True})
-        await repo.delete(flag.id, hard=False)
+
+        with tenant_context(tenant.id):
+            flag = await repo.create({"name": "soon_deleted", "state": True})
+            await repo.delete(flag.id, hard=False)
 
         found = await repo.get_by_name("soon_deleted")
 
@@ -218,9 +231,12 @@ class TestFeatureFlagRepository:
         self, session: AsyncSession
     ) -> None:
         """A soft-deleted flag's name must be free to reuse."""
+        tenant = await self._create_tenant(session)
         repo = FeatureFlagRepository(session)
-        flag = await repo.create({"name": "reusable_name", "state": False})
-        await repo.delete(flag.id, hard=False)
+
+        with tenant_context(tenant.id):
+            flag = await repo.create({"name": "reusable_name", "state": False})
+            await repo.delete(flag.id, hard=False)
 
         assert await repo.name_exists("reusable_name") is False
 
