@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from unittest.mock import patch
+from uuid import uuid4
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
+from app.core.tenant import tenant_context
 from app.models.outbox import Outbox
 from app.models.outbox import OutboxEvent
 
@@ -134,6 +136,33 @@ class TestOutbox:
         assert updated is not None
         assert updated.retry_count == 5
         assert updated.status == "dead"
+
+    @pytest.mark.anyio
+    async def test_publish_defaults_tenant_id_from_current_context(
+        self, session: AsyncSession
+    ) -> None:
+        """publish() should pick up the ambient tenant when none is passed."""
+        outbox = Outbox(session)
+        tenant_id = uuid4()
+
+        with tenant_context(tenant_id):
+            event = await outbox.publish("user.created", {"user_id": "abc-123"})
+
+        assert event.tenant_id == tenant_id
+
+    @pytest.mark.anyio
+    async def test_publish_explicit_none_overrides_context(
+        self, session: AsyncSession
+    ) -> None:
+        """An explicit tenant_id=None must stay None, not fall back to context."""
+        outbox = Outbox(session)
+
+        with tenant_context(uuid4()):
+            event = await outbox.publish(
+                "system.maintenance", {"reason": "backup"}, tenant_id=None
+            )
+
+        assert event.tenant_id is None
 
     @pytest.mark.anyio
     async def test_get_pending_respects_limit(self, session: AsyncSession) -> None:
