@@ -104,10 +104,16 @@ fi
 
 # Replace KEY's value only when it is empty, a placeholder ("your-..."), or
 # matches the optional extra placeholder (e.g. a well-known service default).
+# A key a template sync introduced after this .env was first generated has no
+# line at all, so the sed replace below would silently no-op; append it instead.
 backfill_secret() {
     key="$1"
     value="$2"
     extra_placeholder="${3:-}"
+    if ! grep -q "^${key}=" .env; then
+        echo "${key}=${value}" >> .env
+        return
+    fi
     current="$(sed -n "s/^${key}=//p" .env | head -1)"
     case "$current" in
         "" | your-*)
