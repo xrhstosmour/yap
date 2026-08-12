@@ -152,11 +152,10 @@ async def test_crud_feature_flag_as_admin(client: AsyncClient, session) -> None:
     response = await client.delete("/api/v1/feature-flags/crud_flag", headers=headers)
     assert response.status_code == 204
 
-    # NOTE: delete() is a soft delete, but FeatureFlagRepository.get_by_name()
-    # does not apply the soft-delete filter, so the flag is still visible by
-    # name after deletion. This pins the current (surprising) behavior.
+    # delete() is a soft delete, and get_by_name() filters deleted_at, so
+    # the flag is no longer resolvable by name and its name is free to reuse.
     response = await client.get("/api/v1/feature-flags/crud_flag", headers=headers)
-    assert response.status_code == 200
+    assert response.status_code == 404
 
 
 @pytest.mark.anyio

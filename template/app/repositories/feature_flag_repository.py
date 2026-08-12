@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import and_
 from sqlmodel import select
 
 from app.core.logging import get_logger
@@ -26,13 +27,22 @@ class FeatureFlagRepository(BaseRepository[FeatureFlag]):
     async def get_by_name(self, name: str) -> FeatureFlag | None:
         """Get feature flag by its unique name.
 
+        Ignores soft-deleted rows: a deleted flag must not keep
+        evaluating as active for `feature_enabled()` callers, and its
+        name must be free to reuse for a new flag.
+
         Args:
             name: Feature flag name
 
         Returns:
             FeatureFlag instance or None
         """
-        query = select(FeatureFlag).where(FeatureFlag.name == name)  # type: ignore[arg-type]
+        query = select(FeatureFlag).where(
+            and_(
+                FeatureFlag.name == name,  # type: ignore[arg-type]
+                FeatureFlag.deleted_at.is_(None),  # type: ignore[union-attr]
+            )
+        )
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
 

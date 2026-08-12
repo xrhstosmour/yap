@@ -196,6 +196,35 @@ class TestFeatureFlagRepository:
         assert found.deleted_at is not None
 
     @pytest.mark.anyio
+    async def test_get_by_name_returns_none_after_soft_delete(
+        self, session: AsyncSession
+    ) -> None:
+        """A soft-deleted flag must not keep evaluating as active.
+
+        `feature_enabled()` calls `get_by_name()` on the database
+        fallback tier, so an unfiltered lookup here means deleting a
+        flag has no effect on its runtime evaluation.
+        """
+        repo = FeatureFlagRepository(session)
+        flag = await repo.create({"name": "soon_deleted", "state": True})
+        await repo.delete(flag.id, hard=False)
+
+        found = await repo.get_by_name("soon_deleted")
+
+        assert found is None
+
+    @pytest.mark.anyio
+    async def test_name_exists_false_after_soft_delete(
+        self, session: AsyncSession
+    ) -> None:
+        """A soft-deleted flag's name must be free to reuse."""
+        repo = FeatureFlagRepository(session)
+        flag = await repo.create({"name": "reusable_name", "state": False})
+        await repo.delete(flag.id, hard=False)
+
+        assert await repo.name_exists("reusable_name") is False
+
+    @pytest.mark.anyio
     async def test_tenant_scoping_on_list(self, session: AsyncSession) -> None:
         """Flags created under one tenant should not leak into another tenant's list.
 
