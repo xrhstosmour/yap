@@ -20,6 +20,7 @@ from app.services.two_factor_service import TwoFactorAlreadyEnabledError
 from app.services.two_factor_service import TwoFactorAuthService
 from app.services.two_factor_service import TwoFactorError
 from app.services.two_factor_service import TwoFactorNotEnabledError
+from app.services.two_factor_service import TwoFactorRateLimitError
 
 
 def make_user(
@@ -143,10 +144,13 @@ class TestConfirmEnrollment:
         user = make_user(totp_secret_encrypted=encrypted)
         valid_code = pyotp.TOTP(secret).now()
 
-        with patch(
-            "app.services.two_factor_service.TwoFactorAuthService"
-            "._check_totp_rate_limit",
-            new_callable=AsyncMock,
+        with (
+            patch(
+                "app.services.two_factor_service.TwoFactorAuthService"
+                "._check_totp_rate_limit",
+                new_callable=AsyncMock,
+            ),
+            patch.object(service, "_reset_totp_rate_limit", new_callable=AsyncMock),
         ):
             await service.confirm_enrollment(user, valid_code)
 
@@ -218,10 +222,13 @@ class TestDisable:
         user = make_user(is_2fa_enabled=True, totp_secret_encrypted=encrypted)
         valid_code = pyotp.TOTP(secret).now()
 
-        with patch(
-            "app.services.two_factor_service.TwoFactorAuthService"
-            "._check_totp_rate_limit",
-            new_callable=AsyncMock,
+        with (
+            patch(
+                "app.services.two_factor_service.TwoFactorAuthService"
+                "._check_totp_rate_limit",
+                new_callable=AsyncMock,
+            ),
+            patch.object(service, "_reset_totp_rate_limit", new_callable=AsyncMock),
         ):
             await service.disable(user, valid_code)
 
@@ -260,6 +267,7 @@ class TestVerifyChallenge:
             ),
             patch.object(service, "_check_totp_rate_limit", new_callable=AsyncMock),
             patch.object(service, "_prevent_replay", new_callable=AsyncMock),
+            patch.object(service, "_reset_totp_rate_limit", new_callable=AsyncMock),
         ):
             result = await service.verify_challenge("valid-token", valid_code)
 
@@ -331,6 +339,8 @@ class TestVerifyChallengeWithRecovery:
                 new_callable=AsyncMock,
                 return_value=user,
             ),
+            patch.object(service, "_check_totp_rate_limit", new_callable=AsyncMock),
+            patch.object(service, "_reset_totp_rate_limit", new_callable=AsyncMock),
             patch.object(
                 service.session,
                 "execute",
@@ -362,6 +372,7 @@ class TestVerifyChallengeWithRecovery:
                 new_callable=AsyncMock,
                 return_value=user,
             ),
+            patch.object(service, "_check_totp_rate_limit", new_callable=AsyncMock),
             patch.object(
                 service.session,
                 "execute",
@@ -371,6 +382,69 @@ class TestVerifyChallengeWithRecovery:
             pytest.raises(InvalidTOTPError),
         ):
             await service.verify_challenge_with_recovery("token", "invalid-code")
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_is_checked(
+        self,
+        service: TwoFactorAuthService,
+    ) -> None:
+        """A rate limit exceeded error should stop recovery verification."""
+        user = make_user(is_2fa_enabled=True, totp_secret_encrypted=encrypt("test"))
+
+        with (
+            patch.object(
+                service,
+                "_consume_challenge",
+                new_callable=AsyncMock,
+                return_value=user,
+            ),
+            patch.object(
+                service,
+                "_check_totp_rate_limit",
+                new_callable=AsyncMock,
+                side_effect=TwoFactorRateLimitError("Too many attempts."),
+            ),
+            pytest.raises(TwoFactorRateLimitError),
+        ):
+            await service.verify_challenge_with_recovery("token", "some-code")
+
+    @pytest.mark.asyncio
+    async def test_matching_codes_are_locked_for_update(
+        self,
+        service: TwoFactorAuthService,
+    ) -> None:
+        """The candidate-code lookup should lock rows against a concurrent claim."""
+        user = make_user(is_2fa_enabled=True, totp_secret_encrypted=encrypt("test"))
+        recovery_codes = generate_recovery_codes(1)
+        from app.core.security import generate_password_hash
+
+        rc = MagicMock()
+        rc.code_hash = generate_password_hash(recovery_codes[0])
+        rc.id = UUID("00000000-0000-0000-0000-000000000002")
+
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [rc]
+
+        with (
+            patch.object(
+                service,
+                "_consume_challenge",
+                new_callable=AsyncMock,
+                return_value=user,
+            ),
+            patch.object(service, "_check_totp_rate_limit", new_callable=AsyncMock),
+            patch.object(service, "_reset_totp_rate_limit", new_callable=AsyncMock),
+            patch.object(
+                service.session,
+                "execute",
+                new_callable=AsyncMock,
+                return_value=mock_result,
+            ) as mock_execute,
+        ):
+            await service.verify_challenge_with_recovery("token", recovery_codes[0])
+
+        select_statement = mock_execute.await_args_list[0].args[0]
+        assert select_statement._for_update_arg is not None
 
 
 class TestRegenerateRecoveryCodes:
@@ -393,6 +467,7 @@ class TestRegenerateRecoveryCodes:
                 "._check_totp_rate_limit",
                 new_callable=AsyncMock,
             ),
+            patch.object(service, "_reset_totp_rate_limit", new_callable=AsyncMock),
         ):
             new_codes = await service.regenerate_recovery_codes(user, valid_code)
 
