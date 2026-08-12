@@ -26,10 +26,29 @@ class FileRepository(BaseRepository[File]):
     def __init__(self, session: AsyncSession) -> None:
         super().__init__(session, File)
 
-    async def get_by_content_hash(self, content_hash: str) -> File | None:
-        """Find a file record by its content hash (for dedup)."""
+    async def get_by_content_hash(
+        self, content_hash: str, tenant_id: UUID | None = None
+    ) -> File | None:
+        """Find a file record by its content hash, scoped to a tenant.
+
+        Deduplication is per-tenant (see the ``File`` docstring), so a
+        content-hash lookup without a tenant would either miss another
+        tenant's identical upload or, worse, match it and hand back a row
+        this caller does not own.
+
+        Args:
+            content_hash: SHA-256 hash to look up.
+            tenant_id: Tenant to scope the lookup to. Defaults to the
+                current tenant context.
+
+        Returns:
+            The matching file record, or ``None``.
+        """
+        if tenant_id is None:
+            tenant_id = get_current_tenant_id()
         query = select(File).where(
             File.content_hash == content_hash,  # type: ignore[arg-type]
+            File.tenant_id == tenant_id,  # type: ignore[arg-type]
             File.deleted_at.is_(None),  # type: ignore[union-attr]
         )
         result = await self.session.execute(query)
@@ -37,14 +56,12 @@ class FileRepository(BaseRepository[File]):
 
     async def create_or_increment(self, data: dict[str, Any]) -> tuple[File, bool]:
         """Insert a new file record, or increment ``reference_count`` if one
-        with the same ``content_hash`` already exists.
+        with the same ``(tenant_id, content_hash)`` already exists.
 
-        Uses ``INSERT ... ON CONFLICT (content_hash) DO UPDATE`` so the
-        database resolves duplicate-content races atomically: two concurrent
-        uploads of identical content can no longer both pass a stale
-        existence check and create duplicate rows. ``content_hash`` is
-        globally unique (see ``File.content_hash``), so this check and
-        follow-up lookup are intentionally not tenant-scoped.
+        Uses ``INSERT ... ON CONFLICT (tenant_id, content_hash) DO UPDATE``
+        so the database resolves duplicate-content races atomically: two
+        concurrent uploads of identical content, by the same tenant, can no
+        longer both pass a stale existence check and create duplicate rows.
 
         Args:
             data: Field values for the new file record.
@@ -67,7 +84,7 @@ class FileRepository(BaseRepository[File]):
             pg_insert(File)
             .values(**data)
             .on_conflict_do_update(
-                index_elements=["content_hash"],
+                index_elements=["tenant_id", "content_hash"],
                 set_={
                     "reference_count": File.reference_count + 1,
                     "updated_at": now,
@@ -80,7 +97,9 @@ class FileRepository(BaseRepository[File]):
         await self.session.flush()
 
         created = row_id == new_id
-        record = await self.get_by_content_hash(data["content_hash"])
+        record = await self.get_by_content_hash(
+            data["content_hash"], tenant_id=data.get("tenant_id")
+        )
         if record is None:
             raise RuntimeError(
                 "create_or_increment: no row found for content_hash "
@@ -99,12 +118,22 @@ class FileRepository(BaseRepository[File]):
         return result.scalar_one_or_none()
 
     async def increment_reference_count(self, content_hash: str) -> None:
-        """Increment the reference count for a content hash."""
+        """Increment the reference count for a content hash, within the
+        current tenant.
+
+        Deduplication is per-tenant (see the ``File`` docstring): without
+        the tenant filter, this would match and increment every tenant's
+        row sharing this ``content_hash``, not just the caller's own.
+        """
         from sqlalchemy import update
 
+        tenant_id = get_current_tenant_id()
         await self.session.execute(
             update(File)
-            .where(File.content_hash == content_hash)  # type: ignore[arg-type]
+            .where(
+                File.content_hash == content_hash,  # type: ignore[arg-type]
+                File.tenant_id == tenant_id,  # type: ignore[arg-type]
+            )
             .values(reference_count=File.reference_count + 1)
         )
         await self.session.flush()
