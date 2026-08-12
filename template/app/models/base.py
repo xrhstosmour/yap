@@ -42,7 +42,6 @@ class BaseModel(SQLModel, table=False):
     id: UUID = Field(
         default_factory=uuid7,
         primary_key=True,
-        index=True,
         nullable=False,
     )
 
