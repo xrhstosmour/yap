@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy import delete as sa_delete
 from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,8 +23,10 @@ from app.core.security import generate_password_hash
 from app.core.security import verify_password
 from app.models.api_key import APIKey
 from app.models.audit_log import AuditAction
+from app.models.totp_recovery_code import TotpRecoveryCode
 from app.models.user import User
 from app.models.user import UserRole
+from app.models.webauthn_credential import WebAuthnCredential
 from app.repositories.audit_repository import AuditLogRepository
 from app.repositories.user_repository import UserRepository
 from app.schemas.user import UserCreate
@@ -319,8 +322,9 @@ class UserService:
     async def delete_me(self, user: User) -> None:
         """Self-service account deletion (GDPR Article 17).
 
-        Revokes all API keys, anonymizes personal fields (email,
-        full_name, hashed_password), soft-deletes the account, and
+        Revokes all API keys, anonymizes personal fields (email, phone,
+        full_name, hashed_password), clears 2FA (TOTP secret, recovery
+        codes, WebAuthn credentials), soft-deletes the account, and
         increments `token_version` to immediately invalidate all
         outstanding JWTs. Logs the deletion in the audit trail.
 
@@ -343,7 +347,26 @@ class UserService:
                 .values(deleted_at=now)
             )
 
+            # Hard-delete 2FA credential material. This is not soft-deleted
+            # like the account itself, an erasure request means it should
+            # stop existing, not just stop being queried.
+            await self.session.execute(
+                sa_delete(TotpRecoveryCode).where(
+                    TotpRecoveryCode.user_id == user.id  # type: ignore[arg-type]
+                )
+            )
+            await self.session.execute(
+                sa_delete(WebAuthnCredential).where(
+                    WebAuthnCredential.user_id == user.id  # type: ignore[arg-type]
+                )
+            )
+
             # Anonymize personal fields to satisfy GDPR Article 17 right to erasure.
+            # `phone`/`email` reassignment here goes through `User.update()`,
+            # which sets attributes on a loaded instance rather than issuing a
+            # bare SQL UPDATE, so the `phone_hash`/`email_hash` sync listeners
+            # still fire and those hashes get anonymized too, not just the
+            # plaintext columns.
             anonymized_email = f"deleted_{user.id}@deleted.invalid"
             placeholder_hash = await asyncio.to_thread(
                 generate_password_hash, secrets.token_urlsafe(32)
@@ -352,8 +375,12 @@ class UserService:
                 user.id,
                 {
                     "email": anonymized_email,
+                    "phone": None,
                     "full_name": None,
                     "hashed_password": placeholder_hash,
+                    "is_2fa_enabled": False,
+                    "totp_secret_encrypted": None,
+                    "totp_confirmed_at": None,
                     "token_version": User.token_version + 1,
                 },
             )

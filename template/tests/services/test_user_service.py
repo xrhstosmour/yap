@@ -382,17 +382,51 @@ class TestDeleteMe:
         ):
             await mock_user_service.delete_me(user)
 
-        # API key revocation statement was issued.
-        mock_session.execute.assert_awaited_once()
+        # API key revocation, recovery-code deletion and WebAuthn-credential
+        # deletion statements were all issued.
+        assert mock_session.execute.await_count == 3
+        tables = {
+            call.args[0].table.name for call in mock_session.execute.await_args_list
+        }
+        assert tables == {"api_keys", "totp_recovery_codes", "webauthn_credentials"}
         mock_user_service.audit_repository.log_user_action_safe.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_delete_me_deletes_totp_recovery_codes_and_webauthn_credentials(
+        self, mock_user_service: UserService, mock_session: MagicMock
+    ) -> None:
+        """Should hard-delete 2FA credential material, not just soft-delete it."""
+        user = _make_user_mock()
+
+        mock_session.execute = AsyncMock()
+        mock_user_service.user_repository.update = AsyncMock()
+        mock_user_service.user_repository.increment_token_version = AsyncMock()
+        mock_user_service.user_repository.delete = AsyncMock()
+        mock_user_service.audit_repository.log_user_action_safe = AsyncMock()
+
+        with patch(
+            "app.services.user_service.generate_password_hash",
+            return_value="$2b$12$placeholder_hash...",
+        ):
+            await mock_user_service.delete_me(user)
+
+        statements = [call.args[0] for call in mock_session.execute.await_args_list]
+        recovery_code_delete = next(
+            s for s in statements if s.table.name == "totp_recovery_codes"
+        )
+        webauthn_delete = next(
+            s for s in statements if s.table.name == "webauthn_credentials"
+        )
+        assert recovery_code_delete.is_delete
+        assert webauthn_delete.is_delete
 
     @pytest.mark.asyncio
     async def test_delete_me_anonymizes_personal_fields(
         self, mock_user_service: UserService, mock_session: MagicMock
     ) -> None:
-        """Should replace email, full_name, and hashed_password with
-        GDPR-compliant placeholders."""
-        user = _make_user_mock()
+        """Should replace email, phone, full_name, and hashed_password with
+        GDPR-compliant placeholders, and clear 2FA state."""
+        user = _make_user_mock(phone="+306912345678")
 
         mock_session.execute = AsyncMock()
         mock_user_service.user_repository.update = AsyncMock()
@@ -413,8 +447,12 @@ class TestDeleteMe:
         assert call.args[0] == user.id
         data = call.args[1]
         assert data["email"] == expected_email
+        assert data["phone"] is None
         assert data["full_name"] is None
         assert data["hashed_password"] == "$2b$12$placeholder_hash..."
+        assert data["is_2fa_enabled"] is False
+        assert data["totp_secret_encrypted"] is None
+        assert data["totp_confirmed_at"] is None
         assert "token_version" in data
 
     @pytest.mark.asyncio
