@@ -62,6 +62,12 @@ rabbitmq_password:
   default: ""
   secret: true
 
+rabbitmq_erlang_cookie:
+  type: str
+  help: "Erlang cookie for RabbitMQ clustering (leave empty to auto-generate):"
+  default: ""
+  secret: true
+
 redis_password:
   type: str
   help: "Password for Redis (leave empty to auto-generate):"
