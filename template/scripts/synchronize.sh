@@ -168,6 +168,7 @@ jwt_secret_key: "${SECRET_KEY:-}"
 postgresql_password: "${POSTGRESQL_PASSWORD:-}"
 first_superuser_password: "${FIRST_SUPERUSER_PASSWORD:-}"
 rabbitmq_password: "${RABBITMQ_PASSWORD:-}"
+rabbitmq_erlang_cookie: "${RABBITMQ_ERLANG_COOKIE:-}"
 redis_password: "${REDIS_PASSWORD:-}"
 crypto_key: "${CRYPTO_KEY:-}"
 YAML
