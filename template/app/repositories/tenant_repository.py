@@ -32,13 +32,26 @@ class TenantRepository(BaseRepository[Tenant]):
         return query
 
     async def get_by_slug(self, slug: str) -> Tenant | None:
+        """Get a tenant by its slug, ignoring soft-deleted rows."""
         result = await self.session.execute(
-            select(Tenant).where(Tenant.slug == slug)  # type: ignore[arg-type]
+            select(Tenant).where(
+                Tenant.slug == slug,  # type: ignore[arg-type]
+                Tenant.deleted_at.is_(None),  # type: ignore[union-attr]
+            )
         )
         return result.scalar_one_or_none()
 
     async def slug_exists(self, slug: str, exclude_id: UUID | None = None) -> bool:
-        query = select(Tenant.id).where(Tenant.slug == slug)  # type: ignore[arg-type,call-overload]
+        """Check whether a slug is taken by a non-deleted tenant.
+
+        Ignoring soft-deleted rows here (and in `get_by_slug`) matters:
+        without it, a deleted tenant's slug stays permanently reserved
+        and can never be reused by a new tenant.
+        """
+        query = select(Tenant.id).where(
+            Tenant.slug == slug,  # type: ignore[arg-type,call-overload]
+            Tenant.deleted_at.is_(None),  # type: ignore[union-attr]
+        )
         if exclude_id:
             query = query.where(Tenant.id != exclude_id)  # type: ignore[arg-type]
         result = await self.session.execute(query)
