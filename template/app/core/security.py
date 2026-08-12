@@ -585,15 +585,16 @@ def generate_recovery_codes(count: int = 10) -> list[str]:
         count: Number of codes to generate (default 10).
 
     Returns:
-        List of formatted recovery codes (XXXX-XXXX uppercase alphanumeric).
-        These are shown once and must be stored as bcrypt hashes.
+        List of formatted recovery codes (XXXX-XXXX uppercase alphanumeric),
+        each unique within the batch. These are shown once and must be
+        stored as bcrypt hashes.
     """
     alphabet = string.ascii_uppercase + string.digits
-    codes = []
-    for _ in range(count):
+    codes: set[str] = set()
+    while len(codes) < count:
         raw = "".join(secrets.choice(alphabet) for _ in range(8))
-        codes.append(f"{raw[:4]}-{raw[4:]}")
-    return codes
+        codes.add(f"{raw[:4]}-{raw[4:]}")
+    return list(codes)
 
 
 # Magic link (passwordless login).

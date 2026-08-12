@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from base64 import b32decode
+from unittest.mock import patch
 
 import pyotp
 
@@ -98,6 +99,23 @@ class TestGenerateRecoveryCodes:
             assert len(parts) == 2
             assert len(parts[0]) == 4
             assert len(parts[1]) == 4
+
+    def test_retries_on_collision(self) -> None:
+        """A colliding draw must be discarded and retried, not kept.
+
+        Forces `secrets.choice` to draw the same 8 characters twice in a
+        row (a collision under the 36^8 keyspace, astronomically unlikely
+        in practice but not impossible) before a third, different draw.
+        Without a dedup-and-retry loop, the second draw would silently
+        produce a duplicate code instead of a fresh one.
+        """
+        with patch(
+            "app.core.security.secrets.choice",
+            side_effect=list("AAAAAAAA") + list("AAAAAAAA") + list("BBBBBBBB"),
+        ):
+            codes = generate_recovery_codes(2)
+
+        assert set(codes) == {"AAAA-AAAA", "BBBB-BBBB"}
 
     def test_codes_are_unique(self) -> None:
         """All codes in a batch should be unique."""
