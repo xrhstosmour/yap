@@ -184,6 +184,34 @@ class TestTenantRepository:
         assert found.deleted_at is not None
 
     @pytest.mark.anyio
+    async def test_get_by_slug_returns_none_after_soft_delete(
+        self, session: AsyncSession
+    ) -> None:
+        """A soft-deleted tenant's slug must not resolve via get_by_slug()."""
+        repo = TenantRepository(session)
+        tenant = await repo.create_tenant(name="Ghost Org", slug="ghost-org")
+        await repo.delete(tenant.id, hard=False)
+
+        found = await repo.get_by_slug("ghost-org")
+
+        assert found is None
+
+    @pytest.mark.anyio
+    async def test_slug_exists_false_after_soft_delete(
+        self, session: AsyncSession
+    ) -> None:
+        """A soft-deleted tenant's slug must be free to reuse.
+
+        Without this, a deleted tenant's slug stays permanently
+        reserved and a new tenant can never take it.
+        """
+        repo = TenantRepository(session)
+        tenant = await repo.create_tenant(name="Reusable Org", slug="reusable-slug")
+        await repo.delete(tenant.id, hard=False)
+
+        assert await repo.slug_exists("reusable-slug") is False
+
+    @pytest.mark.anyio
     @pytest.mark.parametrize(
         "index_name", ["ix_tenants_name_trgm", "ix_tenants_slug_trgm"]
     )
