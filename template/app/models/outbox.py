@@ -21,7 +21,14 @@ from sqlalchemy import Index
 from sqlmodel import Field
 from sqlmodel import select
 
+from app.core.tenant import get_current_tenant_id
 from app.models.base import BaseModel
+
+# Distinguishes "caller did not pass tenant_id" (use the current tenant
+# context) from "caller explicitly passed tenant_id=None" (a genuinely
+# system-wide event with no tenant owner), which a plain `= None` default
+# cannot tell apart.
+_UNSET: UUID | None = object()  # type: ignore[assignment]
 
 
 class OutboxEvent(BaseModel, table=True):
@@ -89,8 +96,22 @@ class Outbox:
         self,
         event_type: str,
         payload: dict[str, Any],
-        tenant_id: UUID | None = None,
+        tenant_id: UUID | None = _UNSET,
     ) -> OutboxEvent:
+        """Write an event to the outbox within the current transaction.
+
+        Args:
+            event_type: Dotted event name (e.g. "user.created").
+            payload: Event payload, published as-is.
+            tenant_id: Owning tenant. Defaults to the current tenant context;
+                pass `tenant_id=None` explicitly for a genuinely system-wide
+                event with no single tenant owner.
+
+        Returns:
+            The pending `OutboxEvent`, already added to the session.
+        """
+        if tenant_id is _UNSET:
+            tenant_id = get_current_tenant_id()
         event = OutboxEvent(
             id=uuid7(),
             event_type=event_type,
