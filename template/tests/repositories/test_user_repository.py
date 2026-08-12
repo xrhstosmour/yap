@@ -144,6 +144,24 @@ class TestUserRepository:
         assert await repo.email_exists("missing@example.com") is False
 
     @pytest.mark.anyio
+    async def test_email_exists_false_after_soft_delete(
+        self, session: AsyncSession
+    ) -> None:
+        """A soft-deleted user's email must be free to re-register.
+
+        Otherwise a self-deleted account (GDPR Article 17 erasure) blocks
+        registration forever: email_exists() reports the address taken
+        while get_by_email() reports no user, so the address is both
+        unusable and unrecoverable.
+        """
+        repo = UserRepository(session)
+        user = await repo.create_user(email="deleted@example.com", password_hash="hash")
+
+        await repo.delete(user.id)
+
+        assert await repo.email_exists("deleted@example.com") is False
+
+    @pytest.mark.anyio
     async def test_update_password(self, session: AsyncSession) -> None:
         """update_password() should update the hashed_password field.
 
