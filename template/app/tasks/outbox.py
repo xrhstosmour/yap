@@ -35,7 +35,13 @@ def process_outbox(self) -> dict:
 
                 for event in events:
                     try:
-                        payload = json.dumps(event.payload)
+                        envelope = {
+                            "tenant_id": (
+                                str(event.tenant_id) if event.tenant_id else None
+                            ),
+                            "payload": event.payload,
+                        }
+                        payload = json.dumps(envelope)
                         celery_app.send_task(
                             f"app.events.{event.event_type}",
                             args=[payload],
