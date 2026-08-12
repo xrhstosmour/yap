@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from sqlalchemy import UniqueConstraint
 from sqlmodel import Field
 
 from app.models.base import BaseModel
@@ -18,28 +19,40 @@ class File(BaseModel, table=True):
     """Uploaded file stored in MinIO / S3-compatible blob storage.
 
     Each row represents one logical file. Deduplication is handled by
-    ``content_hash`` (SHA-256): when multiple records share the same
-    hash, ``reference_count`` is incremented instead of uploading
-    duplicates. The storage backend object is deleted when
+    ``content_hash`` (SHA-256): when multiple records within the same
+    tenant share a hash, ``reference_count`` is incremented instead of
+    uploading duplicates. The storage backend object is deleted when
     ``reference_count`` reaches zero.
 
-    Inherits ``tenant_id`` from ``BaseModel`` like every other table, but it
-    is not a reliable ownership signal here: content is deduplicated
-    globally across tenants (see ``content_hash``), so a shared row's
-    ``tenant_id`` is whichever tenant uploaded that content first, not every
-    tenant that references it. ``BaseRepository._apply_tenant_filter`` does
-    apply its usual ``WHERE tenant_id = ...`` filter for this model, it just
-    filters on a column that does not mean "who can access this row" the way
-    it does elsewhere. Ownership is ``uploaded_by``, not tenant membership.
-    Never call ``FileRepository.get()`` directly for a caller-facing read or
-    write; use ``get_owned()`` (or an explicit ``resource_id``/
-    ``resource_type`` ownership check, as the public business-media
-    endpoints do) so one tenant's private files can't be reached by ID from
-    another tenant, and so a second tenant referencing shared content isn't
-    incorrectly filtered out by the first tenant's ``tenant_id``.
+    Deduplication is scoped per tenant (``UNIQUE(tenant_id, content_hash)``),
+    not global. Two tenants uploading identical content each get their own
+    row, own ``uploaded_by``, and own storage object, at the cost of storing
+    that content twice instead of once. The alternative (a single row shared
+    across tenants) would need a many-to-many ownership record, since
+    ``uploaded_by`` is a single FK: a second tenant referencing an
+    already-shared row would either never see it (filtered out by the first
+    tenant's ``tenant_id``) or silently inherit the first tenant's metadata,
+    ownership and access.
+
+    A row with no ``tenant_id`` (``NULL``) still dedupes against other
+    ``NULL``-tenant rows with the same content: the constraint below is
+    declared ``NULLS NOT DISTINCT`` (Postgres 15+), overriding Postgres's
+    default where two ``NULL`` values never count as a conflict for a
+    unique constraint. Without it, two concurrent uploads with no tenant
+    context would both insert instead of racing safely onto one row, the
+    exact bug this migration exists to prevent, just triggered by a missing
+    tenant instead of a mismatched one.
     """
 
     __tablename__ = "files"  # pyright: ignore[reportAssignmentType]
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "content_hash",
+            name="uq_files_tenant_id_content_hash",
+            postgresql_nulls_not_distinct=True,
+        ),
+    )
 
     filename: str = Field(
         nullable=False,
@@ -55,15 +68,14 @@ class File(BaseModel, table=True):
         nullable=False,
     )
 
-    # Globally unique (not tenant-scoped): identical content is stored once
-    # regardless of tenant, mirroring User.email and other codebase-wide
-    # unique columns. The constraint also closes the race between
-    # concurrent uploads of identical content on the dedup check.
+    # Unique per tenant, not globally: see the class docstring. The
+    # `(tenant_id, content_hash)` constraint on `__table_args__` is what
+    # enforces this and provides the lookup index; a standalone index here
+    # would be redundant with it. The constraint also closes the race
+    # between concurrent uploads of identical content on the dedup check.
     content_hash: str = Field(
         nullable=False,
         max_length=64,
-        unique=True,
-        index=True,
     )
 
     bucket: str = Field(

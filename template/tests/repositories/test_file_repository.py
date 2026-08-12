@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.tenant import tenant_context
 from app.models.file import File
 from app.models.tenant import Tenant
 from app.models.user import User
@@ -196,6 +197,58 @@ class TestFileRepository:
         found = await repo.get_by_content_hash("nonexistent-hash")
 
         assert found is None
+
+    @pytest.mark.anyio
+    async def test_create_or_increment_scopes_dedup_per_tenant(
+        self, session: AsyncSession
+    ) -> None:
+        """Two tenants uploading identical content must not share a row.
+
+        Deduplication is per-tenant (see the ``File`` model docstring):
+        a second tenant uploading content identical to a first tenant's
+        must get its own row, own ``uploaded_by``, and remain reachable
+        via ``get_owned()`` by its own uploader, not silently locked out
+        by the first tenant's row.
+
+        Args:
+            session: Async database session fixture.
+
+        Returns:
+            None.
+        """
+        tenant_a = await self._create_tenant(session, slug="tenant-a")
+        tenant_b = await self._create_tenant(session, slug="tenant-b")
+        user_a = await self._create_user(session, email="a@example.com")
+        user_b = await self._create_user(session, email="b@example.com")
+        repo = FileRepository(session)
+
+        with tenant_context(tenant_a.id):
+            record_a, created_a = await repo.create_or_increment(
+                self._file_data(
+                    uploaded_by=user_a.id,
+                    content_hash="shared-across-tenants",
+                    object_key="uploads/a.txt",
+                )
+            )
+
+        with tenant_context(tenant_b.id):
+            record_b, created_b = await repo.create_or_increment(
+                self._file_data(
+                    uploaded_by=user_b.id,
+                    content_hash="shared-across-tenants",
+                    object_key="uploads/b.txt",
+                )
+            )
+
+        assert created_a is True
+        assert created_b is True
+        assert record_a.id != record_b.id
+        assert record_a.uploaded_by == user_a.id
+        assert record_b.uploaded_by == user_b.id
+
+        with tenant_context(tenant_b.id):
+            owned_by_b = await repo.get_owned(record_b.id, user_b.id)
+        assert owned_by_b is not None
 
     @pytest.mark.anyio
     async def test_create_or_increment_resolves_concurrent_upload_race(
