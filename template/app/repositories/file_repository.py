@@ -110,17 +110,28 @@ class FileRepository(BaseRepository[File]):
         await self.session.flush()
 
     async def decrement_reference_count(self, file_id: UUID) -> int:
-        """Decrement reference count and return the new count."""
+        """Decrement reference count and return the new count.
+
+        A single atomic ``UPDATE ... RETURNING`` rather than a read in
+        Python followed by a write: two concurrent deletes of files sharing
+        a ``content_hash`` (see ``create_or_increment``) could otherwise
+        both read the same starting count and one decrement would be lost,
+        leaving the count too high, or a caller purging the shared blob
+        too early. Mirrors the already-atomic ``increment_reference_count``.
+        """
+        from sqlalchemy import func
         from sqlalchemy import update
 
-        record = await self.get(file_id)
-        if not record:
-            return 0
-        new_count = max(0, record.reference_count - 1)
-        await self.session.execute(
+        statement = (
             update(File)
             .where(File.id == file_id)  # type: ignore[arg-type]
-            .values(reference_count=new_count)
+            .values(reference_count=func.greatest(File.reference_count - 1, 0))
+            .returning(File.reference_count)  # type: ignore[call-overload]
         )
+        statement = self._apply_tenant_filter(statement)
+        statement = self._apply_soft_delete_filter(statement)
+
+        result = await self.session.execute(statement)
         await self.session.flush()
-        return new_count
+        row = result.first()
+        return row[0] if row is not None else 0
