@@ -356,6 +356,35 @@ class TestUpdateProfile:
             user.id, {"phone": "+12025551234"}
         )
 
+    @pytest.mark.asyncio
+    async def test_update_password_bumps_token_version_atomically(
+        self, mock_user_service: UserService
+    ) -> None:
+        """token_version must be a SQL expression, not a stale Python read.
+
+        `User.token_version + 1` (the class attribute) compiles to
+        `SET token_version = token_version + 1`, atomic against a concurrent
+        bump. `user.token_version + 1` (the loaded instance's value) would
+        instead write a fixed number computed from a value that could already
+        be stale by the time this UPDATE runs, silently losing a concurrent
+        increment.
+        """
+        user = _make_user_mock(hashed_password="$2b$12$oldhash", token_version=5)
+        updated = _make_user_mock(id=user.id, token_version=6)
+        mock_user_service.user_repository.update = AsyncMock(return_value=updated)
+        mock_user_service.user_repository.get = AsyncMock(return_value=updated)
+
+        data = UserUpdateMe.model_construct(
+            new_password="new-strong-password",
+            current_password="correct-password",
+        )
+        with patch("app.services.user_service.verify_password", return_value=True):
+            await mock_user_service.update_profile(user, data)
+
+        mock_user_service.user_repository.update.assert_awaited_once()
+        call_data = mock_user_service.user_repository.update.await_args.args[1]
+        assert str(call_data["token_version"]) == str(User.token_version + 1)
+
 
 # delete_me
 
