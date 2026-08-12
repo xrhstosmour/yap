@@ -15,7 +15,7 @@ from typing import Any
 REPO_URL = "https://github.com/xrhstosmour/containers.git"
 # Pin to a specific commit instead of floating on the default branch tip.
 # Bump this deliberately when the containers repo needs to be updated.
-REPO_COMMIT = "45fd5762264be7c5bedcfe80f41c0e75ddcdaa0e"
+REPO_COMMIT = "1b3ae03609525e35544967671f14a7308d653b47"
 
 
 def run_openssl(*args: Any) -> None:  # noqa: ANN401
