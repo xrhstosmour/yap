@@ -195,11 +195,18 @@ def _sync_email_hash(
     Fires on every attribute assignment, including model construction
     (`User(email=...)`) and `setattr()`, so callers never compute the
     search hash themselves. Does not fire on ORM load — the hash is
-    read back as its own column value there. `email` is required
-    (`nullable=False`), so `value` is only falsy transiently, e.g.
-    before pydantic validation has run.
+    read back as its own column value there.
+
+    `email_hash` is `nullable=False`, unlike `phone_hash`, so an empty
+    string is hashed rather than skipped: `email_hash` must always reflect
+    the current `email`, including a caller clearing it to `""` (e.g. a
+    GDPR erasure flow). Skipping that assignment would leave `email_hash`
+    pointing at the erased value's hash, silently defeating the erasure.
+    Only `None` is skipped, since `hash_for_search` takes a `str` and
+    `email` is only ever `None` transiently, before pydantic validation
+    has run.
     """
-    if value:
+    if value is not None:
         target.email_hash = crypto.hash_for_search(value)
 
 
