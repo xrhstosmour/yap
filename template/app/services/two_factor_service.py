@@ -197,6 +197,7 @@ class TwoFactorAuthService:
                 "token_version": User.token_version + 1,
             },
         )
+        await self._reset_totp_rate_limit(user.id)
 
         logger.info("totp_enrollment_confirmed", user_id=str(user.id))
 
@@ -259,6 +260,7 @@ class TwoFactorAuthService:
             raise InvalidTOTPError("Invalid TOTP code.")
 
         await self._prevent_replay(user.id, totp_code)
+        await self._reset_totp_rate_limit(user.id)
 
         logger.info("totp_challenge_verified", user_id=str(user.id))
         return user
@@ -281,18 +283,32 @@ class TwoFactorAuthService:
 
         Raises:
             InvalidTOTPError: If challenge or recovery code is invalid.
+            TwoFactorRateLimitError: If rate limit exceeded.
         """
         user = await self._consume_challenge(challenge_token)
+
+        await self._check_totp_rate_limit(user.id)
 
         # Find and consume a matching unused recovery code.
         # NOTE: TotpRecoveryCode does not have a tenant_id field — recovery
         # codes are tenant-agnostic. Projects requiring tenant isolation
         # should add a tenant_id column and join through the User model.
-        query = select(TotpRecoveryCode).where(
-            and_(
-                TotpRecoveryCode.user_id == user.id,  # type: ignore[arg-type]
-                TotpRecoveryCode.used_at.is_(None),  # type: ignore[union-attr]
+        #
+        # `with_for_update()` locks the matching rows for the rest of this
+        # transaction, so a second, concurrent request presenting the same
+        # code cannot also read it as unused: it blocks until this
+        # transaction commits, then re-reads `used_at` as already set and
+        # finds nothing to consume. Without the lock, both requests could
+        # verify the same code and both succeed, defeating single use.
+        query = (
+            select(TotpRecoveryCode)
+            .where(
+                and_(
+                    TotpRecoveryCode.user_id == user.id,  # type: ignore[arg-type]
+                    TotpRecoveryCode.used_at.is_(None),  # type: ignore[union-attr]
+                )
             )
+            .with_for_update()
         )
         result = await self.session.execute(query)
         unused_codes = result.scalars().all()
@@ -303,11 +319,14 @@ class TwoFactorAuthService:
             ):
                 statement = (
                     update(TotpRecoveryCode)
-                    .where(TotpRecoveryCode.id == code_record.id)  # type: ignore[arg-type]
+                    .where(
+                        TotpRecoveryCode.id == code_record.id,  # type: ignore[arg-type]
+                    )
                     .values(used_at=datetime.now(UTC))
                 )
                 await self.session.execute(statement)
                 await self.session.flush()
+                await self._reset_totp_rate_limit(user.id)
                 logger.info(
                     "totp_recovery_code_used",
                     user_id=str(user.id),
@@ -362,6 +381,7 @@ class TwoFactorAuthService:
             },
         )
         await self._delete_all_recovery_codes(user.id)
+        await self._reset_totp_rate_limit(user.id)
 
         logger.info("totp_disabled", user_id=str(user.id))
 
@@ -404,6 +424,7 @@ class TwoFactorAuthService:
 
         new_codes = generate_recovery_codes(settings.TOTP_RECOVERY_CODE_COUNT)
         await self._replace_recovery_codes(user.id, new_codes)
+        await self._reset_totp_rate_limit(user.id)
 
         logger.info("totp_recovery_codes_regenerated", user_id=str(user.id))
         return new_codes
@@ -449,6 +470,19 @@ class TwoFactorAuthService:
             raise TwoFactorRateLimitError(
                 "Too many TOTP attempts. Try again in a few minutes."
             )
+
+    async def _reset_totp_rate_limit(self, user_id: UUID) -> None:
+        """Clear the TOTP attempt counter after a successful verification.
+
+        Without this, a legitimate user who calls any rate-limited
+        operation (TOTP or recovery-code verification, enrollment,
+        disabling, regenerating codes) enough times within the window gets
+        locked out even though every attempt succeeded, and each further
+        successful call keeps refreshing the window's TTL, pushing the
+        lockout out indefinitely instead of letting it expire.
+        """
+        redis = await get_redis()
+        await redis.delete(f"totp_attempts:{user_id}")
 
     async def _prevent_replay(self, user_id: UUID, totp_code: str) -> None:
         """Prevent TOTP code replay within the same time window.
