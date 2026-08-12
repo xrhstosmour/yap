@@ -427,3 +427,96 @@ class TestAuditLogRepository:
 
         # Already-deleted logs should not be counted or re-processed.
         assert count == 0
+
+    @pytest.mark.anyio
+    async def test_get_recent_failures_excludes_other_tenants(
+        self, session: AsyncSession
+    ) -> None:
+        """get_recent_failures() must not leak another tenant's failures.
+
+        Args:
+            session: Async database session fixture.
+
+        Returns:
+            None.
+        """
+        tenant_a = await self._create_tenant(session, slug="tenant-a")
+        tenant_b = await self._create_tenant(session, slug="tenant-b")
+        repo = AuditLogRepository(session)
+        user_id = uuid4()
+
+        session.add(
+            AuditLog(
+                action="login_failed",
+                actor_id=str(user_id),
+                actor_type="user",
+                tenant_id=tenant_a.id,
+                status="failure",
+            )
+        )
+        session.add(
+            AuditLog(
+                action="login_failed",
+                actor_id=str(user_id),
+                actor_type="user",
+                tenant_id=tenant_b.id,
+                status="failure",
+            )
+        )
+        await session.commit()
+
+        with tenant_context(tenant_a.id):
+            failures = await repo.get_recent_failures()
+
+        assert len(failures) == 1
+        assert failures[0].tenant_id == tenant_a.id
+
+    @pytest.mark.anyio
+    async def test_get_recent_failures_excludes_successes_and_old_entries(
+        self, session: AsyncSession
+    ) -> None:
+        """Only recent, failed entries for the current tenant are returned.
+
+        Args:
+            session: Async database session fixture.
+
+        Returns:
+            None.
+        """
+        tenant = await self._create_tenant(session)
+        repo = AuditLogRepository(session)
+        user_id = uuid4()
+
+        session.add(
+            AuditLog(
+                action="login_succeeded",
+                actor_id=str(user_id),
+                actor_type="user",
+                tenant_id=tenant.id,
+                status="success",
+            )
+        )
+        session.add(
+            AuditLog(
+                action="login_failed",
+                actor_id=str(user_id),
+                actor_type="user",
+                tenant_id=tenant.id,
+                status="failure",
+                created_at=datetime.now(UTC) - timedelta(hours=48),
+            )
+        )
+        recent_failure = AuditLog(
+            action="login_failed",
+            actor_id=str(user_id),
+            actor_type="user",
+            tenant_id=tenant.id,
+            status="failure",
+        )
+        session.add(recent_failure)
+        await session.commit()
+
+        with tenant_context(tenant.id):
+            failures = await repo.get_recent_failures(hours=24)
+
+        assert [failure.id for failure in failures] == [recent_failure.id]
