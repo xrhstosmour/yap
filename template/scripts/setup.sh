@@ -67,6 +67,7 @@ CRYPTO_KEY="${CRYPTO_KEY:-$(python3 -c "import secrets, base64; print(base64.url
 POSTGRESQL_PASSWORD="${POSTGRESQL_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(24))")}"
 FIRST_SUPERUSER_PASSWORD="${FIRST_SUPERUSER_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")}"
 RABBITMQ_PASSWORD="${RABBITMQ_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")}"
+RABBITMQ_ERLANG_COOKIE="${RABBITMQ_ERLANG_COOKIE:-$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")}"
 REDIS_PASSWORD="${REDIS_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")}"
 FLOWER_PASSWORD="${FLOWER_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(12))")}"
 PGADMIN4_PASSWORD="${PGADMIN4_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(12))")}"
@@ -88,6 +89,7 @@ if [ ! -f .env ]; then
     "${SED_INPLACE[@]}" "s/POSTGRESQL_PASSWORD=.*/POSTGRESQL_PASSWORD=your-postgresql-password/" .env.example
     "${SED_INPLACE[@]}" "s/FIRST_SUPERUSER_PASSWORD=.*/FIRST_SUPERUSER_PASSWORD=your-superuser-password/" .env.example
     "${SED_INPLACE[@]}" "s/RABBITMQ_PASSWORD=.*/RABBITMQ_PASSWORD=your-rabbitmq-password/" .env.example
+    "${SED_INPLACE[@]}" "s/RABBITMQ_ERLANG_COOKIE=.*/RABBITMQ_ERLANG_COOKIE=your-rabbitmq-erlang-cookie/" .env.example
     "${SED_INPLACE[@]}" "s/REDIS_PASSWORD=.*/REDIS_PASSWORD=your-redis-password/" .env.example
     "${SED_INPLACE[@]}" "s/FLOWER_PASSWORD=.*/FLOWER_PASSWORD=your-flower-password/" .env.example
     "${SED_INPLACE[@]}" "s/PGADMIN4_PASSWORD=.*/PGADMIN4_PASSWORD=your-pgadmin-password/" .env.example
@@ -124,6 +126,7 @@ backfill_secret CRYPTO_KEY "${CRYPTO_KEY}"
 backfill_secret POSTGRESQL_PASSWORD "${POSTGRESQL_PASSWORD}"
 backfill_secret FIRST_SUPERUSER_PASSWORD "${FIRST_SUPERUSER_PASSWORD}"
 backfill_secret RABBITMQ_PASSWORD "${RABBITMQ_PASSWORD}"
+backfill_secret RABBITMQ_ERLANG_COOKIE "${RABBITMQ_ERLANG_COOKIE}"
 backfill_secret REDIS_PASSWORD "${REDIS_PASSWORD}"
 backfill_secret FLOWER_PASSWORD "${FLOWER_PASSWORD}"
 backfill_secret PGADMIN4_PASSWORD "${PGADMIN4_PASSWORD}"
