@@ -36,7 +36,6 @@ class TotpRecoveryCode(SQLModel, table=True):
     id: UUID = Field(
         default_factory=uuid7,
         primary_key=True,
-        index=True,
         nullable=False,
     )
 
