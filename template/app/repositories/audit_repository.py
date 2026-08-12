@@ -267,7 +267,7 @@ class AuditLogRepository(BaseRepository[AuditLog]):
         hours: int = 24,
         limit: int = 100,
     ) -> list[AuditLog]:
-        """Get recent failed actions.
+        """Get recent failed actions, scoped to the current tenant.
 
         Useful for security monitoring.
 
@@ -278,6 +278,9 @@ class AuditLogRepository(BaseRepository[AuditLog]):
         Returns:
             List of failed audit logs
         """
+        from app.core.tenant import get_current_tenant_id
+
+        tenant_id = get_current_tenant_id()
         cutoff = datetime.now(UTC) - timedelta(hours=hours)
 
         query = (
@@ -291,6 +294,9 @@ class AuditLogRepository(BaseRepository[AuditLog]):
             .order_by(AuditLog.created_at.desc())  # type: ignore[attr-defined]
             .limit(limit)
         )
+
+        if tenant_id:
+            query = query.where(AuditLog.tenant_id == tenant_id)  # type: ignore[arg-type]
 
         result = await self.session.execute(query)
         return list(result.scalars().all())
