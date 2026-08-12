@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import create_access_token
 from app.core.security import create_refresh_token
+from app.core.tenant import system_context
 from app.main import app
 from app.schemas.auth import RegisterRequest
 from app.services.auth_service import AuthService
@@ -101,7 +102,8 @@ class TestAuthLogin:
         user = await auth_service.register(
             RegisterRequest(email="inactive@{{ project_slug }}.com", password="password123")
         )
-        await auth_service.user_repository.update(user.id, {"is_active": False})
+        with system_context():
+            await auth_service.user_repository.update(user.id, {"is_active": False})
 
         response = await client.post(
             "/api/v1/auth/login",
@@ -524,14 +526,15 @@ class TestTwoFactorAuth:
         from app.core.security import generate_totp_secret
 
         secret = generate_totp_secret()
-        await auth_service.user_repository.update(
-            user.id,
-            {
-                "is_2fa_enabled": True,
-                "totp_secret_encrypted": encrypt(secret),
-                "totp_confirmed_at": datetime.now(UTC),
-            },
-        )
+        with system_context():
+            await auth_service.user_repository.update(
+                user.id,
+                {
+                    "is_2fa_enabled": True,
+                    "totp_secret_encrypted": encrypt(secret),
+                    "totp_confirmed_at": datetime.now(UTC),
+                },
+            )
 
         # Mock Redis-backed challenge issuance to avoid Redis dependency.
         monkeypatch.setattr(

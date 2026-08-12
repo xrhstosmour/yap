@@ -115,14 +115,16 @@ class TestAuditLogRepository:
         repo = AuditLogRepository(session)
         user_id = uuid4()
 
-        await repo.log_user_action_safe(
-            action=AuditAction.USER_CREATE,
-            user_id=user_id,
-            tenant_id=tenant.id,
-            email="admin@example.com",
-        )
+        with tenant_context(tenant.id):
+            await repo.log_user_action_safe(
+                action=AuditAction.USER_CREATE,
+                user_id=user_id,
+                tenant_id=tenant.id,
+                email="admin@example.com",
+            )
 
-        logs, total = await repo.list(filters={"actor_id": str(user_id)})
+            logs, total = await repo.list(filters={"actor_id": str(user_id)})
+
         assert total == 1
         assert logs[0].action == "user_create"
 
@@ -166,20 +168,21 @@ class TestAuditLogRepository:
         user_a = uuid4()
         user_b = uuid4()
 
-        await repo.log_user_action(
-            action=AuditAction.LOGIN,
-            user_id=user_a,
-            tenant_id=tenant.id,
-            email="a@example.com",
-        )
-        await repo.log_user_action(
-            action=AuditAction.LOGOUT,
-            user_id=user_b,
-            tenant_id=tenant.id,
-            email="b@example.com",
-        )
+        with tenant_context(tenant.id):
+            await repo.log_user_action(
+                action=AuditAction.LOGIN,
+                user_id=user_a,
+                tenant_id=tenant.id,
+                email="a@example.com",
+            )
+            await repo.log_user_action(
+                action=AuditAction.LOGOUT,
+                user_id=user_b,
+                tenant_id=tenant.id,
+                email="b@example.com",
+            )
 
-        logs, total = await repo.list(filters={"actor_id": str(user_a)})
+            logs, total = await repo.list(filters={"actor_id": str(user_a)})
 
         assert total == 1
         assert len(logs) == 1
@@ -200,20 +203,21 @@ class TestAuditLogRepository:
         repo = AuditLogRepository(session)
         user_id = uuid4()
 
-        await repo.log_user_action(
-            action=AuditAction.LOGIN,
-            user_id=user_id,
-            tenant_id=tenant.id,
-            email="test@example.com",
-        )
-        await repo.log_user_action(
-            action=AuditAction.LOGOUT,
-            user_id=user_id,
-            tenant_id=tenant.id,
-            email="test@example.com",
-        )
+        with tenant_context(tenant.id):
+            await repo.log_user_action(
+                action=AuditAction.LOGIN,
+                user_id=user_id,
+                tenant_id=tenant.id,
+                email="test@example.com",
+            )
+            await repo.log_user_action(
+                action=AuditAction.LOGOUT,
+                user_id=user_id,
+                tenant_id=tenant.id,
+                email="test@example.com",
+            )
 
-        logs, total = await repo.list(filters={"action": "login"})
+            logs, total = await repo.list(filters={"action": "login"})
 
         assert total == 1
         assert logs[0].action == "login"
@@ -232,22 +236,23 @@ class TestAuditLogRepository:
         repo = AuditLogRepository(session)
         user_id = uuid4()
 
-        await repo.log_user_action(
-            action=AuditAction.LOGIN,
-            user_id=user_id,
-            tenant_id=tenant.id,
-            email="test@example.com",
-            status="success",
-        )
-        await repo.log_user_action(
-            action=AuditAction.LOGIN_FAILED,
-            user_id=user_id,
-            tenant_id=tenant.id,
-            email="test@example.com",
-            status="failure",
-        )
+        with tenant_context(tenant.id):
+            await repo.log_user_action(
+                action=AuditAction.LOGIN,
+                user_id=user_id,
+                tenant_id=tenant.id,
+                email="test@example.com",
+                status="success",
+            )
+            await repo.log_user_action(
+                action=AuditAction.LOGIN_FAILED,
+                user_id=user_id,
+                tenant_id=tenant.id,
+                email="test@example.com",
+                status="failure",
+            )
 
-        logs, total = await repo.list(filters={"status": "failure"})
+            logs, total = await repo.list(filters={"status": "failure"})
 
         assert total == 1
         assert logs[0].status == "failure"
@@ -292,10 +297,11 @@ class TestAuditLogRepository:
 
         # list() filters are exact-match; date-range filtering is done
         # via the built-in created_at sort. We verify all records are returned.
-        logs, total = await repo.list(
-            sort_by="created_at",
-            sort_order="desc",
-        )
+        with tenant_context(tenant.id):
+            logs, total = await repo.list(
+                sort_by="created_at",
+                sort_order="desc",
+            )
 
         assert total == 2
         # Most recent first.

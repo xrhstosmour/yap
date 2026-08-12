@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.tenant import tenant_context
 from app.models.api_key import APIKey
 from app.models.tenant import Tenant
 from app.models.user import User
@@ -143,7 +144,8 @@ class TestAPIKeyRepository:
         await session.commit()
 
         repo = APIKeyRepository(session)
-        keys, total = await repo.list(filters={"user_id": user_a.id})
+        with tenant_context(tenant.id):
+            keys, total = await repo.list(filters={"user_id": user_a.id})
 
         assert total == 1
         assert len(keys) == 1
@@ -187,13 +189,15 @@ class TestAPIKeyRepository:
 
         repo = APIKeyRepository(session)
 
-        # Default: exclude inactive.
-        keys, total = await repo.list_by_user(user.id)
-        assert total == 1
-        assert keys[0].name == "Active Key"
+        with tenant_context(tenant.id):
+            # Default: exclude inactive.
+            keys, total = await repo.list_by_user(user.id)
+            assert total == 1
+            assert keys[0].name == "Active Key"
 
-        # Include inactive.
-        keys, total = await repo.list_by_user(user.id, include_inactive=True)
+            # Include inactive.
+            keys, total = await repo.list_by_user(user.id, include_inactive=True)
+
         assert total == 2
 
     @pytest.mark.anyio
@@ -223,16 +227,18 @@ class TestAPIKeyRepository:
 
         repo = APIKeyRepository(session)
 
-        # Soft delete.
-        result = await repo.delete(key.id, hard=False)
-        assert result is True
+        with tenant_context(tenant.id):
+            # Soft delete.
+            result = await repo.delete(key.id, hard=False)
+            assert result is True
 
-        # Should not appear in list().
-        keys, total = await repo.list()
-        assert total == 0
+            # Should not appear in list().
+            keys, total = await repo.list()
+            assert total == 0
 
-        # Should not appear in list_by_user().
-        keys, total = await repo.list_by_user(user.id)
+            # Should not appear in list_by_user().
+            keys, total = await repo.list_by_user(user.id)
+
         assert total == 0
 
     @pytest.mark.anyio

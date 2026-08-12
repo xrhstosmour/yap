@@ -28,6 +28,7 @@ from app.core.security import generate_password_hash
 from app.core.security import is_token_blacklisted
 from app.core.security import verify_password
 from app.core.settings import settings
+from app.core.tenant import system_context
 from app.models.audit_log import AuditAction
 from app.models.user import User
 from app.models.user import UserRole
@@ -369,8 +370,10 @@ class AuthService:
             if not user_id:
                 raise AuthenticationError("Invalid token")
 
-            # Get user.
-            user = await self.user_repository.get(UUID(user_id))
+            # Bootstrapping identity from a signed token's user ID: the
+            # tenant isn't known yet, that's what this lookup establishes.
+            with system_context():
+                user = await self.user_repository.get(UUID(user_id))
             if not user:
                 raise UserNotFoundError("User not found")
 
@@ -485,7 +488,10 @@ class AuthService:
         Raises:
             UserNotFoundError: If the user no longer exists.
         """
-        user = await self.user_repository.set_verified(user_id)
+        # Bootstrapping identity from a verification token: the tenant
+        # isn't known yet, that's what this lookup establishes.
+        with system_context():
+            user = await self.user_repository.set_verified(user_id)
         if not user:
             raise UserNotFoundError(f"User {user_id!s} not found.")
         logger.info("user_verified", user_id=str(user_id))
@@ -564,12 +570,16 @@ class AuthService:
         if not user_id:
             raise AuthenticationError("Invalid or expired password reset token.")
 
-        user = await self.user_repository.get(user_id)
-        if not user:
-            raise UserNotFoundError("User not found.")
+        # Bootstrapping identity from a password-reset token: the tenant
+        # isn't known yet, that's what this lookup establishes. The update
+        # right after needs the same context, both stay inside the block.
+        with system_context():
+            user = await self.user_repository.get(user_id)
+            if not user:
+                raise UserNotFoundError("User not found.")
 
-        self._validate_password_strength(new_password)
-        await self._update_password_and_invalidate(user, new_password)
+            self._validate_password_strength(new_password)
+            await self._update_password_and_invalidate(user, new_password)
 
         logger.info("password_reset", user_id=str(user.id))
 
@@ -786,7 +796,10 @@ class AuthService:
         if not user_id:
             raise AuthenticationError("Invalid or expired magic link.")
 
-        user = await self.user_repository.get(user_id)
+        # Bootstrapping identity from a magic-link token: the tenant isn't
+        # known yet, that's what this lookup establishes.
+        with system_context():
+            user = await self.user_repository.get(user_id)
         if not user:
             raise AuthenticationError("Invalid or expired magic link.")
         if not user.is_active:
