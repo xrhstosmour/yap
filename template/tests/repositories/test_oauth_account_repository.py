@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.oauth_account import (
-    OAuthAccount,  # noqa: F401 — registers table for create_all
+    OAuthAccount,  # noqa: F401, registers table for create_all
 )
 from app.models.tenant import Tenant
 from app.models.user import User

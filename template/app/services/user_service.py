@@ -342,7 +342,7 @@ class UserService:
         now = datetime.now(UTC)
 
         # Wrap deletion in a savepoint so API key revocation and
-        # anonymization are atomic — if either fails, both roll back.
+        # anonymization are atomic, if either fails, both roll back.
         async with self.session.begin_nested():
             # Revoke all active API keys so key-based auth stops working immediately.
             await self.session.execute(

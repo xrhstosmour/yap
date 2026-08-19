@@ -182,7 +182,7 @@ class WSTicketResponse(BaseSchema):
 
 
 class LoginResponse(BaseSchema):
-    """Login response — either JWT tokens or a 2FA challenge.
+    """Login response, either JWT tokens or a 2FA challenge.
 
     When 2FA is disabled, access_token and refresh_token are populated.
     When 2FA is required, requires_2fa is True and challenge_token is set.

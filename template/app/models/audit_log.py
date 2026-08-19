@@ -116,7 +116,7 @@ class AuditLog(BaseModel, table=True):
     __table_args__ = (
         Index("ix_audit_logs_actor_id_created_at", "actor_id", "created_at"),
         Index("ix_audit_logs_tenant_id_created_at", "tenant_id", "created_at"),
-        # Compound index for get_recent_failures() — WHERE status='failure'
+        # Compound index for get_recent_failures(), WHERE status='failure'
         # ORDER BY created_at DESC. Eliminates the post-scan sort pass.
         Index("ix_audit_logs_status_created_at", "status", "created_at"),
     )

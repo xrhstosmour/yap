@@ -106,7 +106,7 @@ class TestInit:
 
             await init()
 
-        # Only user is added — tenant is skipped.
+        # Only user is added, tenant is skipped.
         assert session.add.call_count == 1
         added_user = session.add.call_args_list[0][0][0]
         assert added_user.role == UserRole.SUPERUSER
@@ -162,12 +162,12 @@ class TestInit:
 
             await init()
 
-        # Only tenant should be added — user is skipped.
+        # Only tenant should be added, user is skipped.
         assert session.add.call_count == 1
         tenant_call = session.add.call_args_list[0][0][0]
         assert tenant_call.id == SYSTEM_TENANT_ID
 
-    # Happy path — full init
+    # Happy path, full init
 
     @pytest.mark.anyio
     async def test_init_runs_successfully(self) -> None:
