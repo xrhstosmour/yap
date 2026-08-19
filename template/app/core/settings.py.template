@@ -353,7 +353,7 @@ class Settings(BaseSettings):
         """
         if not value:
             message = (
-                f"{var_name} is not set — "
+                f"{var_name} is not set, "
                 "run ./scripts/setup.sh to generate it, "
                 "or set it in .env before deploying."
             )
@@ -363,7 +363,7 @@ class Settings(BaseSettings):
                 raise ValueError(message)
         elif any(p in value.lower() for p in self.__placeholder_patterns):
             message = (
-                f"{var_name} contains a placeholder value — "
+                f"{var_name} contains a placeholder value, "
                 "run ./scripts/setup.sh to generate a proper secret."
             )
             if self.ENVIRONMENT == "local":

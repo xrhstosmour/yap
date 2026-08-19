@@ -64,7 +64,7 @@ background tasks, and comprehensive security features.
 
 ```
 app/
-  api/v1/           Route handlers — thin, delegate to services
+  api/v1/           Route handlers, thin, delegate to services
   schemas/          Pydantic request/response models
   services/         Business logic, orchestrates repositories
   repositories/     Database queries (BaseRepository generic CRUD)
@@ -125,7 +125,7 @@ uv run celery -A app.celery_app beat --loglevel=info
 
 - **Layered**: api → services → repositories → models. Never call repositories
   from route handlers; always go through a service.
-- **Dependency injection**: Type aliases in `dependencies.py` — `CurrentUser`,
+- **Dependency injection**: Type aliases in `dependencies.py`, `CurrentUser`,
   `SuperuserUser`, `SessionDependency`, `AccessTokenDependency`, `AnyAuth`.
 - **Custom exceptions**: Each service defines its own exception hierarchy
   (e.g. `AuthenticationError`, `InvalidCredentialsError`). API layer catches
@@ -142,7 +142,7 @@ uv run celery -A app.celery_app beat --loglevel=info
 ## Conventions
 
 - Python 3.14, `uv` package manager.
-- Full descriptive variable names — no abbreviations (`reference` not `ref`).
+- Full descriptive variable names, no abbreviations (`reference` not `ref`).
 - Google-style docstrings: `Args:`, `Returns:`, `Raises:`, `Example:`.
 - `from __future__ import annotations` at the top of every module.
 - `ruff` for linting (single-line imports, double quotes, LF).

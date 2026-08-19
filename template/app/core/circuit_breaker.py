@@ -149,7 +149,7 @@ def circuit_breaker(name: str, **kwargs: int) -> Callable[[F], F]:
                 # call time, and `breaker.success()`/`breaker.failure()` used
                 # by the previous version of this wrapper don't exist on this
                 # pybreaker version at all (only ever exercised against
-                # mocks in tests — see `tests/core/test_circuit_breaker.py`).
+                # mocks in tests, see `tests/core/test_circuit_breaker.py`).
                 # This mirrors the *synchronous* `CircuitBreakerState.call()`
                 # implementation by hand, since `func` must be awaited rather
                 # than called directly.

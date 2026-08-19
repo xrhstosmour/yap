@@ -295,7 +295,7 @@ class TestNormalUserAgents:
                 "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
             },
         )
-        # Googlebot is a search engine bot, not in AI_BOT_PATTERNS — it should pass
+        # Googlebot is a search engine bot, not in AI_BOT_PATTERNS, it should pass
         assert response.status_code == 200
         # Security headers should still be present
         assert response.headers["X-Content-Type-Options"] == "nosniff"

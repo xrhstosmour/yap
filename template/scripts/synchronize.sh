@@ -193,7 +193,7 @@ info "Pulling upstream template changes..."
 # repo so copier's diff algorithm can work.
 TEMP_GIT=false
 if ! git rev-parse --git-dir >/dev/null 2>&1; then
-    warn "Not inside a git repo — initialising temporary git repo for copier."
+    warn "Not inside a git repo, initialising temporary git repo for copier."
     git init --initial-branch=main . >/dev/null 2>&1
     git add -A >/dev/null 2>&1
     git commit --no-verify -m "Temporary baseline for copier update" >/dev/null 2>&1

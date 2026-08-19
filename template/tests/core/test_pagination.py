@@ -104,7 +104,7 @@ class TestBuildPaginationHeaders:
         headers = build_pagination_headers(request, total=100, skip=-5, limit=25)
 
         links = _parse_link_header(headers["Link"])
-        # Treated as first page — no prev, but next exists.
+        # Treated as first page, no prev, but next exists.
         assert "prev" not in links
         assert "next" in links
 
@@ -119,7 +119,7 @@ class TestBuildPaginationHeaders:
         assert f"limit={MAX_PAGE_SIZE}" in last_url
 
     def test_urls_are_path_only_no_host_injection(self) -> None:
-        """Link URLs must be path-only — no scheme or host to prevent injection."""
+        """Link URLs must be path-only, no scheme or host to prevent injection."""
         request = mock_request(path="/api/v1/items")
         headers = build_pagination_headers(request, total=50, skip=0, limit=25)
 

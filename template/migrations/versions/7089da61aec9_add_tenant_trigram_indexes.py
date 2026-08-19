@@ -9,7 +9,7 @@ Unlike the `users.email`/`users.full_name` trigram indexes added in
 the `unaccent()`-aware search helpers in `app/core/search.py`),
 `list_tenants` filters on the raw columns with a plain `.ilike()`, so the
 indexes here are built directly on `name`/`slug` without the unaccent
-wrapper — that is what the planner will actually match against this
+wrapper, that is what the planner will actually match against this
 query's `ILIKE` expressions.
 
 Revision ID: 7089da61aec9

@@ -77,7 +77,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 # Dummy hash for timing attack prevention.
 # Generated at module load to avoid hardcoded values.
 # Used when user/key is not found to maintain consistent response time.
-# Any valid bcrypt hash works here — the actual value is not a secret.
+# Any valid bcrypt hash works here, the actual value is not a secret.
 DUMMY_PASSWORD_HASH: str = generate_password_hash(secrets.token_urlsafe(32))
 
 
