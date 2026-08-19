@@ -9,7 +9,7 @@ Includes Greek language support: Greeklish-to-Greek transliteration,
 automatic unaccent normalisation on search columns, and configurable
 FTS language via settings.
 
-These helpers are database-level only — no stored tsvector columns
+These helpers are database-level only, no stored tsvector columns
 required. Add stored tsvector columns in your own migrations for
 high-volume production tables.
 """
@@ -54,7 +54,7 @@ def normalise_query(query_str: str) -> str:
 
     Applies Greeklish-to-Greek transliteration so that typing
     `"yiannis"` matches stored `"Γιάννης"` (via unaccent on the
-    column side). The query itself is not unaccented — the column
+    column side). The query itself is not unaccented, the column
     expression is, so diacritics in the query are preserved for
     exact-match scoring.
 

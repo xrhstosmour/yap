@@ -391,7 +391,7 @@ class TestAuditLogRepository:
         with tenant_context(tenant.id):
             count = await repo.cleanup_old_logs(days=365)
 
-        # Log is 5 days old, cutoff is 365 days — should not be cleaned.
+        # Log is 5 days old, cutoff is 365 days, should not be cleaned.
         assert count == 0
 
         await session.refresh(recent_log)

@@ -198,7 +198,7 @@ class TestBeginAuthentication:
             )
 
         assert "allow_credentials" in options
-        assert session_key is None  # known user — challenge stored under user_id
+        assert session_key is None  # known user, challenge stored under user_id
         assert len(options["allow_credentials"]) == 1
 
 

@@ -103,5 +103,5 @@ class TestBackendPreStart:
             with pytest.raises(RetryError):
                 init(mock_engine)
 
-        # Retried multiple times — the exact count matches max_tries (300).
+        # Retried multiple times, the exact count matches max_tries (300).
         assert mock_session.exec.call_count > 1

@@ -2,7 +2,7 @@
 
 Clients that include an `X-Idempotency-Key` header on mutating
 requests (POST, PATCH, PUT, DELETE) are guaranteed that retrying the
-same key will not execute the side effect a second time — the cached
+same key will not execute the side effect a second time, the cached
 response is replayed instead.
 """
 

@@ -51,7 +51,7 @@ class User(BaseModel, table=True):
             randomised and cannot be compared or indexed directly.
         email_hash: Deterministic HMAC-SHA256 hash of `email`, unique and
             indexed. See `CryptoService.hash_for_search()`.
-        full_name: User's display name. Left unencrypted — see note below.
+        full_name: User's display name. Left unencrypted, see note below.
         phone: Phone number in E.164 format. Encrypted at rest, same
             pattern as `email`. `phone_hash` enables exact-match lookups.
         phone_hash: Deterministic HMAC-SHA256 hash of `phone`, indexed.
@@ -78,7 +78,7 @@ class User(BaseModel, table=True):
         (`app/core/search.py`), which requires substring/similarity
         matching directly in SQL. Fernet ciphertext is randomised per
         value, so encrypted text cannot support trigram or full-text
-        search — only exact-match lookups via a deterministic HMAC hash
+        search, only exact-match lookups via a deterministic HMAC hash
         (as used for `email`/`phone`) are possible on encrypted columns.
         Encrypting `full_name` would require dropping name search
         entirely or building a bespoke searchable-encryption scheme
@@ -194,7 +194,7 @@ def _sync_email_hash(
 
     Fires on every attribute assignment, including model construction
     (`User(email=...)`) and `setattr()`, so callers never compute the
-    search hash themselves. Does not fire on ORM load — the hash is
+    search hash themselves. Does not fire on ORM load, the hash is
     read back as its own column value there.
 
     `email_hash` is `nullable=False`, unlike `phone_hash`, so an empty

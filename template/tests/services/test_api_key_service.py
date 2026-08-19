@@ -481,7 +481,7 @@ class TestUpdate:
         service.apikey_repository.get = AsyncMock(return_value=existing)
         service.audit_repository.log_user_action_safe = AsyncMock()
 
-        # All fields None — nothing to update.
+        # All fields None, nothing to update.
         data = APIKeyUpdate.model_construct()
 
         result = await service.update(key_id, user_id, tenant_id, data)

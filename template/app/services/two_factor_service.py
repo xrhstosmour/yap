@@ -207,7 +207,7 @@ class TwoFactorAuthService:
         """Issue a short-lived 2FA challenge token.
 
         Stores the challenge in Redis with a 5-minute TTL. The token
-        is an opaque random string — not a JWT.
+        is an opaque random string, not a JWT.
 
         Args:
             user: The authenticated user who needs to complete 2FA.
@@ -290,7 +290,7 @@ class TwoFactorAuthService:
         await self._check_totp_rate_limit(user.id)
 
         # Find and consume a matching unused recovery code.
-        # NOTE: TotpRecoveryCode does not have a tenant_id field — recovery
+        # NOTE: TotpRecoveryCode does not have a tenant_id field, recovery
         # codes are tenant-agnostic. Projects requiring tenant isolation
         # should add a tenant_id column and join through the User model.
         #
@@ -496,7 +496,7 @@ class TwoFactorAuthService:
         """
         redis = await get_redis()
         key = f"totp_used:{user_id}:{totp_code}"
-        # Single atomic SET NX EX — no race condition between setnx and expire.
+        # Single atomic SET NX EX, no race condition between setnx and expire.
         result = await redis.set(key, "1", nx=True, ex=settings.TOTP_REPLAY_TTL)
         if result is None:
             raise InvalidTOTPError("TOTP code has already been used.")
@@ -517,7 +517,7 @@ class TwoFactorAuthService:
         async with self.session.begin_nested():
             await self._delete_all_recovery_codes(user_id)
             # Hash all codes concurrently off the event loop instead of
-            # sequentially — bcrypt is ~100-250ms per call, so hashing 10
+            # sequentially, bcrypt is ~100-250ms per call, so hashing 10
             # codes one at a time would block the loop for 1-2.5s while
             # this nested transaction is open.
             code_hashes = await asyncio.gather(

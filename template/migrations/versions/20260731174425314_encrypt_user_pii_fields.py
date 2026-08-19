@@ -1,6 +1,6 @@
 """Encrypt `email`/`phone` on `users` and add deterministic search hashes
 
-`full_name` is intentionally left unencrypted — see the note on
+`full_name` is intentionally left unencrypted, see the note on
 `app.models.user.User` for why full trigram/FTS search over encrypted
 text is not viable with the HMAC-based scheme used here.
 
@@ -28,7 +28,7 @@ def upgrade() -> None:
 
     bind = op.get_bind()
 
-    # 1. Add the deterministic HMAC hash columns, nullable for now —
+    # 1. Add the deterministic HMAC hash columns, nullable for now,
     #    they are backfilled below before being locked down.
     op.add_column("users", sa.Column("email_hash", sa.String(length=64), nullable=True))
     op.add_column("users", sa.Column("phone_hash", sa.String(length=64), nullable=True))
@@ -76,7 +76,7 @@ def upgrade() -> None:
 
     # 4. Drop the plaintext-era unique index. Fernet ciphertext is
     #    randomised per encryption call, so it can never be compared or
-    #    indexed directly — equality lookups now go through email_hash.
+    #    indexed directly, equality lookups now go through email_hash.
     op.drop_index(op.f("ix_users_email"), table_name="users")
 
     # 5. Lock down the backfilled hash columns: email_hash is required

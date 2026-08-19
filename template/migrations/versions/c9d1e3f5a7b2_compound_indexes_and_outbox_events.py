@@ -35,14 +35,14 @@ def upgrade() -> None:
     op.drop_index(op.f("ix_audit_logs_actor_id"), table_name="audit_logs")
     op.drop_index(op.f("ix_audit_logs_tenant_id"), table_name="audit_logs")
 
-    # Compound (actor_id, created_at) — GDPR export and user activity queries.
+    # Compound (actor_id, created_at), GDPR export and user activity queries.
     op.create_index(
         op.f("ix_audit_logs_actor_id_created_at"),
         "audit_logs",
         ["actor_id", "created_at"],
         unique=False,
     )
-    # Compound (tenant_id, created_at) — tenant audit timeline queries.
+    # Compound (tenant_id, created_at), tenant audit timeline queries.
     op.create_index(
         op.f("ix_audit_logs_tenant_id_created_at"),
         "audit_logs",
@@ -99,7 +99,7 @@ def upgrade() -> None:
         ["event_type"],
         unique=False,
     )
-    # Compound (status, created_at) — dispatcher's get_pending() query.
+    # Compound (status, created_at), dispatcher's get_pending() query.
     op.create_index(
         op.f("ix_outbox_events_status_created_at"),
         "outbox_events",

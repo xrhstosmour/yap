@@ -115,7 +115,7 @@ def test_health_check_task_executes() -> None:
     assert result.result["status"] == "healthy"
 
 
-# FastAPI server smoke test — starts the server and makes real HTTP requests.
+# FastAPI server smoke test, starts the server and makes real HTTP requests.
 # NOTE: Uses fixed port 8001. If occupied, test will fail.
 # Consider using portpicker for dynamic port selection in CI.
 @pytest.mark.slow
@@ -192,7 +192,7 @@ def test_api_smoke() -> None:
         assert r.status_code == 200
         assert r.json()["message"] == "Alive"
 
-        # Health check (readiness — verifies DB + Redis connectivity).
+        # Health check (readiness, verifies DB + Redis connectivity).
         r = httpx.get(f"{base}/api/v1/health")
         assert r.status_code == 200
         data = r.json()
@@ -365,7 +365,7 @@ def test_celery_beat_default_starts() -> None:
 def test_core_compose_services_running() -> None:
     """Verify core docker-compose services (postgresql, redis) are healthy.
 
-    RabbitMQ is excluded — the container has known stability issues on CI runners
+    RabbitMQ is excluded, the container has known stability issues on CI runners
     due to Erlang VM memory limits.  Celery beat/worker tests will skip when the
     broker is unreachable.
     """

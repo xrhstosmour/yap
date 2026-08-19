@@ -21,15 +21,15 @@
 
 ### GDPR Compliance
 
-- **Account Deletion**: Self-service right to erasure (Article 17) — anonymizes PII, revokes API keys, invalidates all JWTs
-- **Data Export**: Right to data portability (Article 20) — JSON attachment with profile, API keys, and audit activity
+- **Account Deletion**: Self-service right to erasure (Article 17), anonymizes PII, revokes API keys, invalidates all JWTs
+- **Data Export**: Right to data portability (Article 20), JSON attachment with profile, API keys, and audit activity
 
 ### File Storage
 
 - **Object Storage**: MinIO / S3-compatible blob storage for documents, images, and files
 - **Deduplication**: SHA-256 content hash dedup, identical files share storage via reference counting
 - **Image Processing**: Automatic thumbnail generation and dimension extraction via Pillow
-- **Presigned URLs**: Time-limited direct download URLs — file bytes never proxy through the API
+- **Presigned URLs**: Time-limited direct download URLs, file bytes never proxy through the API
 - **Configurable Limits**: `STORAGE_MAX_FILE_SIZE` setting, easy to adjust per deployment
 
 ### Core Infrastructure
@@ -54,13 +54,13 @@
 
 - **Idempotency**: `X-Idempotency-Key` header support on mutating endpoints, safe retries without duplicate side effects
 - **Circuit Breaker**: Protect external service calls from cascading failures
-- **Token Invalidation**: `token_version` claim on all JWTs — password reset, 2FA change, and account deletion immediately block all sessions
+- **Token Invalidation**: `token_version` claim on all JWTs, password reset, 2FA change, and account deletion immediately block all sessions
 - **Resilient Container Startup**: Automated retries on transient Docker Hub/network failures
 
 ### Pagination
 
 - **RFC 5988 Link Headers**: `X-Total-Count` and `Link` (first, last, prev, next) on all list endpoints
-- **`PaginatedResponse`**: Reusable response wrapper — new list endpoints auto-inherit pagination headers
+- **`PaginatedResponse`**: Reusable response wrapper, new list endpoints auto-inherit pagination headers
 
 ### Developer Experience
 
