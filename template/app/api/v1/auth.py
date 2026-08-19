@@ -159,7 +159,7 @@ async def enroll_2fa(
     """Begin TOTP 2FA enrollment for the current user.
 
     Returns a QR code data URL and plaintext recovery codes.
-    Recovery codes are shown only once — store them securely.
+    Recovery codes are shown only once, store them securely.
     """
     from app.services.two_factor_service import TwoFactorAlreadyEnabledError
     from app.services.two_factor_service import TwoFactorAuthService

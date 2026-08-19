@@ -36,7 +36,7 @@ class TestGreeklishToGreek:
     def test_already_latin_stays_as_is_when_no_match(self) -> None:
         """Latin characters without Greeklish mappings pass through."""
         result = greeklish_to_greek("abc")
-        # "a" -> α, "b" -> β, "c" not in map — passes through.
+        # "a" -> α, "b" -> β, "c" not in map, passes through.
         assert result == "αβc"
 
     def test_multi_char_pattern_before_single(self) -> None:

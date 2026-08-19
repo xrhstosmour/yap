@@ -2,7 +2,7 @@
 
 WebSocket handshakes cannot carry an `Authorization` header, so the client's
 JWT access token would otherwise have to travel as a `?token=` query
-parameter — which leaks into server/proxy access logs and browser history.
+parameter, which leaks into server/proxy access logs and browser history.
 Instead, an authenticated client mints a ticket via `POST /auth/ws-ticket`
 and connects with that; the ticket is opaque, single-use, and expires in
 seconds, bounding the blast radius of a logged query string.

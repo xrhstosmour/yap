@@ -100,7 +100,7 @@ class UserRepository(SearchMixin, BaseRepository[User]):
 
         `email` is encrypted at rest (Fernet ciphertext is randomised
         per value), so it cannot support trigram/full-text matching and
-        is intentionally excluded here — only exact-match lookups via
+        is intentionally excluded here, only exact-match lookups via
         `email_hash` are possible on it (see `get_by_email`). Only
         `full_name`, which is stored unencrypted for this reason, is
         searched.

@@ -164,7 +164,7 @@ def test_circuit_breaker_error_message(
     assert expected_state_text in message
 
 
-#  circuit_breaker decorator — sync functions
+#  circuit_breaker decorator, sync functions
 
 
 def test_circuit_breaker_sync_decorator_calls_function() -> None:
@@ -229,7 +229,7 @@ def test_circuit_breaker_sync_decorator_kwargs_pass_through() -> None:
     assert breaker.reset_timeout == 120
 
 
-#  circuit_breaker decorator — async functions
+#  circuit_breaker decorator, async functions
 #
 # These exercise the real (non-mocked) pybreaker.CircuitBreaker, unlike the
 # previous version of this section: mocking breaker.success()/breaker.failure()

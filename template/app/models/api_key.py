@@ -55,8 +55,8 @@ class APIKey(BaseModel, table=True):
 
     __tablename__ = "api_keys"  # pyright: ignore[reportAssignmentType]
     # Compound indexes for common query patterns.
-    # list_by_user() filters on (user_id, is_active) — compound covers both.
-    # deactivate_expired_keys() filters on (expires_at, is_active) — same.
+    # list_by_user() filters on (user_id, is_active), compound covers both.
+    # deactivate_expired_keys() filters on (expires_at, is_active), same.
     __table_args__ = (
         Index("ix_api_keys_user_id_is_active", "user_id", "is_active"),
         Index("ix_api_keys_expires_at_is_active", "expires_at", "is_active"),

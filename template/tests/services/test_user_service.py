@@ -402,7 +402,7 @@ class TestUpdateProfile:
 
 
 class TestDeleteMe:
-    """Tests for UserService.delete_me() — GDPR account deletion."""
+    """Tests for UserService.delete_me(), GDPR account deletion."""
 
     @pytest.mark.asyncio
     async def test_delete_me_revokes_api_keys(
@@ -593,7 +593,7 @@ class TestRevokeAllSessions:
 
 
 class TestExportMyData:
-    """Tests for UserService.export_my_data() — GDPR data export."""
+    """Tests for UserService.export_my_data(), GDPR data export."""
 
     @pytest.mark.asyncio
     async def test_export_returns_profile_data(
@@ -830,7 +830,7 @@ class TestListUsers:
 
 
 class TestAdminUpdate:
-    """Tests for UserService.update() — admin-specific field updates."""
+    """Tests for UserService.update(), admin-specific field updates."""
 
     @pytest.mark.asyncio
     async def test_update_is_active_field(self, mock_user_service: UserService) -> None:

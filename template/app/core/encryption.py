@@ -31,7 +31,7 @@ Transparent model field pattern (used by `User.email` / `User.phone`)::
 
     class User(BaseModel, table=True):
         # The column stores ciphertext; the Python attribute always
-        # reads/writes plain text — encryption happens at the SQLAlchemy
+        # reads/writes plain text, encryption happens at the SQLAlchemy
         # bind/result boundary, transparently to the rest of the app.
         email: EmailStr = Field(sa_type=EncryptedString(512))
 
@@ -39,8 +39,8 @@ Searchable encrypted field (deterministic)::
 
     search_token = crypto.hash_for_search("user@yap.com")
     # Store search_token in a companion `*_hash` column (e.g. `email_hash`)
-    # alongside the encrypted value, and filter on it for equality lookups
-    # — the encrypted column itself cannot be searched or indexed.
+    # alongside the encrypted value, and filter on it for equality lookups,
+    # the encrypted column itself cannot be searched or indexed.
 """
 
 from __future__ import annotations
@@ -61,7 +61,7 @@ class CryptoService:
     """Field-level encryption service with key rotation support.
 
     Uses Fernet for symmetric encryption. Supports multiple keys
-    for rotation — new data is encrypted with the primary key,
+    for rotation, new data is encrypted with the primary key,
     old data can be decrypted with any valid key.
     """
 
@@ -157,7 +157,7 @@ class CryptoService:
         """
         if not self._keys:
             raise RuntimeError("Encryption not configured. Set CRYPTO_KEY in .env")
-        # Derive a separate HMAC key via domain separation — never reuse
+        # Derive a separate HMAC key via domain separation, never reuse
         # the Fernet encryption key directly as an HMAC key.
         key_bytes = base64.urlsafe_b64decode(self._keys[0])
         hmac_key = hashlib.sha256(key_bytes + b":search-hmac").digest()
@@ -176,7 +176,7 @@ class EncryptedString(TypeDecorator[str]):
 
     Because Fernet ciphertext is randomised (unique IV per call), this
     type is not suitable for columns that need equality lookups or
-    uniqueness constraints — pair it with a deterministic HMAC hash
+    uniqueness constraints, pair it with a deterministic HMAC hash
     column (see `CryptoService.hash_for_search()`) for that purpose.
 
     Example::

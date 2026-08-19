@@ -30,7 +30,7 @@ class TestGenerateTotpSecret:
     def test_secret_is_valid_base32(self) -> None:
         """Secret should be decodable as base32."""
         secret = generate_totp_secret()
-        # pyotp uses base32 — must be valid base32 characters.
+        # pyotp uses base32, must be valid base32 characters.
         padded = secret + "=" * (-len(secret) % 8)
         b32decode(padded)
 

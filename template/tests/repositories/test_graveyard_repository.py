@@ -361,7 +361,7 @@ class TestGraveyardRepository:
             entries.append(entry)
 
         # Age the first 2 entries to be older than 90 days.
-        # Use a naive datetime — SQLite discards timezone info, and the
+        # Use a naive datetime, SQLite discards timezone info, and the
         # ORM bulk-delete post-synchronize step would fail comparing
         # naive stored values against an aware purge cutoff.
         old_date = (datetime.now(UTC) - timedelta(days=120)).replace(tzinfo=None)

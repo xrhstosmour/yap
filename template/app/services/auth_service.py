@@ -94,7 +94,7 @@ class AuthService:
     def _validate_password_strength(password: str) -> None:
         """Validate password meets minimum strength requirements.
 
-        Template implementation — projects should customize this
+        Template implementation, projects should customize this
         with their own password policy (e.g. zxcvbn, Pwned Passwords).
 
         Args:
@@ -170,7 +170,7 @@ class AuthService:
 
         # NOTE: send_template_email_task.delay() is a Celery sync call.
         # Celery tasks are designed to be dispatched synchronously with .delay()
-        # or .apply_async() — this is correct even in an async context because
+        # or .apply_async(), this is correct even in an async context because
         # the task is serialized and handed off to the broker, not executed inline.
         try:
             send_template_email_task.delay(
@@ -516,7 +516,7 @@ class AuthService:
             user=user,
             token_factory=create_email_verification_token(user.id),
             url_path="/auth/verify-email",
-            subject=f"Verify your email — {settings.PROJECT_NAME}",
+            subject=f"Verify your email, {settings.PROJECT_NAME}",
             template_name="verification.html",
             url_field_name="verification_url",
         )
@@ -526,7 +526,7 @@ class AuthService:
         """Queue a password reset email if the account exists.
 
         Silently does nothing when the email is not registered to
-        prevent user enumeration — callers should always return 204.
+        prevent user enumeration, callers should always return 204.
         Generates a single-use Redis-backed token with a 1-hour TTL.
 
         Args:
@@ -543,7 +543,7 @@ class AuthService:
             user=user,
             token_factory=create_password_reset_token(user.id),
             url_path="/auth/reset-password",
-            subject=f"Reset your password — {settings.PROJECT_NAME}",
+            subject=f"Reset your password, {settings.PROJECT_NAME}",
             template_name="password_reset.html",
             url_field_name="reset_url",
         )
@@ -753,7 +753,7 @@ class AuthService:
         """Queue a passwordless login link email if the account exists.
 
         Silently does nothing when the email is not registered to
-        prevent user enumeration — callers should always return 204.
+        prevent user enumeration, callers should always return 204.
 
         Args:
             email: Email address of the account to send the link to.

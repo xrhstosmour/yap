@@ -30,7 +30,7 @@ class TestEncryption:
         assert decrypt(encrypt(plaintext)) == plaintext
 
     def test_different_ciphertexts_for_same_plaintext(self) -> None:
-        """Fernet uses random IVs — same input gives different output."""
+        """Fernet uses random IVs, same input gives different output."""
         c1 = encrypt("test")
         c2 = encrypt("test")
         assert c1 != c2
@@ -151,7 +151,7 @@ class TestCryptoService:
         # After rotation: key2 is primary, key1 still valid for decryption
         rotated = CryptoService(encryption_keys=[key2, key1])
 
-        # Encrypt new data — uses primary key2
+        # Encrypt new data, uses primary key2
         new_ciphertext = rotated.encrypt("new-data")
 
         # Both ciphertexts are decryptable by the rotated service
