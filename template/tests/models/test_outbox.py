@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import delete
 from sqlmodel import select
 
 from app.core.tenant import tenant_context
@@ -175,3 +178,59 @@ class TestOutbox:
         results = await outbox.get_pending(limit=3)
 
         assert len(results) == 3
+
+    @pytest.mark.anyio
+    async def test_get_pending_does_not_claim_rows_locked_by_a_concurrent_call(
+        self, engine: AsyncEngine
+    ) -> None:
+        """Two concurrent get_pending() calls must not claim the same rows.
+
+        Uses two independent sessions (separate connections, real commits,
+        both kept open across the gather) so the database itself resolves
+        the race via `with_for_update(skip_locked=True)`, modeling an
+        overlapping Celery beat tick or a second worker polling the same
+        outbox table. Without atomic claiming, both calls could return, and
+        `process_outbox` would dispatch, the same events twice.
+
+        Args:
+            engine: Async engine fixture, used to open independent sessions.
+
+        Returns:
+            None.
+        """
+        event_type = "concurrent.claim.test"
+
+        async with AsyncSession(engine, expire_on_commit=False) as setup_session:
+            outbox = Outbox(setup_session)
+            for i in range(4):
+                await outbox.publish(event_type, {"index": i})
+            await setup_session.commit()
+
+        session_a = AsyncSession(engine, expire_on_commit=False)
+        session_b = AsyncSession(engine, expire_on_commit=False)
+
+        async def _claim(claim_session: AsyncSession) -> list[str]:
+            events = await Outbox(claim_session).get_pending(limit=2)
+            return [str(event.id) for event in events]
+
+        try:
+            # Both sessions stay open (locks held) for the full gather, so
+            # the race is genuine regardless of exact task scheduling.
+            first_ids, second_ids = await asyncio.gather(
+                _claim(session_a), _claim(session_b)
+            )
+
+            assert first_ids, "first claim should have locked at least one row"
+            assert second_ids, "second claim should have locked at least one row"
+            assert set(first_ids).isdisjoint(second_ids)
+        finally:
+            await session_a.rollback()
+            await session_b.rollback()
+            await session_a.close()
+            await session_b.close()
+
+            async with AsyncSession(engine, expire_on_commit=False) as cleanup_session:
+                await cleanup_session.execute(
+                    delete(OutboxEvent).where(OutboxEvent.event_type == event_type)
+                )
+                await cleanup_session.commit()
