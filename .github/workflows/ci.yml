@@ -44,7 +44,6 @@ jobs:
           "
       - run: uv sync --extra dev
       - run: uv run ruff check app/ tests/
-      - run: uv run ruff format app/ tests/
       - run: uv run ruff format --check app/ tests/
       - run: uv run mypy app/ --config-file mypy-ci.toml
       - name: Check single Alembic head
