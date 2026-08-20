@@ -65,6 +65,11 @@ fi
 SECRET_KEY="${SECRET_KEY:-$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")}"
 CRYPTO_KEY="${CRYPTO_KEY:-$(python3 -c "import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())")}"
 POSTGRESQL_PASSWORD="${POSTGRESQL_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(24))")}"
+# GlitchTip's containers dial Postgres directly by hostname before the app's
+# own POSTGRESQL_SERVER setting is ever read, and unlike pgAdmin4's use of the
+# same key, GlitchTip's compose has no soft default, it requires the variable
+# set. "postgresql" is the container's own hostname on the shared network.
+POSTGRESQL_HOST="${POSTGRESQL_HOST:-postgresql}"
 FIRST_SUPERUSER_PASSWORD="${FIRST_SUPERUSER_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")}"
 RABBITMQ_PASSWORD="${RABBITMQ_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")}"
 RABBITMQ_ERLANG_COOKIE="${RABBITMQ_ERLANG_COOKIE:-$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")}"
@@ -137,6 +142,7 @@ backfill_secret() {
 backfill_secret SECRET_KEY "${SECRET_KEY}"
 backfill_secret CRYPTO_KEY "${CRYPTO_KEY}"
 backfill_secret POSTGRESQL_PASSWORD "${POSTGRESQL_PASSWORD}"
+backfill_secret POSTGRESQL_HOST "${POSTGRESQL_HOST}"
 backfill_secret FIRST_SUPERUSER_PASSWORD "${FIRST_SUPERUSER_PASSWORD}"
 backfill_secret RABBITMQ_PASSWORD "${RABBITMQ_PASSWORD}"
 backfill_secret RABBITMQ_ERLANG_COOKIE "${RABBITMQ_ERLANG_COOKIE}"
