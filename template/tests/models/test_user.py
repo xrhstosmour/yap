@@ -39,6 +39,23 @@ class TestEmailHashSync:
 
         assert user.email_hash != original_hash
 
+    def test_erased_users_do_not_collide_on_email_hash(self) -> None:
+        """Two separately erased users must not end up with the same email_hash.
+
+        `hash_for_search("")` is deterministic, so if the empty string were
+        hashed directly, every erased user would get the exact same
+        `email_hash`, and the column's `unique=True` constraint would let
+        only the first erasure in the database's lifetime succeed. Each
+        erasure must produce a distinct hash instead.
+        """
+        first_user = User(email="first@example.com", hashed_password="hash")
+        second_user = User(email="second@example.com", hashed_password="hash")
+
+        first_user.email = ""
+        second_user.email = ""
+
+        assert first_user.email_hash != second_user.email_hash
+
 
 class TestPhoneHashSync:
     """Tests for the `_sync_phone_hash` event listener."""
