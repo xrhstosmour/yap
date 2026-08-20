@@ -138,6 +138,11 @@ class CryptoService:
         The same input always produces the same hash, enabling equality
         lookups on encrypted columns.
 
+        Only reflects the current primary key. A value hashed before a
+        key rotation no longer matches the hash this returns afterwards,
+        use `hash_candidates_for_search()` for lookups that must survive
+        rotation.
+
         Args:
             value: Value to hash.
 
@@ -149,9 +154,37 @@ class CryptoService:
         """
         if not self._keys:
             raise RuntimeError("Encryption not configured. Set CRYPTO_KEY in .env")
+        return self._hash_with_key(value, self._keys[0])
+
+    def hash_candidates_for_search(self, value: str) -> list[str]:
+        """Create a deterministic hash of `value` under every configured key.
+
+        Mirrors `decrypt()`'s try-every-key approach to key rotation:
+        `hash_for_search()` alone only reflects the current primary key,
+        so a value hashed before a rotation no longer matches after one.
+        Lookups that must keep matching across rotation (e.g. filtering
+        `User.email_hash`) should compare against ANY of these candidates
+        instead of a single `hash_for_search()` value.
+
+        Args:
+            value: Value to hash.
+
+        Returns:
+            List of base64-encoded HMAC hashes prefixed with "hmac:",
+            one per configured key, primary key first.
+
+        Raises:
+            RuntimeError: If encryption is not configured.
+        """
+        if not self._keys:
+            raise RuntimeError("Encryption not configured. Set CRYPTO_KEY in .env")
+        return [self._hash_with_key(value, key) for key in self._keys]
+
+    def _hash_with_key(self, value: str, key: str) -> str:
+        """Compute the deterministic search hash of `value` under one key."""
         # Derive a separate HMAC key via domain separation, never reuse
         # the Fernet encryption key directly as an HMAC key.
-        key_bytes = base64.urlsafe_b64decode(self._keys[0])
+        key_bytes = base64.urlsafe_b64decode(key)
         hmac_key = hashlib.sha256(key_bytes + b":search-hmac").digest()
         h = hmac.new(hmac_key, value.encode(), hashlib.sha256)
         return "hmac:" + base64.urlsafe_b64encode(h.digest()).decode()
