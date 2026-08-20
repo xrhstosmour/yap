@@ -148,10 +148,20 @@ class Outbox:
             event.status = "pending"
 
     async def get_pending(self, limit: int = 100) -> list[OutboxEvent]:
+        """Fetch and claim pending events for dispatch.
+
+        `with_for_update(skip_locked=True)` locks the returned rows for the
+        rest of this transaction and makes a second, concurrent caller skip
+        them entirely instead of returning the same rows. Without this, an
+        overlapping beat tick or a second worker consuming the same
+        periodic task could fetch and dispatch the same batch of events
+        twice before either transaction commits.
+        """
         result = await self.session.execute(
             select(OutboxEvent)
             .where(OutboxEvent.status == "pending")  # type: ignore[arg-type]
             .order_by(OutboxEvent.created_at.asc())  # type: ignore[attr-defined]
             .limit(limit)
+            .with_for_update(skip_locked=True)
         )
         return list(result.scalars().all())
