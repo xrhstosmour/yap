@@ -5,6 +5,87 @@ All notable changes to this project will be documented in this file.
 The format is based on the '[Keep a Changelog](https://keepachangelog.com/en/1.0.0/)',
 and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Add multi-tenancy with automatic tenant filtering and a `Tenant` model
+- Add TOTP two-factor authentication with single-use recovery codes
+- Add WebAuthn credential registration and assertion
+- Add Google OAuth sign-in and an `OAuthAccount` model
+- Add passwordless authentication via magic links
+- Add password reset and email verification flows
+- Add GDPR endpoints for data export and right-to-erasure
+- Add field-level encryption for user PII, with searchable blind-index hashes
+- Add file storage with S3-compatible backends and optional MinIO
+- Add per-tenant file deduplication keyed on content hash
+- Add the outbox pattern for transactional event publishing
+- Add a graveyard table retaining soft-deleted records
+- Add search infrastructure with `pg_trgm` and `unaccent` trigram indexes
+- Add Greeklish transliteration for search
+- Add a Redis-backed JWT blacklist for token revocation
+- Add API keys with scopes, expiry, and usage tracking
+- Add phone numbers to `User`, with normalization and validation
+- Add a `UserRole` enum on `User`, replacing `is_superuser`
+- Add pagination headers and a shared pagination helper
+- Add a multi-database engine option and a Copier question for extra databases
+- Add `scripts/synchronize.sh` for pulling template updates into generated projects
+- Add nested-repository support, moving CI into the parent repo's workflows
+- Add compound and performance indexes across the schema
+- Add `AGENTS.md` documenting the template's conventions
+
+### Changed
+
+- Move settings-driven database pool and Celery tuning into `settings.py`
+- Standardize on whole-word names across the codebase, no abbreviations
+- Standardize SQLModel imports to one symbol per line
+- Standardize audit log error handling
+- Offload blocking bcrypt hashing and storage I/O off the event loop
+- Reduce graveyard retention
+- Give Celery tasks pooled database connections
+- Improve outbox and audit log query efficiency
+- Pin the containers repo and supply-chain dependencies to fixed commits
+- Run `ruff` and `mypy` as local pre-commit hooks against the project's own environment
+- Upgrade to the latest FastAPI and align the Docker base image with the project's Python version
+
+### Fixed
+
+- Fail closed when a tenant-scoped query runs with no tenant context, and add `system_context()` for deliberate cross-tenant access
+- Close a 2FA bypass reachable through OAuth, magic link, and WebAuthn sign-in
+- Authenticate WebSocket endpoints
+- Check the blacklist on refresh tokens
+- Place the CORS middleware outermost in the stack
+- Tenant-scope `AuditLogRepository.get_recent_failures`, `increment_token_version`, graveyard recovery, and tenant slug lookup
+- Encrypt `actor_email` on `audit_logs`
+- Recompute `email_hash` when `email` is cleared, and stop `hash_for_search` breaking after key rotation
+- Resolve an `email_hash` collision during erasure
+- Complete GDPR erasure for phone, TOTP secret, and 2FA credentials
+- Deduplicate recovery codes within a batch, and harden TOTP recovery-code verification against races and abuse
+- Make `decrement_reference_count`, `update_profile` token-version bumps, and other update paths single atomic statements
+- Close races on file upload content hashing and outbox double dispatch
+- Propagate `tenant_id` through outbox event publishing
+- Respect soft deletes in email-exists checks, feature flag lookups, and tenant slug lookups
+- Stop the async circuit breaker from crashing
+- Stop audit log write failures from poisoning the session
+- Give anonymous idempotency keys distinct scopes
+- Fix an unstable sort order in the tenant repository
+- Fix a tenant search index gap and a cache stampede
+- Drop redundant secondary indexes on primary key columns
+- Register missing tables in `models/__init__`
+- Make the `unaccent` search path immutable
+- Generate a real `RABBITMQ_ERLANG_COOKIE` secret
+- Backfill missing keys in `.env`, not just placeholder values, and preserve volumes across setup runs
+- Track the full commit SHA in `.copier/.version`, and record it before Copier runs
+- Fix `synchronize.sh` version tracking, commit tracking, inline conflict handling, and a redundant clone
+- Assert a single Alembic head in CI, and fix a CI port conflict causing double migration
+- Scope CI/CD to conditional secrets, and harden workflow permissions
+
+### Security
+
+- Keep secrets out of scaffolding output
+- Auto-generate every secret Copier collects when left empty
+- Add supply-chain pinning for third-party GitHub Actions and container images
+
 ## [0.2.0] - 2026-05-14
 
 ### Added
