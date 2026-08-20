@@ -76,8 +76,15 @@ REDIS_COMMANDER_PASSWORD="${REDIS_COMMANDER_PASSWORD:-$(python3 -c "import secre
 METABASE_READ_ONLY_PASSWORD="${METABASE_READ_ONLY_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")}"
 STORAGE_SECRET_KEY="${STORAGE_SECRET_KEY:-$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")}"
 MINIO_ROOT_PASSWORD="${MINIO_ROOT_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")}"
+# .env.example always carries the project's real POSTGRESQL_USER (== project_slug,
+# baked in by Copier at render time), even before .env exists on a fresh clone.
+CURRENT_POSTGRESQL_USER="$(sed -n 's/^POSTGRESQL_USER=//p' .env.example 2>/dev/null | head -1 | tr -d '"')"
+MINIO_DEFAULT_BUCKET="${MINIO_DEFAULT_BUCKET:-${CURRENT_POSTGRESQL_USER:-app}-files}"
 GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET:-$(python3 -c "import secrets; print(secrets.token_urlsafe(24))")}"
 SMTP_PASSWORD="${SMTP_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")}"
+# Mailpit's web UI captures every outgoing email, including password-reset and
+# magic-link tokens, so it must never be left open even in local development.
+MAILPIT_UI_AUTH="${MAILPIT_UI_AUTH:-admin:$(python3 -c "import secrets; print(secrets.token_urlsafe(12))")}"
 
 if [ ! -f .env ]; then
     info "Generating environment variables..."
@@ -141,8 +148,10 @@ backfill_secret REDIS_COMMANDER_PASSWORD "${REDIS_COMMANDER_PASSWORD}"
 backfill_secret METABASE_READ_ONLY_PASSWORD "${METABASE_READ_ONLY_PASSWORD}"
 backfill_secret STORAGE_SECRET_KEY "${STORAGE_SECRET_KEY}"
 backfill_secret MINIO_ROOT_PASSWORD "${MINIO_ROOT_PASSWORD}" "minioadmin"
+backfill_secret MINIO_DEFAULT_BUCKET "${MINIO_DEFAULT_BUCKET}"
 backfill_secret GOOGLE_CLIENT_SECRET "${GOOGLE_CLIENT_SECRET}"
 backfill_secret SMTP_PASSWORD "${SMTP_PASSWORD}"
+backfill_secret MAILPIT_UI_AUTH "${MAILPIT_UI_AUTH}"
 
 # Derive the connection URLs and Metabase password from the current, possibly
 # just-backfilled, database and Redis passwords. Idempotent.
