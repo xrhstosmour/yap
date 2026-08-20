@@ -12,11 +12,13 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
+from app.core.tenant import system_context
 from app.core.tenant import tenant_context
 from app.models.audit_log import AuditAction
 from app.models.audit_log import AuditLog
 from app.models.tenant import Tenant
 from app.repositories.audit_repository import AuditLogRepository
+from app.repositories.base import TenantContextRequiredError
 
 
 class TestAuditLogRepository:
@@ -476,6 +478,71 @@ class TestAuditLogRepository:
 
         assert len(failures) == 1
         assert failures[0].tenant_id == tenant_a.id
+
+    @pytest.mark.anyio
+    async def test_get_recent_failures_requires_tenant_context(
+        self, session: AsyncSession
+    ) -> None:
+        """get_recent_failures() fails closed when no tenant context is set.
+
+        Args:
+            session: Async database session fixture.
+
+        Returns:
+            None.
+        """
+        tenant = await self._create_tenant(session, slug="tenant-fail-closed")
+        repo = AuditLogRepository(session)
+
+        session.add(
+            AuditLog(
+                action="login_failed",
+                actor_id=str(uuid4()),
+                actor_type="user",
+                tenant_id=tenant.id,
+                status="failure",
+            )
+        )
+        await session.commit()
+
+        with pytest.raises(TenantContextRequiredError):
+            await repo.get_recent_failures()
+
+    @pytest.mark.anyio
+    async def test_get_recent_failures_spans_tenants_in_system_context(
+        self, session: AsyncSession
+    ) -> None:
+        """system_context() still allows a deliberate cross-tenant sweep.
+
+        Args:
+            session: Async database session fixture.
+
+        Returns:
+            None.
+        """
+        tenant_a = await self._create_tenant(session, slug="sweep-a")
+        tenant_b = await self._create_tenant(session, slug="sweep-b")
+        repo = AuditLogRepository(session)
+
+        for tenant_id in (tenant_a.id, tenant_b.id):
+            session.add(
+                AuditLog(
+                    action="login_failed",
+                    actor_id=str(uuid4()),
+                    actor_type="user",
+                    tenant_id=tenant_id,
+                    status="failure",
+                )
+            )
+        await session.commit()
+
+        with system_context():
+            failures = await repo.get_recent_failures()
+
+        assert {failure.tenant_id for failure in failures} == {
+            tenant_a.id,
+            tenant_b.id,
+        }
 
     @pytest.mark.anyio
     async def test_get_recent_failures_excludes_successes_and_old_entries(

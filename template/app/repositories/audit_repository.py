@@ -277,10 +277,11 @@ class AuditLogRepository(BaseRepository[AuditLog]):
 
         Returns:
             List of failed audit logs
-        """
-        from app.core.tenant import get_current_tenant_id
 
-        tenant_id = get_current_tenant_id()
+        Raises:
+            TenantContextRequiredError: If no tenant context is set and
+                `system_context()` is not active.
+        """
         cutoff = datetime.now(UTC) - timedelta(hours=hours)
 
         query = (
@@ -294,9 +295,7 @@ class AuditLogRepository(BaseRepository[AuditLog]):
             .order_by(AuditLog.created_at.desc())  # type: ignore[attr-defined]
             .limit(limit)
         )
-
-        if tenant_id:
-            query = query.where(AuditLog.tenant_id == tenant_id)  # type: ignore[arg-type]
+        query = self._apply_tenant_filter(query)
 
         result = await self.session.execute(query)
         return list(result.scalars().all())
