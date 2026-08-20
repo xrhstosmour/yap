@@ -177,6 +177,37 @@ class TestCryptoService:
         with pytest.raises(FernetInvalidToken):
             old_only_svc.decrypt(ciphertext)
 
+    def test_hash_candidates_for_search_lookup_survives_rotation(self) -> None:
+        """A value hashed under the old primary key must still be found
+        via `hash_candidates_for_search()` after that key is rotated out.
+
+        `hash_for_search()` alone only reflects the current primary key,
+        so an equality lookup against a single `hash_for_search()` value
+        breaks for every row hashed before the rotation, even though
+        `decrypt()` on the same row's ciphertext still works fine. This
+        proves the fix: `hash_candidates_for_search()` includes a
+        candidate for every configured key, so the pre-rotation hash is
+        always one of them.
+        """
+        key1 = Fernet.generate_key().decode()  # old, primary at hash time.
+        key2 = Fernet.generate_key().decode()  # new, primary after rotation.
+
+        # Pre-rotation: hash computed while key1 was primary, this is
+        # what would have been stored in the `email_hash` column.
+        old_svc = CryptoService(encryption_keys=[key1])
+        stored_hash = old_svc.hash_for_search("user@yap.com")
+
+        # After rotation: key2 is primary, key1 retained for old data.
+        rotated_svc = CryptoService(encryption_keys=[key2, key1])
+
+        # A single hash_for_search() no longer matches the stored value.
+        assert rotated_svc.hash_for_search("user@yap.com") != stored_hash
+
+        # But the stored hash is among the rotated service's candidates,
+        # so a `column_hash.in_(candidates)` lookup still finds the row.
+        candidates = rotated_svc.hash_candidates_for_search("user@yap.com")
+        assert stored_hash in candidates
+
     #  Edge cases
 
     def test_encrypt_large_data(self) -> None:
