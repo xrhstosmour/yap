@@ -1,0 +1,88 @@
+# Core application services, layered on top of the infrastructure services
+# that docker-compose.yml includes from the containers repository.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.app.yml up
+#
+# The `internal` network is declared external because the containers repo
+# owns it. Create it once with `docker network create internal` if it does
+# not already exist.
+
+networks:
+  internal:
+    name: "internal"
+    external: true
+
+services:
+  app:
+    build:
+      context: "."
+    container_name: "{{ project_slug }}-app"
+    restart: "unless-stopped"
+    env_file:
+      - ".env"
+    environment:
+      # The defaults in .env point at localhost, which resolves to the
+      # container itself once the app runs inside compose.
+      - "POSTGRESQL_SERVER=postgresql"
+      - "REDIS_HOST=redis"
+      - "RABBITMQ_HOST=rabbitmq"
+    ports:
+      - "8000:8000"
+    networks:
+      - "internal"
+    depends_on:
+      postgresql:
+        condition: "service_healthy"
+      redis:
+        condition: "service_healthy"
+      rabbitmq:
+        condition: "service_healthy"
+
+  celery-worker:
+    build:
+      context: "."
+    container_name: "{{ project_slug }}-celery-worker"
+    restart: "unless-stopped"
+    command: ["celery", "-A", "app.celery_app", "worker", "--loglevel=info"]
+    env_file:
+      - ".env"
+    environment:
+      - "POSTGRESQL_SERVER=postgresql"
+      - "REDIS_HOST=redis"
+      - "RABBITMQ_HOST=rabbitmq"
+    networks:
+      - "internal"
+    depends_on:
+      postgresql:
+        condition: "service_healthy"
+      redis:
+        condition: "service_healthy"
+      rabbitmq:
+        condition: "service_healthy"
+
+  celery-beat:
+    build:
+      context: "."
+    container_name: "{{ project_slug }}-celery-beat"
+    restart: "unless-stopped"
+{%- if include_redbeat %}
+    command: ["celery", "-A", "app.celery_app", "beat", "-S", "redbeat.RedBeatScheduler", "-l", "info"]
+{%- else %}
+    command: ["celery", "-A", "app.celery_app", "beat", "--loglevel=info"]
+{%- endif %}
+    env_file:
+      - ".env"
+    environment:
+      - "POSTGRESQL_SERVER=postgresql"
+      - "REDIS_HOST=redis"
+      - "RABBITMQ_HOST=rabbitmq"
+    networks:
+      - "internal"
+    depends_on:
+      postgresql:
+        condition: "service_healthy"
+      redis:
+        condition: "service_healthy"
+      rabbitmq:
+        condition: "service_healthy"
