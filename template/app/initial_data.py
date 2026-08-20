@@ -25,21 +25,22 @@ logger = logging.getLogger(__name__)
 async def init() -> None:
     """Create system tenant and initial superuser if not exists."""
     async with async_session_factory() as session:
-        result = await session.execute(
+        tenant_result = await session.execute(
             select(Tenant).where(Tenant.id == SYSTEM_TENANT_ID)
         )
-        if not result.scalar_one_or_none():
+        if not tenant_result.scalar_one_or_none():
             session.add(Tenant(id=SYSTEM_TENANT_ID, name="System", slug="system"))
             await session.commit()
             logger.info("Created system tenant")
 
-        result = await session.execute(
+        user_result = await session.execute(
             select(User).where(
-                User.email_hash
-                == crypto.hash_for_search(settings.FIRST_SUPERUSER_EMAIL)
+                User.email_hash.in_(  # type: ignore[attr-defined]
+                    crypto.hash_candidates_for_search(settings.FIRST_SUPERUSER_EMAIL)
+                )
             )
         )
-        existing_user = result.scalar_one_or_none()
+        existing_user = user_result.scalar_one_or_none()
 
         if not existing_user:
             password_hash = generate_password_hash(settings.FIRST_SUPERUSER_PASSWORD)

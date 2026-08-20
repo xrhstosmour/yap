@@ -45,7 +45,10 @@ class UserRepository(SearchMixin, BaseRepository[User]):
 
         `email` is encrypted at rest, so lookups filter on `email_hash`
         (a deterministic HMAC of the address) rather than the encrypted
-        column itself, which cannot be compared directly in SQL.
+        column itself, which cannot be compared directly in SQL. Matches
+        against a hash candidate for every configured key, not just the
+        primary one, so a rotation doesn't strand rows hashed under an
+        older key, see `CryptoService.hash_candidates_for_search()`.
 
         Args:
             email: User's email address
@@ -55,7 +58,9 @@ class UserRepository(SearchMixin, BaseRepository[User]):
         """
         query = select(User).where(
             and_(
-                User.email_hash == crypto.hash_for_search(email),  # type: ignore[arg-type]
+                User.email_hash.in_(  # type: ignore[arg-type,attr-defined]
+                    crypto.hash_candidates_for_search(email)
+                ),
                 User.deleted_at.is_(None),  # type: ignore[union-attr]
             )
         )
@@ -69,7 +74,8 @@ class UserRepository(SearchMixin, BaseRepository[User]):
         user who self-deletes their account (Article 17 erasure) could
         never re-register with the same address: `email_exists` would
         keep reporting it taken while `get_by_email` reports no user,
-        blocking both registration and login.
+        blocking both registration and login. Matches against a hash
+        candidate for every configured key, see `get_by_email`.
 
         Args:
             email: Email to check
@@ -82,7 +88,9 @@ class UserRepository(SearchMixin, BaseRepository[User]):
             .select_from(User)
             .where(
                 and_(
-                    User.email_hash == crypto.hash_for_search(email),  # type: ignore[arg-type]
+                    User.email_hash.in_(  # type: ignore[arg-type,attr-defined]
+                        crypto.hash_candidates_for_search(email)
+                    ),
                     User.deleted_at.is_(None),  # type: ignore[union-attr]
                 )
             )
