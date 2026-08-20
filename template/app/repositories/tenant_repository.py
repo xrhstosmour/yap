@@ -85,13 +85,15 @@ class TenantRepository(BaseRepository[Tenant]):
                 (Tenant.name.ilike(pattern)) | (Tenant.slug.ilike(pattern))  # type: ignore[union-attr,attr-defined]
             )
 
-        query = query.offset(skip).limit(limit).order_by(Tenant.name)
-
         sort_column = getattr(Tenant, sort_by, None)
-        if sort_column and sort_order == "desc":
+        if sort_column is not None and sort_order == "desc":
             query = query.order_by(sort_column.desc())  # type: ignore[union-attr]
-        elif sort_column:
+        elif sort_column is not None:
             query = query.order_by(sort_column)  # type: ignore[arg-type]
+        else:
+            query = query.order_by(Tenant.name)
+
+        query = query.offset(skip).limit(limit)
 
         total_result = await self.session.execute(count_query)
         total = total_result.scalar() or 0
