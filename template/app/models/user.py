@@ -10,6 +10,7 @@ import enum
 from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
+from uuid import uuid4
 
 from pydantic import EmailStr
 from sqlalchemy import Enum as SAEnum
@@ -50,7 +51,10 @@ class User(BaseModel, table=True):
             (e.g. login) and to enforce uniqueness, since ciphertext is
             randomised and cannot be compared or indexed directly.
         email_hash: Deterministic HMAC-SHA256 hash of `email`, unique and
-            indexed. See `CryptoService.hash_for_search()`.
+            indexed. See `CryptoService.hash_for_search()`. Exception: when
+            `email` is cleared to `""` (GDPR erasure), a random token is
+            salted in instead, so repeated erasures don't collide on this
+            unique column, see `_sync_email_hash`.
         full_name: User's display name. Left unencrypted, see note below.
         phone: Phone number in E.164 format. Encrypted at rest, same
             pattern as `email`. `phone_hash` enables exact-match lookups.
@@ -205,9 +209,21 @@ def _sync_email_hash(
     Only `None` is skipped, since `hash_for_search` takes a `str` and
     `email` is only ever `None` transiently, before pydantic validation
     has run.
+
+    The empty string is handled separately from a real address: `email_hash`
+    is `unique=True`, and `hash_for_search("")` is deterministic, so every
+    erased user would otherwise get the exact same hash and only the first
+    erasure in the database's lifetime would succeed, every later one would
+    hit the unique constraint. A fresh random token is salted in instead,
+    so each erasure still produces a hash that does not trace back to the
+    real email, but no longer collides with other erased users.
     """
     if value is not None:
-        target.email_hash = crypto.hash_for_search(value)
+        target.email_hash = (
+            crypto.hash_for_search(value)
+            if value
+            else crypto.hash_for_search(f"erased:{uuid4()}")
+        )
 
 
 @event.listens_for(User.phone, "set")
