@@ -212,6 +212,29 @@ class TestTenantRepository:
         assert await repo.slug_exists("reusable-slug") is False
 
     @pytest.mark.anyio
+    async def test_list_tenants_sorts_by_requested_column(
+        self, session: AsyncSession
+    ) -> None:
+        """list_tenants() must order by the caller's sort_by, not by name.
+
+        Names and creation order are deliberately out of sync: "Zeta" is
+        created first (oldest) but sorts last alphabetically, "Alpha" is
+        created last (newest) but sorts first alphabetically. Requesting
+        sort_by=created_at, sort_order=desc should return the newest
+        tenant first, which only happens if the hardcoded `Tenant.name`
+        ordering is not stacked on top of the requested sort.
+        """
+        repo = TenantRepository(session)
+        zeta = await repo.create_tenant(name="Zeta Corp", slug="zeta-corp")
+        middle = await repo.create_tenant(name="Middle Corp", slug="middle-corp")
+        alpha = await repo.create_tenant(name="Alpha Corp", slug="alpha-corp")
+
+        tenants, _ = await repo.list_tenants(sort_by="created_at", sort_order="desc")
+
+        ids = [tenant.id for tenant in tenants]
+        assert ids.index(alpha.id) < ids.index(middle.id) < ids.index(zeta.id)
+
+    @pytest.mark.anyio
     @pytest.mark.parametrize(
         "index_name", ["ix_tenants_name_trgm", "ix_tenants_slug_trgm"]
     )
