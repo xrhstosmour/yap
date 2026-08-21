@@ -8,7 +8,14 @@ from unittest.mock import patch
 from uuid import UUID
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
+from webauthn.helpers import base64url_to_bytes
+from webauthn.helpers import bytes_to_base64url
 
+from app.core.tenant import tenant_context
+from app.models.tenant import Tenant
+from app.models.webauthn_credential import WebAuthnCredential
+from app.repositories.user_repository import UserRepository
 from app.services.webauthn_service import WebAuthnError
 from app.services.webauthn_service import WebAuthnService
 
@@ -549,3 +556,78 @@ class TestCompleteAuthentication:
             pytest.raises(WebAuthnError, match="User not found or inactive"),
         ):
             await service.complete_authentication(credential_payload)
+
+
+class TestCompleteAuthenticationTenantContext:
+    """Regression test for complete_authentication() against a real
+    repository, not the mocked one every other test in this file uses.
+
+    Every other test replaces `service.user_repository` with a MagicMock,
+    which cannot reveal a TenantContextRequiredError: complete_authentication
+    reloads the user by ID before any tenant context exists yet (this is
+    what establishes it), and BaseRepository.get() fails closed when a
+    tenant-scoped model is queried with no tenant context set. Without
+    system_context() around that one call, every real WebAuthn login
+    crashed with a 500, this passed with the mocked repository regardless.
+    """
+
+    @pytest.mark.anyio
+    async def test_succeeds_with_no_tenant_context_active(
+        self, session: AsyncSession
+    ) -> None:
+        """complete_authentication() must not require an active tenant context."""
+        tenant = Tenant(name="Test Org", slug="webauthn-tenant-context-org")
+        session.add(tenant)
+        await session.commit()
+        await session.refresh(tenant)
+
+        user_repository = UserRepository(session)
+        with tenant_context(tenant.id):
+            user = await user_repository.create_user(
+                email="webauthn-tenant-context@example.com",
+                password_hash="hash",
+                tenant_id=tenant.id,
+            )
+
+        credential = WebAuthnCredential(
+            user_id=user.id,
+            credential_id="dGVzdC1jcmVkZW50aWFsLWlk",
+            public_key="cHViLWtleQ==",
+            user_handle="dXNlci1oYW5kbGU=",
+            sign_count=3,
+            device_name="Test Key",
+        )
+        session.add(credential)
+        await session.flush()
+        await session.commit()
+
+        service = WebAuthnService(session)
+        mock_redis = AsyncMock()
+        mock_redis.getdel = AsyncMock(return_value=bytes_to_base64url(b"a" * 32))
+        fake_verification = MagicMock()
+        fake_verification.new_sign_count = 5
+
+        credential_payload = {
+            "id": "dGVzdC1jcmVkZW50aWFsLWlk",
+            "raw_id": base64url_to_bytes("dGVzdC1jcmVkZW50aWFsLWlk"),
+            "response": {
+                "client_data_json": "eyJjaGFsbGVuZ2UiOiJZMiU=",
+                "authenticator_data": "oA==",
+                "signature": "sig",
+            },
+            "type": "public-key",
+        }
+
+        # No tenant_context(...) or system_context() active here, matching
+        # the real request state: the tenant isn't known until this call
+        # resolves it.
+        with (
+            patch("app.services.webauthn_service.get_redis", return_value=mock_redis),
+            patch(
+                "app.services.webauthn_service.verify_authentication_response",
+                return_value=fake_verification,
+            ),
+        ):
+            result = await service.complete_authentication(credential_payload)
+
+        assert result.id == user.id
