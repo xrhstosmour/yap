@@ -51,6 +51,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Fail closed when a tenant-scoped query runs with no tenant context, and add `system_context()` for deliberate cross-tenant access
+- Make `AuditLogRepository.get_recent_failures` fail closed too, it had its own hand-rolled tenant filter that silently returned every tenant's failed audit records when no tenant context was set
 - Close a 2FA bypass reachable through OAuth, magic link, and WebAuthn sign-in
 - Authenticate WebSocket endpoints
 - Check the blacklist on refresh tokens
@@ -77,8 +78,10 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 - Backfill missing keys in `.env`, not just placeholder values, and preserve volumes across setup runs
 - Track the full commit SHA in `.copier/.version`, and record it before Copier runs
 - Fix `synchronize.sh` version tracking, commit tracking, inline conflict handling, and a redundant clone
+- Stop `synchronize.sh` from `source`ing `.env` wholesale, a free-text field containing a space (an ordinary superuser name) crashed the script outright
 - Assert a single Alembic head in CI, and fix a CI port conflict causing double migration
 - Scope CI/CD to conditional secrets, and harden workflow permissions
+- Backfill `MINIO_DEFAULT_BUCKET`, `MAILPIT_UI_AUTH`, and `POSTGRESQL_HOST` in `.env`, closing a gap where `docker compose config` failed once MinIO, Mailpit, or GlitchTip was enabled
 
 ### Security
 
