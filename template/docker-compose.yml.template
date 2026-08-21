@@ -30,7 +30,3 @@ include:
 {%- if include_flower %}
   - containers/monitoring/workers/flower/docker-compose.yml
 {%- endif %}
-
-networks:
-  backend:
-    driver: bridge
