@@ -30,6 +30,7 @@ from app.schemas.user import UserResponse
 from app.schemas.user import UserUpdate
 from app.schemas.user import UserUpdateMe
 from app.services.user_service import UserService
+from app.services.user_service import UserServiceError
 
 router = APIRouter(prefix="/users", tags=["Users"])
 logger = get_logger("api.users")
@@ -112,7 +113,13 @@ async def update_me(
 ) -> UserResponse:
     """Update current user's profile."""
     service = UserService(session)
-    user = await service.update_profile(current_user, data)
+    try:
+        user = await service.update_profile(current_user, data)
+    except UserServiceError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
     return UserResponse.model_validate(user)
 
 
@@ -209,7 +216,7 @@ async def create_user(
     try:
         user = await service.create(data, created_by=current_user.id)
         return UserResponse.model_validate(user)
-    except ValueError as e:
+    except (ValueError, UserServiceError) as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
@@ -230,7 +237,13 @@ async def update_user(
 ) -> UserResponse:
     """Update a user (admin only)."""
     service = UserService(session)
-    user = await service.update(user_id, data, updated_by=current_user.id)
+    try:
+        user = await service.update(user_id, data, updated_by=current_user.id)
+    except UserServiceError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
 
     if not user:
         raise HTTPException(

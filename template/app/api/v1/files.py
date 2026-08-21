@@ -20,6 +20,7 @@ from app.schemas.files import FileMetadataResponse
 from app.schemas.files import FileUploadResponse
 from app.schemas.files import FileUrlResponse
 from app.services.file_service import FileService
+from app.services.file_service import FileServiceError
 
 router = APIRouter(prefix="/files", tags=["Files"])
 logger = get_logger("api.files")
@@ -82,7 +83,7 @@ async def get_file_url(
     service = FileService(session)
     try:
         record = await service.get_owned_file(file_id, current_user)
-    except ValueError as e:
+    except (ValueError, FileServiceError) as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="File not found.",
@@ -107,7 +108,7 @@ async def get_file_metadata(
     service = FileService(session)
     try:
         record = await service.get_owned_file(file_id, current_user)
-    except ValueError as e:
+    except (ValueError, FileServiceError) as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="File not found.",
@@ -149,7 +150,7 @@ async def delete_file(
     service = FileService(session)
     try:
         await service.delete(file_id, current_user)
-    except ValueError as e:
+    except (ValueError, FileServiceError) as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="File not found.",

@@ -26,6 +26,7 @@ from app.schemas.feature_flag import FeatureFlagResponse
 from app.schemas.feature_flag import FeatureFlagToggle
 from app.schemas.feature_flag import FeatureFlagUpdate
 from app.services.feature_flag_service import FeatureFlagService
+from app.services.feature_flag_service import FeatureFlagServiceError
 
 router = APIRouter(prefix="/feature-flags", tags=["Feature Flags"])
 logger = get_logger("api.feature_flags")
@@ -94,7 +95,7 @@ async def create_feature_flag(
     try:
         flag = await service.create_flag(data)
         return FeatureFlagResponse.model_validate(flag)
-    except ValueError as e:
+    except (ValueError, FeatureFlagServiceError) as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
