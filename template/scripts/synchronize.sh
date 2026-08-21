@@ -1,6 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# This script updates itself: `copier update` further down overwrites this
+# very file, since it is part of what gets synced from the template. Bash
+# does not fully buffer a script before executing it, it reads and executes
+# incrementally, so a change to the file underneath a running process can
+# corrupt execution (a "syntax error near unexpected token" partway through,
+# from a read landing mid-edit, or later lines silently never running).
+# Re-exec once from a private, stable copy so the rest of this run reads
+# bytes that can never change out from under it, regardless of what
+# `copier update` does to the real file on disk.
+if [ -z "${SYNCHRONIZE_SH_REEXECUTED:-}" ]; then
+    PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+    STABLE_COPY="$(mktemp)"
+    cp "$0" "$STABLE_COPY"
+    chmod +x "$STABLE_COPY"
+    cd "$PROJECT_DIR"
+    SYNCHRONIZE_SH_REEXECUTED="$STABLE_COPY" exec "$STABLE_COPY" "$@"
+fi
+trap 'rm -f "$SYNCHRONIZE_SH_REEXECUTED"' EXIT
+
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
@@ -26,8 +45,7 @@ read_env_scalar() {
     fi
 }
 
-PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$PROJECT_DIR"
+PROJECT_DIR="$(pwd)"
 
 echo ""
 echo "────────────────────────────────────────────────────────────"
@@ -193,8 +211,10 @@ ANSWERS_FILE=".copier/.answers.yml"
 info "Answers file reconstructed for copier update."
 
 # Ensure the secret-bearing answers file is never left behind, on success
-# or on any failure path below.
-trap 'rm -f "$ANSWERS_FILE"' EXIT
+# or on any failure path below. Setting a new EXIT trap replaces the one
+# from the re-exec guard above rather than adding to it, so this one
+# cleans up both files, or the stable copy would leak from here on.
+trap 'rm -f "$ANSWERS_FILE" "$SYNCHRONIZE_SH_REEXECUTED"' EXIT
 
 if [ -n "$(git status --porcelain -- .)" ]; then
     warn "Uncommitted changes detected."
