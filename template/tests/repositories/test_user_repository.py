@@ -11,6 +11,7 @@ from app.core.tenant import tenant_context
 from app.models.tenant import Tenant
 from app.models.user import User
 from app.models.user import UserRole
+from app.repositories.base import TenantContextRequiredError
 from app.repositories.user_repository import UserRepository
 
 
@@ -260,6 +261,26 @@ class TestUserRepository:
 
         assert found is not None
         assert found.token_version == 1
+
+    @pytest.mark.anyio
+    async def test_increment_token_version_requires_tenant_context(
+        self, session: AsyncSession
+    ) -> None:
+        """increment_token_version() fails closed when no tenant context is set."""
+        tenant = Tenant(name="Test Org", slug="tenant-tv-fail-closed")
+        session.add(tenant)
+        await session.commit()
+        await session.refresh(tenant)
+
+        repo = UserRepository(session)
+        user = await repo.create_user(
+            email="tv-fail-closed@example.com",
+            password_hash="hash",
+            tenant_id=tenant.id,
+        )
+
+        with pytest.raises(TenantContextRequiredError):
+            await repo.increment_token_version(user.id)
 
     @pytest.mark.anyio
     async def test_search_by_name(
