@@ -42,7 +42,13 @@ class APIKeyRepository(BaseRepository[APIKey]):
         super().__init__(session, APIKey)
 
     async def get_by_key_id(self, key_id: str) -> APIKey | None:
-        """Get API key by its public identifier.
+        """Get API key by its public identifier, deliberately unscoped.
+
+        Runs before the caller knows which tenant the key belongs to, this
+        is what resolves that tenant, the same way `TenantRepository.get_by_slug`
+        looks up cross-tenant on purpose. Safe because `key_id` is globally
+        unique (see the model's `unique=True` index), not a guessable
+        sequential value another tenant's key could collide with.
 
         Args:
             key_id: Public key identifier
@@ -137,6 +143,10 @@ class APIKeyRepository(BaseRepository[APIKey]):
 
         Returns:
             Number of active keys
+
+        Raises:
+            TenantContextRequiredError: If no tenant context is set and
+                `system_context()` is not active.
         """
         query = (
             select(func.count())
@@ -149,6 +159,7 @@ class APIKeyRepository(BaseRepository[APIKey]):
                 )
             )
         )
+        query = self._apply_tenant_filter(query)
         result = await self.session.execute(query)
         return result.scalar() or 0
 
