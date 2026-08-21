@@ -31,6 +31,7 @@ from webauthn.helpers.structs import UserVerificationRequirement
 from app.core.cache import get_redis
 from app.core.logging import get_logger
 from app.core.settings import settings
+from app.core.tenant import system_context
 from app.models.user import User
 from app.models.webauthn_credential import WebAuthnCredential
 from app.repositories.user_repository import UserRepository
@@ -241,7 +242,15 @@ class WebAuthnService:
         stored_cred.last_used_at = datetime.now(UTC)
 
         # Reload user from DB since WebAuthnCredential has no relationship.
-        user = await self.user_repository.get(stored_cred.user_id)
+        # Bootstrapping identity from a WebAuthn assertion: the tenant isn't
+        # known yet, that's what this lookup establishes, the same
+        # situation as magic-link and Google OAuth login (see
+        # AuthService.verify_magic_link and .google_login). Without
+        # system_context(), User being tenant-scoped means this raises
+        # TenantContextRequiredError on every single login attempt, since
+        # no tenant context can exist yet at this point in the request.
+        with system_context():
+            user = await self.user_repository.get(stored_cred.user_id)
         if not user or not user.is_active:
             raise WebAuthnError("User not found or inactive.")
 
