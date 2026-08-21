@@ -38,10 +38,26 @@ command -v git >/dev/null 2>&1 || error "git is required"
 
 [ -f .env ] || error ".env not found. Run ./scripts/setup.sh first to create it."
 
-set -a
-# shellcheck source=/dev/null
-source .env
-set +a
+# Extract only the secrets the answers file below actually needs, through
+# read_env_scalar's plain grep+cut, rather than `source .env`. Sourcing the
+# whole file as bash script requires every line to be valid shell syntax,
+# but free-text fields like FIRST_SUPERUSER_FULL_NAME are user-supplied and
+# can contain a space or a shell-special character (a name with a space is
+# enough to crash this script under `set -e`, since bash reads the second
+# word as a command). None of the keys below are free text, every one is a
+# generated secret, so this is exactly as safe and needs no quoting in .env.
+SECRET_KEY="$(read_env_scalar "SECRET_KEY" ".env")"
+CRYPTO_KEY="$(read_env_scalar "CRYPTO_KEY" ".env")"
+POSTGRESQL_PASSWORD="$(read_env_scalar "POSTGRESQL_PASSWORD" ".env")"
+FIRST_SUPERUSER_PASSWORD="$(read_env_scalar "FIRST_SUPERUSER_PASSWORD" ".env")"
+RABBITMQ_PASSWORD="$(read_env_scalar "RABBITMQ_PASSWORD" ".env")"
+RABBITMQ_ERLANG_COOKIE="$(read_env_scalar "RABBITMQ_ERLANG_COOKIE" ".env")"
+REDIS_PASSWORD="$(read_env_scalar "REDIS_PASSWORD" ".env")"
+FLOWER_PASSWORD="$(read_env_scalar "FLOWER_PASSWORD" ".env")"
+PGADMIN4_PASSWORD="$(read_env_scalar "PGADMIN4_PASSWORD" ".env")"
+GLITCHTIP_SECRET_KEY="$(read_env_scalar "GLITCHTIP_SECRET_KEY" ".env")"
+REDIS_COMMANDER_PASSWORD="$(read_env_scalar "REDIS_COMMANDER_PASSWORD" ".env")"
+METABASE_READ_ONLY_PASSWORD="$(read_env_scalar "METABASE_READ_ONLY_PASSWORD" ".env")"
 
 # Reconstruct answers at every sync from project files and .env.
 # The answers file is intentionally gitignored to avoid committing secrets.
