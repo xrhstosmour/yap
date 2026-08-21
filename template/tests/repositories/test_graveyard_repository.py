@@ -12,9 +12,11 @@ from sqlalchemy import select
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.tenant import system_context
 from app.core.tenant import tenant_context
 from app.models.graveyard import Graveyard
 from app.models.tenant import Tenant
+from app.repositories.base import TenantContextRequiredError
 from app.repositories.graveyard_repository import GraveyardRepository
 
 
@@ -211,6 +213,45 @@ class TestGraveyardRepository:
             data = await repo.recover(record_id)
 
         assert data is None
+
+    @pytest.mark.anyio
+    async def test_recover_requires_tenant_context(self, session: AsyncSession) -> None:
+        """recover() fails closed when no tenant context is set.
+
+        Without this, a caller that forgot to set a tenant context would
+        get back the most recently deleted matching record from any
+        tenant, not an error, silently leaking PII and secret hashes.
+        """
+        tenant = await self._create_tenant(session)
+        repo = GraveyardRepository(session)
+        record_id = uuid4()
+        await repo.bury(
+            model_name="users",
+            record_id=record_id,
+            data={"email": "alice@example.com"},
+            tenant_id=tenant.id,
+        )
+
+        with pytest.raises(TenantContextRequiredError):
+            await repo.recover(record_id)
+
+    @pytest.mark.anyio
+    async def test_recover_works_in_system_context(self, session: AsyncSession) -> None:
+        """system_context() still allows a deliberate cross-tenant recovery."""
+        tenant = await self._create_tenant(session)
+        repo = GraveyardRepository(session)
+        record_id = uuid4()
+        await repo.bury(
+            model_name="users",
+            record_id=record_id,
+            data={"email": "alice@example.com"},
+            tenant_id=tenant.id,
+        )
+
+        with system_context():
+            data = await repo.recover(record_id)
+
+        assert data == {"email": "alice@example.com"}
 
     @pytest.mark.anyio
     async def test_recover_returns_none_for_unknown_record(
