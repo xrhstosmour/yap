@@ -5,11 +5,13 @@ from __future__ import annotations
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.tenant import system_context
 from app.core.tenant import tenant_context
 from app.models.api_key import APIKey
 from app.models.tenant import Tenant
 from app.models.user import User
 from app.repositories.api_key_repository import APIKeyRepository
+from app.repositories.base import TenantContextRequiredError
 
 
 class TestAPIKeyRepository:
@@ -260,3 +262,112 @@ class TestAPIKeyRepository:
         index_names = [idx.name for idx in indexes if hasattr(idx, "name")]
         assert "ix_api_keys_user_id_is_active" in index_names
         assert "ix_api_keys_expires_at_is_active" in index_names
+
+    @pytest.mark.anyio
+    async def test_count_active_by_user_excludes_other_tenants(
+        self, session: AsyncSession
+    ) -> None:
+        """count_active_by_user() must not count another tenant's keys.
+
+        Args:
+            session: Async database session fixture.
+
+        Returns:
+            None.
+        """
+        tenant_a = await self._create_tenant(session, slug="tenant-a")
+        tenant_b = await self._create_tenant(session, slug="tenant-b")
+        user = await self._create_user(session)
+
+        session.add(
+            APIKey(
+                key_id="pk_a",
+                key_hash="hash",
+                key_prefix="pk_",
+                name="Key A",
+                tenant_id=tenant_a.id,
+                user_id=user.id,
+            )
+        )
+        session.add(
+            APIKey(
+                key_id="pk_b",
+                key_hash="hash",
+                key_prefix="pk_",
+                name="Key B",
+                tenant_id=tenant_b.id,
+                user_id=user.id,
+            )
+        )
+        await session.commit()
+
+        repo = APIKeyRepository(session)
+        with tenant_context(tenant_a.id):
+            count = await repo.count_active_by_user(user.id)
+
+        assert count == 1
+
+    @pytest.mark.anyio
+    async def test_count_active_by_user_requires_tenant_context(
+        self, session: AsyncSession
+    ) -> None:
+        """count_active_by_user() fails closed with no tenant context set.
+
+        Args:
+            session: Async database session fixture.
+
+        Returns:
+            None.
+        """
+        tenant = await self._create_tenant(session)
+        user = await self._create_user(session)
+        session.add(
+            APIKey(
+                key_id="pk_c",
+                key_hash="hash",
+                key_prefix="pk_",
+                name="Key C",
+                tenant_id=tenant.id,
+                user_id=user.id,
+            )
+        )
+        await session.commit()
+
+        repo = APIKeyRepository(session)
+        with pytest.raises(TenantContextRequiredError):
+            await repo.count_active_by_user(user.id)
+
+    @pytest.mark.anyio
+    async def test_count_active_by_user_spans_tenants_in_system_context(
+        self, session: AsyncSession
+    ) -> None:
+        """system_context() still allows a deliberate cross-tenant count.
+
+        Args:
+            session: Async database session fixture.
+
+        Returns:
+            None.
+        """
+        tenant_a = await self._create_tenant(session, slug="sweep-a")
+        tenant_b = await self._create_tenant(session, slug="sweep-b")
+        user = await self._create_user(session)
+
+        for tenant, suffix in ((tenant_a, "a"), (tenant_b, "b")):
+            session.add(
+                APIKey(
+                    key_id=f"pk_sweep_{suffix}",
+                    key_hash="hash",
+                    key_prefix="pk_",
+                    name=f"Sweep Key {suffix}",
+                    tenant_id=tenant.id,
+                    user_id=user.id,
+                )
+            )
+        await session.commit()
+
+        repo = APIKeyRepository(session)
+        with system_context():
+            count = await repo.count_active_by_user(user.id)
+
+        assert count == 2
