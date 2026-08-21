@@ -17,10 +17,11 @@ RUN apk add --no-cache libpq ca-certificates tzdata curl \
     && adduser -D -s /bin/sh appuser
 
 COPY --from=builder --chown=appuser:appuser /app/.venv /app/.venv
-COPY --chown=appuser:appuser pyproject.toml uv.lock ./
+COPY --chown=appuser:appuser pyproject.toml uv.lock alembic.ini ./
 COPY --chown=appuser:appuser app/ ./app/
 COPY --chown=appuser:appuser scripts/ ./scripts/
 COPY --chown=appuser:appuser templates/ ./templates/
+COPY --chown=appuser:appuser migrations/ ./migrations/
 
 ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONPATH=/app
