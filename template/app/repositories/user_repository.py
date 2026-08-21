@@ -16,7 +16,6 @@ from sqlmodel import select
 
 from app.core.encryption import crypto
 from app.core.logging import get_logger
-from app.core.tenant import get_current_tenant_id
 from app.models.user import User
 from app.models.user import UserRole
 from app.repositories.base import BaseRepository
@@ -209,16 +208,21 @@ class UserRepository(SearchMixin, BaseRepository[User]):
 
         Args:
             user_id: User's UUID
-        """
-        tenant_id = get_current_tenant_id()
-        conditions = [User.id == user_id, User.deleted_at.is_(None)]  # type: ignore[arg-type,union-attr]
-        if tenant_id is not None:
-            conditions.append(User.tenant_id == tenant_id)  # type: ignore[arg-type]
 
+        Raises:
+            TenantContextRequiredError: If no tenant context is set and
+                `system_context()` is not active.
+        """
         statement = (
             update(User)
-            .where(and_(*conditions))
+            .where(
+                and_(
+                    User.id == user_id,  # type: ignore[arg-type]
+                    User.deleted_at.is_(None),  # type: ignore[union-attr]
+                )
+            )
             .values(token_version=User.token_version + 1)
         )
+        statement = self._apply_tenant_filter(statement)
         await self.session.execute(statement)
         await self.session.flush()

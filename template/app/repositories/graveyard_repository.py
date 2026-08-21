@@ -15,8 +15,10 @@ from sqlmodel import select
 
 from app.core.logging import get_logger
 from app.core.tenant import get_current_tenant_id
+from app.core.tenant import is_system_access
 from app.models.graveyard import DEFAULT_RETENTION_DAYS
 from app.models.graveyard import Graveyard
+from app.repositories.base import TenantContextRequiredError
 
 logger = get_logger("repository.graveyard")
 
@@ -100,13 +102,24 @@ class GraveyardRepository:
         Scoped to the active tenant: a graveyard snapshot holds every
         column of the original row, including PII and secret hashes, so
         an unscoped lookup would let one tenant recover another tenant's
-        deleted record by guessing its `record_id`.
+        deleted record by guessing its `record_id`. Unlike `bury()` and
+        `purge()`, which this class deliberately keeps free of
+        `BaseRepository`'s ambient-tenant machinery so background jobs can
+        write or sweep across every tenant, `recover()` is the one
+        exception: a real lookup by a caller who should only ever see
+        their own tenant's data, so it fails closed the same way
+        `BaseRepository._apply_tenant_filter()` does rather than silently
+        running unfiltered when no tenant context is set.
 
         Args:
             record_id: UUID of the deleted record.
 
         Returns:
             Record data dict or None.
+
+        Raises:
+            TenantContextRequiredError: If no tenant context is set and
+                `system_context()` is not active.
         """
         tenant_id = get_current_tenant_id()
         query = (
@@ -117,6 +130,13 @@ class GraveyardRepository:
         )
         if tenant_id is not None:
             query = query.where(Graveyard.tenant_id == tenant_id)  # type: ignore[arg-type]
+        elif not is_system_access():
+            message = (
+                "Graveyard.recover() requires a tenant context. Set one "
+                "with tenant_context(...), or wrap deliberate cross-tenant "
+                "access in system_context()."
+            )
+            raise TenantContextRequiredError(message)
         result = await self.session.execute(query)
         entry = result.scalar_one_or_none()
         return entry.data if entry else None
