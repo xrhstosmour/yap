@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import cast
+from uuid import uuid4
 
 import pytest
 from httpx import ASGITransport
@@ -70,3 +71,65 @@ class TestFileUpload:
         assert data["mimetype"] == "text/plain"
         assert data["size"] == len(content)
         assert "id" in data
+
+
+class TestFileNotFoundReturnsCleanly:
+    """Regression tests: a missing or unowned file_id must return 404,
+    not crash. get_file_url, get_file_metadata, and delete_file all call
+    FileService methods that raise FileServiceError, not ValueError, on a
+    missing/unowned file. Catching only ValueError let FileServiceError
+    propagate uncaught, an unhandled 500 instead of the documented 404.
+    """
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_get_file_url_returns_404_for_unknown_file(
+        self, client: AsyncClient, session: AsyncSession
+    ) -> None:
+        auth_service = AuthService(cast(AsyncSession, session))
+        user = await auth_service.register(
+            RegisterRequest(email="file-url-404@testapp.com", password="password123")
+        )
+        token = create_access_token(subject=user.id)
+
+        response = await client.get(
+            f"/api/v1/files/{uuid4()}/url",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 404
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_get_file_metadata_returns_404_for_unknown_file(
+        self, client: AsyncClient, session: AsyncSession
+    ) -> None:
+        auth_service = AuthService(cast(AsyncSession, session))
+        user = await auth_service.register(
+            RegisterRequest(
+                email="file-metadata-404@testapp.com", password="password123"
+            )
+        )
+        token = create_access_token(subject=user.id)
+
+        response = await client.get(
+            f"/api/v1/files/{uuid4()}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 404
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_delete_file_returns_404_for_unknown_file(
+        self, client: AsyncClient, session: AsyncSession
+    ) -> None:
+        auth_service = AuthService(cast(AsyncSession, session))
+        user = await auth_service.register(
+            RegisterRequest(email="file-delete-404@testapp.com", password="password123")
+        )
+        token = create_access_token(subject=user.id)
+
+        response = await client.delete(
+            f"/api/v1/files/{uuid4()}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 404
