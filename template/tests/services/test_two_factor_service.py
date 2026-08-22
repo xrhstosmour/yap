@@ -9,12 +9,16 @@ from uuid import UUID
 
 import pyotp
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.encryption import decrypt
 from app.core.encryption import encrypt
 from app.core.security import generate_recovery_codes
 from app.core.security import generate_totp_secret
 from app.core.settings import settings
+from app.core.tenant import tenant_context
+from app.schemas.auth import RegisterRequest
+from app.services.auth_service import AuthService
 from app.services.two_factor_service import InvalidTOTPError
 from app.services.two_factor_service import TwoFactorAlreadyEnabledError
 from app.services.two_factor_service import TwoFactorAuthService
@@ -502,3 +506,38 @@ class TestRegenerateRecoveryCodes:
             pytest.raises(InvalidTOTPError),
         ):
             await service.regenerate_recovery_codes(user, "000000")
+
+
+class TestConsumeChallengeTenantContext:
+    """Tests for _consume_challenge() against a real database session.
+
+    The rest of this module mocks the repository, which cannot catch a
+    tenant-filter regression. /auth/2fa/verify is unauthenticated, so these
+    run with no tenant context set, exactly as the endpoint does.
+    """
+
+    @pytest.mark.asyncio
+    async def test_consumes_challenge_without_tenant_context(
+        self, session: AsyncSession
+    ) -> None:
+        """Challenge lookup must work with no tenant context set."""
+        auth_service = AuthService(session)
+        user = await auth_service.register(
+            RegisterRequest(email="2fa-user@example.com", password="password123")
+        )
+
+        redis = AsyncMock()
+        redis.getdel = AsyncMock(return_value=str(user.id))
+
+        async def _get_redis() -> AsyncMock:
+            return redis
+
+        service = TwoFactorAuthService(session)
+
+        with (
+            patch("app.services.two_factor_service.get_redis", _get_redis),
+            tenant_context(None),
+        ):
+            resolved = await service._consume_challenge("challenge-token")
+
+        assert resolved.id == user.id
