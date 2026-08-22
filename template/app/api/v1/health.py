@@ -16,6 +16,7 @@ from sqlmodel import text
 
 from app.core.cache import RedisDependency
 from app.core.logging import get_logger
+from app.core.settings import settings
 from app.database import async_engine
 from app.dependencies import SessionDependency
 from app.dependencies import SuperuserUser
@@ -186,7 +187,7 @@ async def get_metrics(
 
     cache_stats = CacheStats(
         connected=cache_connected,
-        max_connections=50,
+        max_connections=settings.REDIS_MAX_CONNECTIONS,
     )
 
     return MetricsResponse(pool=pool_stats, cache=cache_stats)
