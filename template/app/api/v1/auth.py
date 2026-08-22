@@ -109,8 +109,6 @@ async def login(
     session: SessionDependency,
 ) -> LoginResponse:
     """Authenticate user and return tokens or a 2FA challenge."""
-    from app.services.two_factor_service import TwoFactorAuthService
-
     service = AuthService(session)
 
     try:
@@ -127,19 +125,7 @@ async def login(
             detail=str(e),
         ) from e
 
-    # If 2FA is active, issue a challenge token instead of full tokens.
-    if user.is_2fa_enabled:
-        totp_service = TwoFactorAuthService(session)
-        challenge_token = await totp_service.issue_challenge(user)
-        return LoginResponse(requires_2fa=True, challenge_token=challenge_token)
-
-    tokens = service.create_tokens(user)
-    return LoginResponse(
-        access_token=tokens.access_token,
-        refresh_token=tokens.refresh_token,
-        token_type=tokens.token_type,
-        expires_in=tokens.expires_in,
-    )
+    return await service.issue_login_response(user)
 
 
 @router.post(
