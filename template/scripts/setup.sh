@@ -94,25 +94,34 @@ MAILPIT_UI_AUTH="${MAILPIT_UI_AUTH:-admin:$(python3 -c "import secrets; print(se
 if [ ! -f .env ]; then
     info "Generating environment variables..."
     cp .env.example .env
-
-    # Reset .env.example back to placeholders so real secrets never leak into it.
-    "${SED_INPLACE[@]}" "s/SECRET_KEY=.*/SECRET_KEY=your-secret-key/" .env.example
-    "${SED_INPLACE[@]}" "s/CRYPTO_KEY=.*/CRYPTO_KEY=your-32-bit-fernet-key==/" .env.example
-    "${SED_INPLACE[@]}" "s/POSTGRESQL_PASSWORD=.*/POSTGRESQL_PASSWORD=your-postgresql-password/" .env.example
-    "${SED_INPLACE[@]}" "s/FIRST_SUPERUSER_PASSWORD=.*/FIRST_SUPERUSER_PASSWORD=your-superuser-password/" .env.example
-    "${SED_INPLACE[@]}" "s/RABBITMQ_PASSWORD=.*/RABBITMQ_PASSWORD=your-rabbitmq-password/" .env.example
-    "${SED_INPLACE[@]}" "s/RABBITMQ_ERLANG_COOKIE=.*/RABBITMQ_ERLANG_COOKIE=your-rabbitmq-erlang-cookie/" .env.example
-    "${SED_INPLACE[@]}" "s/REDIS_PASSWORD=.*/REDIS_PASSWORD=your-redis-password/" .env.example
-    "${SED_INPLACE[@]}" "s/FLOWER_PASSWORD=.*/FLOWER_PASSWORD=your-flower-password/" .env.example
-    "${SED_INPLACE[@]}" "s/PGADMIN4_PASSWORD=.*/PGADMIN4_PASSWORD=your-pgadmin-password/" .env.example
-    "${SED_INPLACE[@]}" "s/GLITCHTIP_SECRET_KEY=.*/GLITCHTIP_SECRET_KEY=your-glitchtip-secret-key/" .env.example
-    "${SED_INPLACE[@]}" "s/REDIS_COMMANDER_PASSWORD=.*/REDIS_COMMANDER_PASSWORD=your-redis-commander-password/" .env.example
-    "${SED_INPLACE[@]}" "s/METABASE_READ_ONLY_PASSWORD=.*/METABASE_READ_ONLY_PASSWORD=your-metabase-read-only-password/" .env.example
-    "${SED_INPLACE[@]}" "s/MINIO_ROOT_PASSWORD=.*/MINIO_ROOT_PASSWORD=minioadmin/" .env.example
-    "${SED_INPLACE[@]}" "s/SENTRY_DSN=.*/SENTRY_DSN=https:\/\/public:secret@sentry.com\/1/" .env.example
 else
     info "Backfilling any placeholder secrets in existing .env..."
 fi
+
+# Reset .env.example back to placeholders so real secrets never leak into it.
+# Unconditional on purpose: `copier update` (see synchronize.sh) re-renders
+# .env.example from the real answers on every sync, and .env already exists on
+# that path, so scrubbing only when .env is missing would leave every secret
+# sitting in a file that is not gitignored.
+"${SED_INPLACE[@]}" "s/SECRET_KEY=.*/SECRET_KEY=your-secret-key/" .env.example
+"${SED_INPLACE[@]}" "s/CRYPTO_KEY=.*/CRYPTO_KEY=your-32-bit-fernet-key==/" .env.example
+"${SED_INPLACE[@]}" "s/POSTGRESQL_PASSWORD=.*/POSTGRESQL_PASSWORD=your-postgresql-password/" .env.example
+"${SED_INPLACE[@]}" "s/FIRST_SUPERUSER_PASSWORD=.*/FIRST_SUPERUSER_PASSWORD=your-superuser-password/" .env.example
+"${SED_INPLACE[@]}" "s/RABBITMQ_PASSWORD=.*/RABBITMQ_PASSWORD=your-rabbitmq-password/" .env.example
+"${SED_INPLACE[@]}" "s/RABBITMQ_ERLANG_COOKIE=.*/RABBITMQ_ERLANG_COOKIE=your-rabbitmq-erlang-cookie/" .env.example
+"${SED_INPLACE[@]}" "s/REDIS_PASSWORD=.*/REDIS_PASSWORD=your-redis-password/" .env.example
+"${SED_INPLACE[@]}" "s/FLOWER_PASSWORD=.*/FLOWER_PASSWORD=your-flower-password/" .env.example
+"${SED_INPLACE[@]}" "s/PGADMIN4_PASSWORD=.*/PGADMIN4_PASSWORD=your-pgadmin-password/" .env.example
+"${SED_INPLACE[@]}" "s/GLITCHTIP_SECRET_KEY=.*/GLITCHTIP_SECRET_KEY=your-glitchtip-secret-key/" .env.example
+"${SED_INPLACE[@]}" "s/REDIS_COMMANDER_PASSWORD=.*/REDIS_COMMANDER_PASSWORD=your-redis-commander-password/" .env.example
+"${SED_INPLACE[@]}" "s/METABASE_READ_ONLY_PASSWORD=.*/METABASE_READ_ONLY_PASSWORD=your-metabase-read-only-password/" .env.example
+# Metabase reuses the project's Postgres password, and GlitchTip embeds both
+# the Postgres and Redis passwords in full connection URLs.
+"${SED_INPLACE[@]}" "s/METABASE_DATABASE_PASSWORD=.*/METABASE_DATABASE_PASSWORD=your-postgresql-password/" .env.example
+"${SED_INPLACE[@]}" "s|^DATABASE_URL=.*|DATABASE_URL=postgres://your-user:your-postgresql-password@postgresql:5432/glitchtip|" .env.example
+"${SED_INPLACE[@]}" "s|^REDIS_URL=.*|REDIS_URL=redis://:your-redis-password@redis:6379/0|" .env.example
+"${SED_INPLACE[@]}" "s/MINIO_ROOT_PASSWORD=.*/MINIO_ROOT_PASSWORD=minioadmin/" .env.example
+"${SED_INPLACE[@]}" "s/SENTRY_DSN=.*/SENTRY_DSN=https:\/\/public:secret@sentry.com\/1/" .env.example
 
 # Replace KEY's value only when it is empty, a placeholder ("your-..."), or
 # matches the optional extra placeholder (e.g. a well-known service default).
