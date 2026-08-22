@@ -103,6 +103,41 @@ async def test_metrics_endpoint_returns_stats_for_superuser(
     assert response.status_code in (200, 500)
 
 
+@pytest.mark.anyio
+@pytest.mark.usefixtures("override_get_async_session")
+async def test_metrics_reports_configured_redis_max_connections(
+    async_client: AsyncClient, session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GET /api/v1/metrics must report the configured REDIS_MAX_CONNECTIONS,
+    not a hardcoded value. Regression: cache.max_connections was hardcoded
+    to 50, so it silently ignored an operator's actual setting, misleading
+    exactly the capacity-planning use case this endpoint exists for.
+    """
+    from app.core.settings import settings
+    from app.services.auth_service import AuthService
+
+    monkeypatch.setattr(settings, "REDIS_MAX_CONNECTIONS", 137)
+
+    service = AuthService(session)
+    admin = User(
+        email="admin-metrics-max-conn@example.com",
+        hashed_password="hash",
+        role=UserRole.SUPERUSER,
+        is_active=True,
+    )
+    session.add(admin)
+    await session.commit()
+    tokens = service.create_tokens(admin)
+
+    response = await async_client.get(
+        "/api/v1/metrics",
+        headers={"Authorization": f"Bearer {tokens.access_token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["cache"]["max_connections"] == 137
+
+
 def test_health_returns_healthy_status_when_dependencies_available(client) -> None:
     """GET /api/v1/health should return a structured health response."""
     response = client.get("/api/v1/health")
