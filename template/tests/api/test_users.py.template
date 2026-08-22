@@ -126,6 +126,40 @@ class TestUsersRead:
         assert response.status_code == 404
 
 
+class TestUsersCreate:
+    """Tests for POST /api/v1/users.
+
+    Regression coverage: UserService.create() raises UserServiceError
+    (not a ValueError subclass) for a duplicate email. Catching only
+    ValueError let it propagate uncaught, an unhandled 500 instead of the
+    documented 400.
+    """
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_create_user_duplicate_email_returns_400(
+        self, client: AsyncClient, session: AsyncSession
+    ) -> None:
+        auth_service = _auth_service(session)
+        await auth_service.register(
+            RegisterRequest(email="dupe-create@{{ project_slug }}.com", password="password123")
+        )
+        superuser = await _create_superuser(auth_service)
+        token = create_access_token(subject=superuser.id)
+
+        response = await client.post(
+            "/api/v1/users",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "email": "dupe-create@{{ project_slug }}.com",
+                "full_name": "Duplicate",
+                "password": "password123",
+            },
+        )
+
+        assert response.status_code == 400
+        assert "already in use" in response.json()["detail"]
+
+
 class TestUsersUpdate:
     """Tests for PATCH /api/v1/users/{user_id}."""
 
@@ -150,6 +184,70 @@ class TestUsersUpdate:
         assert response.status_code == 200
         data = response.json()
         assert data["full_name"] == "Updated Name"
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_update_user_duplicate_email_returns_400(
+        self, client: AsyncClient, session: AsyncSession
+    ) -> None:
+        """Regression: UserService.update() raises UserServiceError (not
+        ValueError) for a duplicate email. Route previously had no
+        exception handling at all around this call.
+        """
+        auth_service = _auth_service(session)
+        await auth_service.register(
+            RegisterRequest(email="dupe-existing@{{ project_slug }}.com", password="password123")
+        )
+        target_user = await auth_service.register(
+            RegisterRequest(email="dupe-target@{{ project_slug }}.com", password="password123")
+        )
+        superuser = await _create_superuser(auth_service)
+        token = create_access_token(subject=superuser.id)
+
+        response = await client.patch(
+            f"/api/v1/users/{target_user.id}",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"email": "dupe-existing@{{ project_slug }}.com"},
+        )
+
+        assert response.status_code == 400
+        assert "already in use" in response.json()["detail"]
+
+
+class TestUsersUpdateMe:
+    """Tests for PATCH /api/v1/users/me.
+
+    Regression coverage: UserService.update_profile() raises
+    UserServiceError for a duplicate email or wrong current password. The
+    route previously had no exception handling at all around this call.
+    """
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_update_me_duplicate_email_returns_400(
+        self, client: AsyncClient, session: AsyncSession
+    ) -> None:
+        auth_service = _auth_service(session)
+        await auth_service.register(
+            RegisterRequest(
+                email="dupe-me-existing@{{ project_slug }}.com",
+                password="password123",
+            )
+        )
+        current_user = await auth_service.register(
+            RegisterRequest(email="dupe-me-self@{{ project_slug }}.com", password="password123")
+        )
+        token = create_access_token(subject=current_user.id)
+
+        response = await client.patch(
+            "/api/v1/users/me",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "email": "dupe-me-existing@{{ project_slug }}.com",
+                "current_password": "password123",
+            },
+        )
+
+        assert response.status_code == 400
+        assert "already in use" in response.json()["detail"]
 
 
 class TestUsersDelete:

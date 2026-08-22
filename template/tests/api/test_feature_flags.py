@@ -277,17 +277,11 @@ async def test_duplicate_feature_flag_name_rejected(
         headers=headers,
     )
 
-    # NOTE: the route only converts ValueError to a 400 response, but the
-    # service raises FeatureFlagServiceError (not a ValueError subclass) for
-    # duplicate names. httpx's ASGITransport re-raises unhandled exceptions
-    # from the app rather than surfacing the 500 JSON response, so this
-    # pins the current (buggy) behavior; ideally the route would catch
-    # FeatureFlagServiceError and return 400.
-    from app.services.feature_flag_service import FeatureFlagServiceError
+    response = await client.post(
+        "/api/v1/feature-flags",
+        json={"name": "duplicate_flag", "state": False},
+        headers=headers,
+    )
 
-    with pytest.raises(FeatureFlagServiceError, match="already exists"):
-        await client.post(
-            "/api/v1/feature-flags",
-            json={"name": "duplicate_flag", "state": False},
-            headers=headers,
-        )
+    assert response.status_code == 400
+    assert "already exists" in response.json()["detail"]
