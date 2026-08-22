@@ -52,6 +52,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 - Fail closed when a tenant-scoped query runs with no tenant context, and add `system_context()` for deliberate cross-tenant access
 - Make `AuditLogRepository.get_recent_failures` fail closed too, it had its own hand-rolled tenant filter that silently returned every tenant's failed audit records when no tenant context was set
+- Stop 2FA sign-in returning a 500 and locking the account out, `_consume_challenge` looked the user up without `system_context()` on an unauthenticated endpoint, so the fail-closed tenant filter rejected every verification after the challenge had already been consumed
 - Close a 2FA bypass reachable through OAuth, magic link, and WebAuthn sign-in
 - Authenticate WebSocket endpoints
 - Check the blacklist on refresh tokens

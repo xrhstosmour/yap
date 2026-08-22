@@ -30,6 +30,7 @@ from app.core.security import generate_totp_secret
 from app.core.security import verify_password
 from app.core.security import verify_totp
 from app.core.settings import settings
+from app.core.tenant import system_context
 from app.models.totp_recovery_code import TotpRecoveryCode
 from app.models.user import User
 from app.repositories.user_repository import UserRepository
@@ -445,7 +446,14 @@ class TwoFactorAuthService:
         if not user_id_str:
             raise InvalidTOTPError("Challenge token expired or invalid.")
 
-        user = await self.user_repository.get(UUID(user_id_str))
+        # Bootstrapping identity from a challenge token: /auth/2fa/verify is
+        # unauthenticated, so no tenant context exists yet, that's what this
+        # lookup establishes. Without system_context(), User being
+        # tenant-scoped means this raises TenantContextRequiredError on every
+        # 2FA login, and the challenge has already been consumed by the GETDEL
+        # above so the attempt cannot be retried.
+        with system_context():
+            user = await self.user_repository.get(UUID(user_id_str))
         if not user or not user.is_active:
             raise InvalidTOTPError("User not found or inactive.")
 
