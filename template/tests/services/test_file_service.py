@@ -251,3 +251,37 @@ class TestDelete:
             object_key="uploads/abc123", bucket="default"
         )
         service.file_repository.delete.assert_awaited_once_with(file_id)
+
+    @pytest.mark.asyncio
+    async def test_keeps_the_row_while_other_references_remain(
+        self, service: FileService
+    ) -> None:
+        """Should only decrement while other references still hold the row.
+
+        Deduplication gives every reference to the same content within a
+        tenant one shared row. Soft-deleting it on the first delete hid the
+        file from every other referencer that still owned it.
+        """
+        user = make_user()
+        file_id = UUID("00000000-0000-0000-0000-000000000003")
+
+        record = File(
+            id=file_id,
+            filename="shared.txt",
+            mimetype="text/plain",
+            size=10,
+            content_hash="abc123",
+            bucket="default",
+            object_key="uploads/abc123",
+            thumbnail_object_key="thumbnails/abc123",
+            reference_count=2,
+            uploaded_by=user.id,
+        )
+        service.file_repository.get_owned = AsyncMock(return_value=record)
+        service.file_repository.decrement_reference_count = AsyncMock(return_value=1)
+
+        with patch("app.services.file_service.delete_object") as mock_delete:
+            await service.delete(file_id, user)
+
+        mock_delete.assert_not_called()
+        service.file_repository.delete.assert_not_awaited()
