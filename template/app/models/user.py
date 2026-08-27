@@ -173,11 +173,16 @@ class User(BaseModel, table=True):
         ),
     )
 
+    # Collections are `raise`, not `selectin`: eager-loading them made every
+    # `User` fetch drag in unbounded child tables nothing reads. Ask for one
+    # explicitly where it is genuinely needed:
+    #
+    #     select(User).options(selectinload(User.api_keys))
     api_keys: list[APIKey] = Relationship(
         sa_relationship=relationship(
             "APIKey",
             back_populates="user",
-            lazy="selectin",
+            lazy="raise",
         ),
     )
 
@@ -185,7 +190,7 @@ class User(BaseModel, table=True):
         sa_relationship=relationship(
             "OAuthAccount",
             back_populates="user",
-            lazy="selectin",
+            lazy="raise",
         ),
     )
 
