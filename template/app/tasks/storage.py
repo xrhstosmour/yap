@@ -35,6 +35,7 @@ def generate_thumbnail_task(self, file_id: str) -> dict:
     import asyncio
 
     from app.core.storage import _build_thumbnail
+    from app.core.storage import build_object_key
     from app.core.storage import download_object
     from app.core.storage import upload_object
     from app.core.tenant import system_context
@@ -58,7 +59,14 @@ def generate_thumbnail_task(self, file_id: str) -> dict:
                     _build_thumbnail, content, record.mimetype
                 )
 
-                thumbnail_object_key = f"thumbnails/{record.content_hash}"
+                # Keyed off the record's own tenant, not the context: this
+                # runs inside `system_context()`, so the ambient tenant is
+                # the system one and would collide across tenants again.
+                thumbnail_object_key = build_object_key(
+                    "thumbnails",
+                    record.content_hash,
+                    record.tenant_id,
+                )
                 await upload_object(
                     thumbnail_object_key,
                     thumbnail_bytes,
