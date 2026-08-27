@@ -189,6 +189,12 @@ class FileService:
         record = await self.get_owned_file(file_id, user)
         new_count = await self.file_repository.decrement_reference_count(file_id)
 
+        # One row serves every reference to the same content within a tenant
+        # (see `create_or_increment`), so dropping a single reference must
+        # not retire the row while others still hold it. Soft-deleting here
+        # unconditionally made the row invisible to `get_owned`, so every
+        # remaining referencer got "File not found." on a file they still
+        # owned, with `reference_count` left stranded above zero.
         if new_count == 0:
             # Delete thumbnail FIRST to avoid orphaned thumbnails if main
             # delete succeeds but thumbnail delete fails.
@@ -198,8 +204,7 @@ class FileService:
                     bucket=record.bucket,
                 )
             await delete_object(object_key=record.object_key, bucket=record.bucket)
-
-        await self.file_repository.delete(file_id)
+            await self.file_repository.delete(file_id)
 
         logger.info(
             "file_deleted",
