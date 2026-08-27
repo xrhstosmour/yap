@@ -144,14 +144,23 @@ def create_app() -> FastAPI:
     Returns:
         Configured FastAPI application instance
     """
+    # The interactive docs and the schema they read describe every auth,
+    # tenant, API-key and file endpoint, so they are served only in local
+    # development. Passing None to FastAPI unregisters the routes outright
+    # rather than hiding them. To expose them in staging too, widen this to
+    # `settings.ENVIRONMENT != "production"`.
+    serve_documentation = settings.ENVIRONMENT == "local"
+
     app = FastAPI(
         title=settings.PROJECT_NAME,
         description="{{ description }}",
         version="1.0.0",
-        openapi_url=f"{settings.API_V1_STR}/openapi.json",
+        openapi_url=(
+            f"{settings.API_V1_STR}/openapi.json" if serve_documentation else None
+        ),
         generate_unique_id_function=custom_generate_unique_id,
-        docs_url="/try",
-        redoc_url="/documentation",
+        docs_url="/try" if serve_documentation else None,
+        redoc_url="/documentation" if serve_documentation else None,
         lifespan=lifespan,
     )
 
