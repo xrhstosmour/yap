@@ -145,7 +145,14 @@ class Settings(BaseSettings):
     # Additional database for preview/demo/staging content.
     # When set, the X-Database-Mode header can route requests to this database
     # via the `database_mode_variable` contextvar and `additional_async_engine`.
-    POSTGRESQL_ADDITIONAL_DATABASE: str = "{{ project_slug }}_additional"
+    #
+    # Empty by default, which is what disables the feature, see
+    # `ADDITIONAL_DATABASE_ENABLED` in app/database.py. A non-empty default
+    # would build the second engine on every start against a database nothing
+    # creates, since POSTGRESQL_ADDITIONAL_DATABASES, the list Postgres
+    # actually provisions from, does not contain it. Set this, and add the
+    # same name to that list, to turn the routing on.
+    POSTGRESQL_ADDITIONAL_DATABASE: str = ""
 
     @computed_field  # type: ignore[prop-decorator]  # pyright: ignore[reportDecoratorUsage]
     @property
