@@ -19,7 +19,6 @@ from sqlmodel import func
 from sqlmodel import select
 
 from app.core.logging import get_logger
-from app.core.security import verify_password
 from app.models.api_key import APIKey
 from app.repositories.base import BaseRepository
 
@@ -60,39 +59,30 @@ class APIKeyRepository(BaseRepository[APIKey]):
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
-    async def verify_key(self, key_id: str, key_secret: str) -> APIKey | None:
-        """Verify API key and return if valid.
-
-        Args:
-            key_id: Public key identifier
-            key_hash: Hash of the provided key
-
-        Returns:
-            APIKey if valid, None otherwise
-        """
-        api_key = await self.get_by_key_id(key_id)
-
-        if not api_key:
-            return None
-
-        if not verify_password(key_secret, api_key.key_hash):
-            return None
-
-        if not api_key.is_valid():
-            return None
-
-        return api_key
-
     async def update_last_used(self, key_id: str | UUID) -> None:
-        """Update last_used_at timestamp.
+        """Stamp ``last_used_at``, deliberately unscoped.
+
+        Runs during authentication, before the request has a tenant
+        context, against a row the caller just resolved through the
+        globally unique ``key_id`` (see ``get_by_key_id``). Going through
+        ``get()`` instead would apply the tenant filter and raise
+        ``TenantContextRequiredError`` on every API-key request.
+
+        A single ``UPDATE ... WHERE id`` rather than a read-then-write:
+        this is on the hot path of every API-key request and there is
+        nothing to read back.
 
         Args:
             key_id: API key ID
         """
-        api_key = await self.get(key_id)
-        if api_key:
-            api_key.last_used_at = datetime.now(UTC)
-            await self.session.flush()
+        from sqlalchemy import update
+
+        await self.session.execute(
+            update(APIKey)
+            .where(APIKey.id == key_id)  # type: ignore[arg-type]
+            .values(last_used_at=datetime.now(UTC))
+        )
+        await self.session.flush()
 
     async def revoke(self, key_id: str | UUID) -> APIKey | None:
         """Revoke an API key.

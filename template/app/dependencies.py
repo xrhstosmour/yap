@@ -34,8 +34,8 @@ from app.database import get_async_session
 from app.models.api_key import APIKey
 from app.models.user import User
 from app.models.user import UserRole
-from app.repositories.api_key_repository import APIKeyRepository
 from app.repositories.user_repository import UserRepository
+from app.services.api_key_service import APIKeyService
 
 if TYPE_CHECKING:
     pass
@@ -291,9 +291,13 @@ async def get_api_key_auth(
 
     key_id, key_secret = api_key_header.split(":", 1)
 
-    # Verify key.
-    apikey_repository = APIKeyRepository(session)
-    api_key = await apikey_repository.verify_key(key_id, key_secret)
+    # Verified through the service, not the repository. The repository's
+    # own verify_key ran bcrypt synchronously, freezing the event loop for
+    # every other request for the duration of the hash, returned early when
+    # no row matched so response time told an attacker which key IDs exist,
+    # and never stamped `last_used_at`, leaving usage tracking always NULL.
+    service = APIKeyService(session)
+    api_key = await service.verify(key_id, key_secret)
 
     if not api_key:
         return None
