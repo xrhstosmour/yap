@@ -66,6 +66,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 - Make `decrement_reference_count`, `update_profile` token-version bumps, and other update paths single atomic statements
 - Close races on file upload content hashing and outbox double dispatch
 - Propagate `tenant_id` through outbox event publishing
+- Stop deleting one file reference from retiring the row every other reference shares, `FileService.delete` soft-deleted unconditionally, so the remaining referencers got "File not found." on a file they still owned
 - Respect soft deletes in email-exists checks, feature flag lookups, and tenant slug lookups
 - Stop the async circuit breaker from crashing
 - Stop audit log write failures from poisoning the session
