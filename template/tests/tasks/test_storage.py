@@ -22,6 +22,7 @@ from app.tasks.storage import generate_thumbnail_task  # noqa: E402
 def _make_file_record(**overrides: object) -> MagicMock:
     record = MagicMock()
     record.id = uuid4()
+    record.tenant_id = uuid4()
     record.object_key = "uploads/abc123"
     record.bucket = "default"
     record.mimetype = "image/png"
@@ -78,8 +79,13 @@ class TestGenerateThumbnailTask:
         assert result.successful()
         assert result.result["status"] == "completed"
 
+        # Namespaced by the record's own tenant. The task runs under
+        # `system_context()`, which sets no tenant of its own, so keying off
+        # the ambient context would put every tenant's thumbnail for the same
+        # bytes on one object again.
+        expected_key = f"thumbnails/{record.tenant_id}/{record.content_hash}"
         mock_upload_object.assert_awaited_once_with(
-            f"thumbnails/{record.content_hash}",
+            expected_key,
             b"thumb-bytes",
             record.mimetype,
             bucket=record.bucket,
@@ -87,7 +93,7 @@ class TestGenerateThumbnailTask:
         mock_repository.update.assert_awaited_once_with(
             record.id,
             {
-                "thumbnail_object_key": f"thumbnails/{record.content_hash}",
+                "thumbnail_object_key": expected_key,
                 "image_width": 1920,
                 "image_height": 1080,
             },
