@@ -11,9 +11,12 @@ import asyncio
 import hashlib
 import io
 from typing import Any
+from uuid import UUID
 
+from app.core import SYSTEM_TENANT_ID
 from app.core.logging import get_logger
 from app.core.settings import settings
+from app.core.tenant import get_current_tenant_id
 
 logger = get_logger("storage")
 
@@ -96,6 +99,37 @@ def is_thumbnailable(mimetype: str) -> bool:
     return mimetype.startswith("image/") and mimetype != "image/gif"
 
 
+def build_object_key(
+    prefix: str,
+    content_hash: str,
+    tenant_id: UUID | None = None,
+) -> str:
+    """Build a content-addressed object key namespaced by tenant.
+
+    Deduplication is per tenant, not global (see the ``File`` model
+    docstring): two tenants uploading identical bytes each own a row and
+    each own a storage object. A key of just ``prefix/content_hash``
+    breaks that, both rows point at one object, so the moment the first
+    tenant's ``reference_count`` hits zero its purge deletes the bytes
+    the second tenant still references and every download 404s.
+
+    Falls back to ``SYSTEM_TENANT_ID`` when no tenant context is set,
+    matching how ``BaseRepository`` fills ``tenant_id`` on insert, so the
+    key always names the same tenant as the row that stores it.
+
+    Args:
+        prefix: Key namespace, ``uploads`` or ``thumbnails``.
+        content_hash: SHA-256 hash of the content.
+        tenant_id: Owning tenant. Defaults to the current tenant context.
+
+    Returns:
+        The object key to store the content under.
+    """
+    if tenant_id is None:
+        tenant_id = get_current_tenant_id()
+    return f"{prefix}/{tenant_id or SYSTEM_TENANT_ID}/{content_hash}"
+
+
 async def upload_object(
     object_key: str,
     content: bytes,
@@ -160,7 +194,7 @@ async def upload_file(
     """
     bucket = bucket or settings.STORAGE_BUCKET
     content_hash = hashlib.sha256(content).hexdigest()
-    object_key = f"uploads/{content_hash}"
+    object_key = build_object_key("uploads", content_hash)
 
     await upload_object(object_key, content, mimetype, bucket=bucket)
 

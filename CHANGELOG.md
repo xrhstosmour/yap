@@ -86,6 +86,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Namespace blob object keys by tenant, deduplication is per tenant but the keys were global, so one tenant's file purge deleted the bytes another tenant's rows still pointed at
 - Serve Swagger, ReDoc, and `openapi.json` only in local development, a deployed project published its entire API surface to anonymous callers
 - Stop `.env.example` shipping real secrets, the scrub in `setup.sh` missed `METABASE_DATABASE_PASSWORD`, `DATABASE_URL`, and `REDIS_URL`, and was skipped entirely on the sync path where `copier update` re-renders every secret into a file that is not gitignored
 - Keep secrets out of scaffolding output
