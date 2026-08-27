@@ -18,6 +18,7 @@ from fastapi import status
 from jwt import ExpiredSignatureError
 from jwt import InvalidTokenError
 
+from app.core.security import DUMMY_PASSWORD_HASH
 from app.dependencies import get_api_key_auth
 from app.dependencies import get_current_superuser
 from app.dependencies import get_current_user
@@ -27,6 +28,7 @@ from app.models.user import User
 from app.models.user import UserRole
 from app.repositories.api_key_repository import APIKeyRepository
 from app.repositories.user_repository import UserRepository
+from app.services.api_key_service import APIKeyService
 
 # Helpers
 
@@ -536,7 +538,7 @@ class TestGetApiKeyAuth:
         session = AsyncMock()
 
         with patch.object(
-            APIKeyRepository, "verify_key", new_callable=AsyncMock, return_value=api_key
+            APIKeyService, "verify", new_callable=AsyncMock, return_value=api_key
         ):
             result = await get_api_key_auth(
                 session=session,
@@ -546,6 +548,76 @@ class TestGetApiKeyAuth:
         assert result is api_key
         assert request.state.api_key is api_key
         assert request.state.tenant_id == api_key.tenant_id
+
+    @pytest.mark.asyncio
+    async def test_unknown_key_id_still_costs_a_hash_comparison(self) -> None:
+        """An unknown key ID must take as long as a known one.
+
+        Verifying through the repository returned the moment no row
+        matched, so response time told an anonymous caller which key IDs
+        exist. The service path compares against a dummy hash instead.
+        """
+        request = _mock_request(headers={"X-API-Key": "key_unknown:some_secret"})
+        session = AsyncMock()
+
+        with (
+            patch.object(
+                APIKeyRepository,
+                "get_by_key_id",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "app.services.api_key_service.verify_password", return_value=False
+            ) as mock_verify,
+        ):
+            result = await get_api_key_auth(
+                session=session,
+                request=request,
+            )
+
+        assert result is None
+        mock_verify.assert_called_once_with("some_secret", DUMMY_PASSWORD_HASH)
+
+    @pytest.mark.asyncio
+    async def test_valid_key_stamps_last_used_at(self) -> None:
+        """Usage tracking has to happen on the path that actually runs.
+
+        `last_used_at` stayed NULL forever because the only code stamping
+        it lived in a service method nothing called.
+        """
+        api_key = APIKey(
+            id=uuid4(),
+            key_id="key_test123",
+            key_hash="hashed_in_test",
+            key_prefix="sk_testab",
+            name="Test Key",
+            scopes=[],
+            tenant_id=uuid4(),
+            user_id=uuid4(),
+        )
+        request = _mock_request(headers={"X-API-Key": "key_test123:test_secret_value"})
+        session = AsyncMock()
+
+        with (
+            patch.object(
+                APIKeyRepository,
+                "get_by_key_id",
+                new_callable=AsyncMock,
+                return_value=api_key,
+            ),
+            patch("app.services.api_key_service.verify_password", return_value=True),
+            patch.object(
+                APIKeyRepository, "update_last_used", new_callable=AsyncMock
+            ) as mock_stamp,
+        ):
+            result = await get_api_key_auth(
+                session=session,
+                request=request,
+            )
+
+        assert result is api_key
+        mock_stamp.assert_awaited_once_with(api_key.id)
 
     @pytest.mark.asyncio
     async def test_invalid_key_returns_none(self) -> None:
@@ -559,7 +631,7 @@ class TestGetApiKeyAuth:
         session = AsyncMock()
 
         with patch.object(
-            APIKeyRepository, "verify_key", new_callable=AsyncMock, return_value=None
+            APIKeyService, "verify", new_callable=AsyncMock, return_value=None
         ):
             result = await get_api_key_auth(
                 session=session,
