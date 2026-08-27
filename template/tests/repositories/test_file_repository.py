@@ -252,6 +252,63 @@ class TestFileRepository:
         assert owned_by_b is not None
 
     @pytest.mark.anyio
+    async def test_create_or_increment_resurrects_a_deleted_row(
+        self, session: AsyncSession
+    ) -> None:
+        """Re-uploading content that was deleted must revive its row.
+
+        The unique constraint does not know about ``deleted_at``, so the
+        retired row still wins the conflict. Left soft-deleted it was
+        invisible to every lookup, so the upload reported success and then
+        found nothing, and the content could never be uploaded again.
+
+        Args:
+            session: Async database session fixture.
+
+        Returns:
+            None.
+        """
+        tenant = await self._create_tenant(session, slug="resurrect-org")
+        first = await self._create_user(session, email="first@example.com")
+        second = await self._create_user(session, email="second@example.com")
+        repo = FileRepository(session)
+
+        with tenant_context(tenant.id):
+            original, _ = await repo.create_or_increment(
+                self._file_data(
+                    uploaded_by=first.id,
+                    content_hash="deleted-then-reuploaded",
+                    filename="original.txt",
+                    thumbnail_object_key="thumbnails/purged",
+                )
+            )
+            await repo.delete(original.id)
+
+            revived, created = await repo.create_or_increment(
+                self._file_data(
+                    uploaded_by=second.id,
+                    content_hash="deleted-then-reuploaded",
+                    filename="reuploaded.txt",
+                    thumbnail_object_key=None,
+                )
+            )
+
+            assert revived.id == original.id
+            assert revived.deleted_at is None
+            # Starts over at one reference, the blob was purged on delete.
+            assert revived.reference_count == 1
+            # `created` drives the caller's thumbnail dispatch, and the old
+            # thumbnail went with the old blob.
+            assert created is True
+            assert revived.thumbnail_object_key is None
+            # The new uploader owns it, or `get_owned` locks them out of
+            # their own upload.
+            assert revived.uploaded_by == second.id
+            assert revived.filename == "reuploaded.txt"
+
+            assert await repo.get_owned(revived.id, second.id) is not None
+
+    @pytest.mark.anyio
     async def test_create_or_increment_resolves_concurrent_upload_race(
         self, engine: AsyncEngine
     ) -> None:

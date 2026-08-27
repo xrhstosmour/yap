@@ -66,6 +66,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 - Make `decrement_reference_count`, `update_profile` token-version bumps, and other update paths single atomic statements
 - Close races on file upload content hashing and outbox double dispatch
 - Propagate `tenant_id` through outbox event publishing
+- Stop re-uploading previously deleted content returning a 500 forever, the soft-deleted row still won the unique-constraint conflict but was never revived, so `create_or_increment` succeeded and then could not find its own row
 - Stop a duplicate upload that loses the dedup race from deleting the winner's blob, object keys are content-addressed so both racers wrote the same bytes to the same key and the "discard the loser" cleanup purged the only copy
 - Stop deleting one file reference from retiring the row every other reference shares, `FileService.delete` soft-deleted unconditionally, so the remaining referencers got "File not found." on a file they still owned
 - Respect soft deletes in email-exists checks, feature flag lookups, and tenant slug lookups
