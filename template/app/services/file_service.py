@@ -124,8 +124,12 @@ class FileService:
 
         if not created:
             # Lost the race: another upload of identical content committed
-            # first. Discard the blob we just wrote so it does not leak.
-            await delete_object(object_key=object_key, bucket=settings.STORAGE_BUCKET)
+            # first. Nothing to clean up, and nothing may be cleaned up.
+            # Object keys are content-addressed and tenant-namespaced (see
+            # `build_object_key`), so the winner's row points at the exact
+            # key this upload just wrote, with the exact same bytes.
+            # Deleting it here purged the blob out from under the winner and
+            # every later referencer, leaving rows whose downloads 404.
             logger.info(
                 "file_upload_dedup_race",
                 content_hash=content_hash[:16],
