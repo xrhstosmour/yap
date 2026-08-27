@@ -9,6 +9,7 @@ from uuid import UUID
 
 import pytest
 
+from app.core import SYSTEM_TENANT_ID
 from app.core.settings import settings
 from app.models.file import File
 from app.services.file_service import FileService
@@ -110,11 +111,16 @@ class TestUpload:
         service.file_repository.increment_reference_count.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_discards_blob_and_returns_winner_when_insert_race_lost(
+    async def test_keeps_the_blob_and_returns_winner_when_insert_race_lost(
         self, service: FileService
     ) -> None:
-        """Should discard the just-uploaded blob when the DB upsert reveals
-        a concurrent upload of identical content already won the race."""
+        """Should leave the blob alone when the upsert reveals a concurrent
+        upload of identical content already won the race.
+
+        Object keys are content-addressed and tenant-namespaced, so both
+        racers wrote the same bytes to the same key. Deleting "the loser's"
+        blob deletes the only blob, the one the winner's row points at.
+        """
         user = make_user()
         mock_file = MagicMock()
         mock_file.filename = "race.txt"
@@ -122,13 +128,14 @@ class TestUpload:
         mock_file.read = AsyncMock(side_effect=[b"raced content", b""])
 
         service.file_repository.get_by_content_hash = AsyncMock(return_value=None)
+        shared_key = f"uploads/{SYSTEM_TENANT_ID}/raced-hash"
         winner = File(
             filename="race.txt",
             mimetype="text/plain",
             size=13,
-            content_hash="dummy",
-            bucket="default",
-            object_key="uploads/winner",
+            content_hash="raced-hash",
+            bucket=settings.STORAGE_BUCKET,
+            object_key=shared_key,
             reference_count=2,
             uploaded_by=user.id,
         )
@@ -140,13 +147,11 @@ class TestUpload:
             patch("app.services.file_service.upload_file") as mock_upload,
             patch("app.services.file_service.delete_object") as mock_delete,
         ):
-            mock_upload.return_value = ("uploads/loser", "loser-hash")
+            mock_upload.return_value = (shared_key, "raced-hash")
             record = await service.upload(mock_file, user)
 
         assert record is winner
-        mock_delete.assert_called_once_with(
-            object_key="uploads/loser", bucket=settings.STORAGE_BUCKET
-        )
+        mock_delete.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_dispatches_thumbnail_task_for_new_image(
