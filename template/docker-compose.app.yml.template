@@ -4,14 +4,14 @@
 # Usage:
 #   docker compose -f docker-compose.yml -f docker-compose.app.yml up
 #
-# The `internal` network is declared external because the containers repo
-# owns it. Create it once with `docker network create internal` if it does
-# not already exist.
+# The network is named after the project, and owned by it, so two projects
+# generated from this template can run side by side. The vendored compose
+# files under containers/ are rewritten to match by scripts/assemble.py.
+# Compose creates it, so there is no `docker network create` step.
 
 networks:
   internal:
-    name: "internal"
-    external: true
+    name: "{{ project_slug }}-internal"
 
 services:
   app:
