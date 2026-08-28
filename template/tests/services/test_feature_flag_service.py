@@ -8,9 +8,12 @@ from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
 from unittest.mock import patch
 from uuid import UUID
+from uuid import uuid4
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.tenant import tenant_context
 from app.models.feature_flag import FeatureFlag
 from app.schemas.feature_flag import FeatureFlagCreate
 from app.schemas.feature_flag import FeatureFlagUpdate
@@ -231,3 +234,107 @@ class TestDeleteFlag:
         assert result is False
         service.repository.get_by_name.assert_awaited_once_with("nonexistent")
         service.repository.delete.assert_not_awaited()
+
+
+class TestFlagsAreDeploymentWide:
+    """Flags must be readable and writable from any tenant, or neither.
+
+    `FeatureFlagRepository.get_by_name` goes around `BaseRepository` on
+    purpose, so lookups worked from anywhere. The writes still went
+    through the tenant filter, so a flag was visible to every tenant but
+    editable only from the one that created it. `delete_flag` then
+    discarded the repository's answer and reported success anyway, so a
+    superuser could evict any flag from Redis, disabling it across the
+    whole deployment, while the row survived and the API answered 204.
+    """
+
+    @pytest.fixture
+    def anyio_backend(self) -> str:
+        """Provide the asyncio backend for anyio-marked tests.
+
+        Returns:
+            The backend name.
+        """
+        return "asyncio"
+
+    @pytest.mark.anyio
+    async def test_delete_from_another_tenant_really_deletes(
+        self, session: AsyncSession
+    ) -> None:
+        """A reported delete must leave nothing behind.
+
+        Args:
+            session: Async database session fixture.
+        """
+        owner = uuid4()
+        stranger = uuid4()
+        service = FeatureFlagService(session)
+
+        with tenant_context(owner):
+            await service.create_flag(
+                FeatureFlagCreate(name="deployment_wide", state=True)
+            )
+
+        with tenant_context(stranger):
+            with patch(
+                "app.services.feature_flag_service.ff.remove_from_redis",
+                new_callable=AsyncMock,
+            ):
+                deleted = await service.delete_flag("deployment_wide")
+
+            assert deleted is True
+            # The claim has to hold. It used to be an unconditional True.
+            assert await service.get_by_name("deployment_wide") is None
+
+    @pytest.mark.anyio
+    async def test_update_from_another_tenant_really_updates(
+        self, session: AsyncSession
+    ) -> None:
+        """A flag created in one tenant must be editable from another.
+
+        Args:
+            session: Async database session fixture.
+        """
+        owner = uuid4()
+        stranger = uuid4()
+        service = FeatureFlagService(session)
+
+        with tenant_context(owner):
+            with patch(
+                "app.services.feature_flag_service.ff.sync_to_redis",
+                new_callable=AsyncMock,
+            ):
+                await service.create_flag(
+                    FeatureFlagCreate(name="editable_anywhere", state=False)
+                )
+
+        with tenant_context(stranger):
+            with patch(
+                "app.services.feature_flag_service.ff.sync_to_redis",
+                new_callable=AsyncMock,
+            ):
+                updated = await service.toggle_flag("editable_anywhere", True)
+
+            assert updated is not None
+            assert updated.state is True
+
+    @pytest.mark.asyncio
+    async def test_delete_reports_false_and_spares_redis_when_nothing_matched(
+        self, service: FeatureFlagService
+    ) -> None:
+        """A delete that matched no row must not evict the cache entry.
+
+        Args:
+            service: Feature flag service with a mocked repository.
+        """
+        service.repository.get_by_name = AsyncMock(return_value=_make_flag())
+        service.repository.delete = AsyncMock(return_value=False)
+
+        with patch(
+            "app.services.feature_flag_service.ff.remove_from_redis",
+            new_callable=AsyncMock,
+        ) as mock_remove:
+            result = await service.delete_flag("test_flag")
+
+        assert result is False
+        mock_remove.assert_not_awaited()
