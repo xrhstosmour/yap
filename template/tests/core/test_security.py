@@ -18,6 +18,7 @@ from app.core.security import _check_token_rate_limit
 from app.core.security import blacklist_token
 from app.core.security import create_access_token
 from app.core.security import create_email_verification_token
+from app.core.security import create_google_oauth_state
 from app.core.security import create_magic_link_token
 from app.core.security import create_password_reset_token
 from app.core.security import create_refresh_token
@@ -681,4 +682,53 @@ class TestDummyPasswordHash:
         assert verify_password("", DUMMY_PASSWORD_HASH) is False
         assert (
             verify_password("correcthorsebatterystaple", DUMMY_PASSWORD_HASH) is False
+        )
+
+
+class TestGoogleOAuthStateHasNoSharedCooldown:
+    """The Google state token must not throttle the whole deployment.
+
+    `_check_token_rate_limit` keys on a per-user identifier, but this flow
+    has no user yet, so it was called with `redirect_uri`. Every caller of
+    a deployment sends the same registered callback URL, so one request
+    parked the shared cooldown key and every other Google sign-in got a
+    429 until it expired, repeatable indefinitely by anyone.
+    """
+
+    @pytest.mark.asyncio
+    async def test_two_callers_sharing_a_redirect_uri_both_get_a_state(
+        self, mock_redis: AsyncMock, _patch_get_redis: None
+    ) -> None:
+        """A second caller must not be blocked by the first.
+
+        Args:
+            mock_redis: Mocked Redis client.
+            _patch_get_redis: Fixture patching `get_redis`.
+        """
+        redirect_uri = "https://app.example.com/auth/callback"
+
+        # A cooldown key set by the first caller would already exist, so
+        # `SET NX` returns None for the second. That is what used to raise.
+        mock_redis.set = AsyncMock(return_value=None)
+
+        first = await create_google_oauth_state(redirect_uri)
+        second = await create_google_oauth_state(redirect_uri)
+
+        assert first != second
+        assert mock_redis.setex.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_no_cooldown_key_is_written(
+        self, mock_redis: AsyncMock, _patch_get_redis: None
+    ) -> None:
+        """No shared cooldown key means nothing to park.
+
+        Args:
+            mock_redis: Mocked Redis client.
+            _patch_get_redis: Fixture patching `get_redis`.
+        """
+        await create_google_oauth_state("https://app.example.com/auth/callback")
+
+        assert not any(
+            "rate_limit" in str(call) for call in mock_redis.set.await_args_list
         )
