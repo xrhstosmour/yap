@@ -353,15 +353,16 @@ class WebAuthnLoginBeginResponse(BaseSchema):
     Attributes:
         options: The ``PublicKeyCredentialRequestOptions`` dict.
         challenge_session_key: Opaque key that must be echoed back in the
-            completion request. Only present for anonymous (no-email) flows.
+            completion request. Always present. It used to be omitted when
+            the address named a real account, which made its absence an
+            account-existence oracle on an unauthenticated endpoint.
     """
 
     options: dict = Field(
         description="WebAuthn authentication options for the frontend"
     )
-    challenge_session_key: str | None = Field(
-        default=None,
-        description="Echo this back in the completion request (anonymous flows only)",
+    challenge_session_key: str = Field(
+        description="Echo this back in the completion request"
     )
 
 
