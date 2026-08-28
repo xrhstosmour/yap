@@ -102,16 +102,17 @@ def is_thumbnailable(mimetype: str) -> bool:
 def build_object_key(
     prefix: str,
     content_hash: str,
+    uploaded_by: UUID,
     tenant_id: UUID | None = None,
 ) -> str:
-    """Build a content-addressed object key namespaced by tenant.
+    """Build a content-addressed object key namespaced by tenant and uploader.
 
-    Deduplication is per tenant, not global (see the ``File`` model
-    docstring): two tenants uploading identical bytes each own a row and
-    each own a storage object. A key of just ``prefix/content_hash``
-    breaks that, both rows point at one object, so the moment the first
-    tenant's ``reference_count`` hits zero its purge deletes the bytes
-    the second tenant still references and every download 404s.
+    Deduplication is per uploader, not per tenant and not global (see the
+    ``File`` model docstring): every distinct uploader of identical bytes
+    owns a row and owns a storage object. A key that stops at the tenant
+    breaks that, two of that tenant's rows point at one object, so the
+    moment the first uploader's ``reference_count`` hits zero its purge
+    deletes the bytes the second still references and every download 404s.
 
     Falls back to ``SYSTEM_TENANT_ID`` when no tenant context is set,
     matching how ``BaseRepository`` fills ``tenant_id`` on insert, so the
@@ -120,6 +121,7 @@ def build_object_key(
     Args:
         prefix: Key namespace, ``uploads`` or ``thumbnails``.
         content_hash: SHA-256 hash of the content.
+        uploaded_by: ID of the user the stored row belongs to.
         tenant_id: Owning tenant. Defaults to the current tenant context.
 
     Returns:
@@ -127,7 +129,7 @@ def build_object_key(
     """
     if tenant_id is None:
         tenant_id = get_current_tenant_id()
-    return f"{prefix}/{tenant_id or SYSTEM_TENANT_ID}/{content_hash}"
+    return f"{prefix}/{tenant_id or SYSTEM_TENANT_ID}/{uploaded_by}/{content_hash}"
 
 
 async def upload_object(
@@ -175,6 +177,7 @@ async def download_object(object_key: str, bucket: str | None = None) -> bytes:
 async def upload_file(
     content: bytes,
     mimetype: str,
+    uploaded_by: UUID,
     bucket: str | None = None,
 ) -> tuple[str, str]:
     """Upload file bytes to blob storage.
@@ -187,6 +190,7 @@ async def upload_file(
     Args:
         content: Raw file bytes.
         mimetype: MIME type of the file.
+        uploaded_by: ID of the user the stored row will belong to.
         bucket: Storage bucket. Defaults to ``settings.STORAGE_BUCKET``.
 
     Returns:
@@ -194,7 +198,7 @@ async def upload_file(
     """
     bucket = bucket or settings.STORAGE_BUCKET
     content_hash = hashlib.sha256(content).hexdigest()
-    object_key = build_object_key("uploads", content_hash)
+    object_key = build_object_key("uploads", content_hash, uploaded_by)
 
     await upload_object(object_key, content, mimetype, bucket=bucket)
 

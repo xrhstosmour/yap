@@ -111,6 +111,49 @@ class TestUpload:
         service.file_repository.increment_reference_count.assert_awaited_once()
 
     @pytest.mark.asyncio
+    async def test_dedup_lookup_is_scoped_to_the_uploader(
+        self, service: FileService
+    ) -> None:
+        """The dedup lookup must name the uploader, not just the tenant.
+
+        Scoped to the tenant alone it matched a colleague's row and handed
+        it back: their filename, their visibility, their file ID, plus a
+        reference this caller could never release, since `get_owned`
+        filters on `uploaded_by`.
+        """
+        user = make_user()
+        mock_file = MagicMock()
+        mock_file.filename = "shared.txt"
+        mock_file.content_type = "text/plain"
+        mock_file.read = AsyncMock(side_effect=[b"content two users share", b""])
+
+        service.file_repository.get_by_content_hash = AsyncMock(return_value=None)
+        service.file_repository.create_or_increment = AsyncMock(
+            return_value=(
+                File(
+                    filename="shared.txt",
+                    mimetype="text/plain",
+                    size=23,
+                    content_hash="shared-hash",
+                    bucket="default",
+                    object_key="uploads/shared",
+                    reference_count=1,
+                    uploaded_by=user.id,
+                ),
+                True,
+            )
+        )
+
+        with patch("app.services.file_service.upload_file") as mock_upload:
+            mock_upload.return_value = ("uploads/shared", "shared-hash")
+            await service.upload(mock_file, user)
+
+        arguments = service.file_repository.get_by_content_hash.await_args
+        assert user.id in arguments.args or user.id in arguments.kwargs.values()
+        # The blob is keyed by uploader too, or the two rows collide again.
+        assert mock_upload.await_args.kwargs["uploaded_by"] == user.id
+
+    @pytest.mark.asyncio
     async def test_keeps_the_blob_and_returns_winner_when_insert_race_lost(
         self, service: FileService
     ) -> None:
