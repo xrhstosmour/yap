@@ -467,21 +467,27 @@ async def create_google_oauth_state(redirect_uri: str) -> str:
     Binding the URI to the state token prevents open-redirect attacks
     where an attacker substitutes a different callback URI on the return trip.
 
+    No cooldown of its own. `_check_token_rate_limit` keys on a per-user
+    identifier, and this flow has no user yet, so it was called with
+    `redirect_uri` instead. Every caller of a given deployment sends the
+    same one, that is the point of a registered callback URL, so the
+    cooldown key was shared by everybody: one request parked
+    `rate_limit:google_oauth_state:<the callback URL>` for ten seconds and
+    every other Google sign-in in the deployment got a 429 until it
+    expired, repeatable indefinitely by an anonymous caller. `/auth/google`
+    carries `check_auth_rate_limit` instead, which keys on client IP, the
+    same limiter the other unauthenticated auth endpoints use.
+
     Args:
         redirect_uri: The redirect URI that will be sent to Google.
             Stored in Redis so it can be validated on callback.
 
     Returns:
         Opaque URL-safe state string (32 bytes, base64url encoded).
-
-    Raises:
-        TokenRateLimitError: If a token was recently created for this redirect URI.
     """
     from app.core.cache import get_redis
 
     redis = await get_redis()
-    await _check_token_rate_limit(redis, "google_oauth_state", redirect_uri, 10)
-
     state = secrets.token_urlsafe(32)
     key = f"{_GOOGLE_OAUTH_STATE_PREFIX}:{state}"
     await redis.setex(key, settings.GOOGLE_OAUTH_STATE_TTL_SECONDS, redirect_uri)

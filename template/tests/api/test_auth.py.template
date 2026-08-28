@@ -871,6 +871,44 @@ class TestAuthRateLimit:
         assert response.status_code == 429
         assert response.headers["retry-after"] == "30"
 
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_google_auth_rate_limited_returns_429(
+        self, client: AsyncClient, session
+    ) -> None:
+        """GET /auth/google should return 429 once the IP limit is exceeded.
+
+        This endpoint used to carry its own cooldown instead, keyed on the
+        `redirect_uri`. Every caller sends the same registered callback
+        URL, so that cooldown was shared by the whole deployment and one
+        anonymous request could 429 everybody else's Google sign-in.
+        """
+        with self._simulate_denied():
+            response = await client.get(
+                "/api/v1/auth/google",
+                params={"redirect_uri": "https://app.example.com/callback"},
+            )
+
+        assert response.status_code == 429
+        assert response.headers["retry-after"] == "30"
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_google_callback_rate_limited_returns_429(
+        self, client: AsyncClient, session
+    ) -> None:
+        """POST /auth/google/callback should return 429 once the IP limit is exceeded."""
+        with self._simulate_denied():
+            response = await client.post(
+                "/api/v1/auth/google/callback",
+                json={
+                    "code": "authorization-code",
+                    "state": "csrf-state",
+                    "redirect_uri": "https://app.example.com/callback",
+                },
+            )
+
+        assert response.status_code == 429
+        assert response.headers["retry-after"] == "30"
+
 
 class TestWebSocketTicket:
     """Tests for POST /auth/ws-ticket."""
