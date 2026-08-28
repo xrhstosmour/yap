@@ -579,6 +579,7 @@ async def reset_password(
     response_model=GoogleAuthUrlResponse,
     summary="Initiate Google OAuth",
     description="Get the Google OAuth 2.0 authorization URL to start the login flow.",
+    dependencies=[Depends(check_auth_rate_limit)],
 )
 async def google_auth(
     session: SessionDependency,
@@ -772,6 +773,7 @@ async def verify_magic_link(
     response_model=LoginResponse,
     summary="Google OAuth callback",
     description="Exchange a Google authorization code for YAP access tokens.",
+    dependencies=[Depends(check_auth_rate_limit)],
 )
 async def google_callback(
     data: GoogleCallbackRequest,
