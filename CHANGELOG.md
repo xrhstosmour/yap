@@ -90,6 +90,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Stop `/auth/webauthn/login/begin` disclosing whether an address has an account, `challenge_session_key` was omitted only for real accounts and `allowCredentials` was populated only for real accounts, which also handed out their credential IDs, and rate limit both WebAuthn login endpoints per client IP
 - Close a user-enumeration oracle on `/auth/forgot-password` and `/auth/magic-link`, the per-user token cooldown only fires for addresses that exist, so a 429 on a repeated request confirmed the account was real despite both endpoints documenting an unconditional 204
 - Rate limit `/auth/google` and `/auth/google/callback` per client IP, the Google state token's own cooldown was keyed on the shared `redirect_uri`, so one anonymous request 429'd every other Google sign-in in the deployment for ten seconds, repeatable indefinitely
 - Stop `FeatureFlagService.delete_flag` reporting success for a delete that matched nothing, feature flags read globally but wrote per tenant, so a superuser could evict any flag from Redis, disabling it deployment-wide, while the row survived and the API answered 204
