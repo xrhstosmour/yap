@@ -35,6 +35,8 @@ class TestSettingsValidation:
             _env_file=None,
             PROJECT_NAME="Test Project",
             ENVIRONMENT="staging",
+            FRONTEND_HOST="https://app.example.com",
+            BACKEND_CORS_ORIGINS=[],
             SECRET_KEY="test-key",
             POSTGRESQL_PASSWORD="test",
             FIRST_SUPERUSER_PASSWORD="test",
@@ -95,6 +97,9 @@ class TestSettingsValidation:
 
         settings = Settings(
             _env_file=None,
+            # Pinned: loopback origins are only valid in `local`, and the
+            # field default for `ENVIRONMENT` is `production`.
+            ENVIRONMENT="local",
             BACKEND_CORS_ORIGINS=["http://localhost:3000", "http://localhost:8080"],
             FRONTEND_HOST="http://localhost:5173",
             SECRET_KEY="test-key",
@@ -254,3 +259,72 @@ class TestParseCors:
 
         with pytest.raises(ValueError):
             parse_cors(42)
+
+
+class TestLoopbackCorsOrigins:
+    """A deployed environment must not trust the developer's own machine.
+
+    `FRONTEND_HOST` defaults to `http://localhost:5173` and lands in
+    `all_cors_origins` unconditionally, while the CORS middleware runs with
+    `allow_credentials=True`. Left at the default in a deployed
+    environment, the API returns authenticated responses to whatever the
+    victim happens to be serving on that port. The same value also builds
+    the links in verification, reset and magic-link emails.
+    """
+
+    _SECRETS = {
+        "SECRET_KEY": "test-key",
+        "POSTGRESQL_PASSWORD": "test",
+        "FIRST_SUPERUSER_PASSWORD": "test",
+        "RABBITMQ_PASSWORD": "test",
+        "CRYPTO_KEY": "dGVzdC1rZXktMzItYnl0ZXMtbG9uZw==",
+    }
+
+    def test_production_rejects_the_default_frontend_host(self) -> None:
+        """The out-of-the-box default must not deploy."""
+        from app.core.settings import Settings
+
+        with pytest.raises(ValueError, match="point at the local machine"):
+            # `BACKEND_CORS_ORIGINS` is pinned so `FRONTEND_HOST` is the only
+            # possible offender, the ambient environment sets that variable.
+            Settings(
+                _env_file=None,
+                ENVIRONMENT="production",
+                BACKEND_CORS_ORIGINS=[],
+                **self._SECRETS,
+            )
+
+    def test_staging_rejects_a_loopback_backend_origin(self) -> None:
+        """A loopback entry in `BACKEND_CORS_ORIGINS` counts too."""
+        from app.core.settings import Settings
+
+        with pytest.raises(ValueError, match="point at the local machine"):
+            Settings(
+                _env_file=None,
+                ENVIRONMENT="staging",
+                FRONTEND_HOST="https://app.example.com",
+                BACKEND_CORS_ORIGINS="https://admin.example.com,http://127.0.0.1:3000",
+                **self._SECRETS,
+            )
+
+    def test_production_accepts_real_origins(self) -> None:
+        """A properly configured deployment still starts."""
+        from app.core.settings import Settings
+
+        settings = Settings(
+            _env_file=None,
+            ENVIRONMENT="production",
+            FRONTEND_HOST="https://app.example.com",
+            BACKEND_CORS_ORIGINS="https://admin.example.com",
+            **self._SECRETS,
+        )
+
+        assert "https://app.example.com" in settings.all_cors_origins
+
+    def test_local_keeps_loopback(self) -> None:
+        """Loopback is correct in local, not a lesser problem to warn about."""
+        from app.core.settings import Settings
+
+        settings = Settings(_env_file=None, ENVIRONMENT="local", **self._SECRETS)
+
+        assert "http://localhost:5173" in settings.all_cors_origins
