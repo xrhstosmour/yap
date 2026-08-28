@@ -17,7 +17,7 @@ from typing import Any
 REPO_URL = "https://github.com/xrhstosmour/containers.git"
 # Pin to a specific commit instead of floating on the default branch tip.
 # Bump this deliberately when the containers repo needs to be updated.
-REPO_COMMIT = "1b3ae03609525e35544967671f14a7308d653b47"
+REPO_COMMIT = "75c958d0f30c538d2a40a8bbbb133075bae5ac29"
 
 
 # Matched against the vendored compose files to namespace them per project.
