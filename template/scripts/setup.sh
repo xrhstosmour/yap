@@ -296,9 +296,16 @@ elif command -v docker >/dev/null 2>&1; then
 
     info "Waiting for database readiness..."
     sleep 5
+    # Probed on the configured port, not pg_isready's own default of 5432.
+    # Postgres is started with `-p ${POSTGRESQL_PORT}`, so on any other port a
+    # bare pg_isready reports "no response" forever and this loop times out
+    # against a database that has been up the whole time.
+    POSTGRESQL_PORT_VALUE="$(sed -n "s/^POSTGRESQL_PORT=//p" .env | head -1)"
+    POSTGRESQL_PORT_VALUE="${POSTGRESQL_PORT_VALUE:-5432}"
     database_ready=false
     for i in $(seq 1 30); do
-        if docker compose exec -T postgresql pg_isready 2>/dev/null; then
+        if docker compose exec -T postgresql \
+            pg_isready -p "$POSTGRESQL_PORT_VALUE" 2>/dev/null; then
             database_ready=true
             break
         fi
