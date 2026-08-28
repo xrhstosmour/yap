@@ -11,6 +11,7 @@ import json
 import secrets
 from datetime import UTC
 from datetime import datetime
+from hashlib import sha256
 from typing import Any
 from uuid import UUID
 
@@ -29,6 +30,7 @@ from webauthn.helpers.structs import RegistrationCredential
 from webauthn.helpers.structs import UserVerificationRequirement
 
 from app.core.cache import get_redis
+from app.core.encryption import crypto
 from app.core.logging import get_logger
 from app.core.settings import settings
 from app.core.tenant import system_context
@@ -53,6 +55,29 @@ def _dataclass_to_dict(obj: Any) -> dict[str, Any]:  # noqa: ANN401
         json.dumps(dataclasses.asdict(obj), default=str)
     )
     return result
+
+
+def _decoy_credentials(email: str) -> list[PublicKeyCredentialDescriptor]:
+    """Build a plausible credential list for an address with no passkeys.
+
+    ``begin_authentication`` is unauthenticated, so whatever it returns is
+    readable by anyone who can name an address. An empty ``allowCredentials``
+    for unknown addresses and a populated one for real accounts is an
+    account-existence oracle, and the populated form additionally hands out
+    the account's real credential IDs and how many it has.
+
+    The decoys are derived deterministically from the address, so probing
+    the same one twice returns the same list. Fresh random bytes per request
+    would be its own oracle, since a real account's IDs never change.
+
+    Args:
+        email: The address that was probed.
+
+    Returns:
+        A single descriptor whose ID is an HMAC of the address.
+    """
+    digest = crypto.hash_for_search(f"webauthn-decoy:{email}")
+    return [PublicKeyCredentialDescriptor(id=sha256(digest.encode()).digest())]
 
 
 class WebAuthnService:
@@ -144,41 +169,59 @@ class WebAuthnService:
 
     async def begin_authentication(
         self, email: str | None = None
-    ) -> tuple[dict[str, Any], str | None]:
+    ) -> tuple[dict[str, Any], str]:
         """Begin WebAuthn authentication.
 
+        The response is deliberately identical whether or not the address
+        names a real account. This endpoint is unauthenticated, so every
+        field in it is readable by anyone who can guess an address, and it
+        used to answer the question two different ways at once:
+
+        - ``challenge_session_key`` was ``None`` for a real account (the
+          challenge was keyed on its user ID) and a nonce otherwise, so
+          ``null`` in the response meant "this account exists".
+        - ``allowCredentials`` was populated for a real account and absent
+          otherwise, which leaked existence again and additionally handed
+          out the account's real credential IDs and how many it has.
+
+        Now the challenge is always keyed on a fresh nonce, which is always
+        returned, and an address with no passkeys, whether because there is
+        no such user or because that user has not registered one, gets
+        decoys from ``_decoy_credentials``. ``complete_authentication``
+        never needed the user-ID keying: it resolves the user from the
+        asserted credential itself.
+
+        Args:
+            email: Address to scope the assertion to, or None for the
+                usernameless flow over discoverable credentials.
+
         Returns:
-            Tuple of (options_dict, challenge_session_key). challenge_session_key
-            is None when email is known (challenge is stored under user_id);
-            it is a random nonce when email is absent and must be echoed back
-            in complete_authentication() so the challenge can be found.
+            Tuple of (options_dict, challenge_session_key). The key must be
+            echoed back in ``complete_authentication()`` so the challenge
+            can be found.
         """
         challenge = secrets.token_bytes(32)
 
         allow_credentials: list[PublicKeyCredentialDescriptor] | None = None
-        user_id: UUID | None = None
 
         if email:
             user = await self.user_repository.get_by_email(email)
+            descriptors: list[PublicKeyCredentialDescriptor] = []
             if user:
-                user_id = user.id
                 creds = await self._get_user_credentials(user.id)
-                allow_credentials = [
+                descriptors = [
                     PublicKeyCredentialDescriptor(
                         id=base64url_to_bytes(c.credential_id)
                     )
                     for c in creds
                 ]
+            allow_credentials = descriptors or _decoy_credentials(email)
 
-        # Use user_id as challenge key when known; otherwise generate a unique
-        # nonce per request so concurrent anonymous flows cannot collide.
-        challenge_session_key: str | None
-        if user_id:
-            challenge_key = str(user_id)
-            challenge_session_key = None
-        else:
-            challenge_key = secrets.token_hex(16)
-            challenge_session_key = challenge_key
+        # Always a fresh nonce, never the user ID: keying on the user ID is
+        # what made the returned key's presence an existence oracle. A nonce
+        # per request also keeps concurrent flows from colliding.
+        challenge_key = secrets.token_hex(16)
+        challenge_session_key = challenge_key
 
         redis = await get_redis()
         await redis.setex(

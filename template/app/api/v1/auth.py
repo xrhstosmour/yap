@@ -668,6 +668,7 @@ async def webauthn_register_complete(
     response_model=WebAuthnLoginBeginResponse,
     summary="Begin WebAuthn login",
     description="Generate WebAuthn authentication options for passkey login.",
+    dependencies=[Depends(check_auth_rate_limit)],
 )
 async def webauthn_login_begin(
     session: SessionDependency,
@@ -693,6 +694,7 @@ async def webauthn_login_begin(
     response_model=LoginResponse,
     summary="Complete WebAuthn login",
     description="Verify a WebAuthn assertion and return access tokens.",
+    dependencies=[Depends(check_auth_rate_limit)],
 )
 async def webauthn_login_complete(
     data: WebAuthnLoginCompleteRequest,
