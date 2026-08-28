@@ -266,12 +266,38 @@ class TestPoolTimeout:
         assert async_engine.pool._timeout == settings.DATABASE_POOL_TIMEOUT
 
     def test_additional_async_engine_pool_timeout_from_settings(self) -> None:
-        """additional_async_engine's pool_timeout matches settings.DATABASE_POOL_TIMEOUT."""
-        from app.core.settings import settings
-        from app.database import additional_async_engine
+        """The additional engine's pool_timeout matches DATABASE_POOL_TIMEOUT.
 
-        assert additional_async_engine is not None
-        assert additional_async_engine.pool._timeout == settings.DATABASE_POOL_TIMEOUT
+        The additional database is off unless a name is configured, so the
+        engine only exists in a process started with one. Asserted in a
+        subprocess rather than by reloading `app.database` here, because
+        reloading swaps the module-level session factories that the fixtures
+        in this session are already bound to.
+        """
+        import os
+        import subprocess
+        import sys
+
+        script = (
+            "from app.core.settings import settings\n"
+            "from app.database import additional_async_engine\n"
+            "assert additional_async_engine is not None\n"
+            "assert (\n"
+            "    additional_async_engine.pool._timeout\n"
+            "    == settings.DATABASE_POOL_TIMEOUT\n"
+            ")\n"
+            "print('ok')\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            env={**os.environ, "POSTGRESQL_ADDITIONAL_DATABASE": "pool_timeout_probe"},
+            check=False,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert "ok" in result.stdout
 
 
 # Additional database gating
@@ -281,23 +307,28 @@ class TestPoolTimeout:
 class TestAdditionalDatabaseGating:
     """Tests that the additional database engine is only created when configured."""
 
-    def test_additional_database_enabled_by_default(self) -> None:
-        """ADDITIONAL_DATABASE_ENABLED is True when POSTGRESQL_ADDITIONAL_DATABASE is set."""
+    def test_additional_database_disabled_by_default(self) -> None:
+        """ADDITIONAL_DATABASE_ENABLED is False until a database name is set.
+
+        The feature is opt-in. A non-empty default would point the second
+        engine at a database nothing provisions, and every start would log a
+        connection failure for a feature the project never asked for.
+        """
         from app.database import ADDITIONAL_DATABASE_ENABLED
 
-        assert ADDITIONAL_DATABASE_ENABLED is True
+        assert ADDITIONAL_DATABASE_ENABLED is False
 
-    def test_additional_engines_created_when_enabled(self) -> None:
-        """The additional engine/session-factory attributes are populated by default."""
+    def test_additional_engines_absent_by_default(self) -> None:
+        """The additional engine/session-factory attributes stay None."""
         from app.database import additional_async_engine
         from app.database import additional_async_session_factory
         from app.database import additional_sync_engine
         from app.database import additional_sync_session_factory
 
-        assert additional_async_engine is not None
-        assert additional_async_session_factory is not None
-        assert additional_sync_engine is not None
-        assert additional_sync_session_factory is not None
+        assert additional_async_engine is None
+        assert additional_async_session_factory is None
+        assert additional_sync_engine is None
+        assert additional_sync_session_factory is None
 
     @pytest.mark.anyio
     async def test_get_async_session_raises_when_additional_disabled(self) -> None:
@@ -494,8 +525,12 @@ class TestAdditionalDatabaseURI:
         assert "myuser" in uri
         assert "+psycopg" in uri
 
-    def test_additional_database_uri_default_suffix(self) -> None:
-        """ADDITIONAL_DATABASE_URI defaults to {project_slug}_additional."""
+    def test_additional_database_defaults_to_empty(self) -> None:
+        """POSTGRESQL_ADDITIONAL_DATABASE is empty unless the project sets it.
+
+        This is the value `ADDITIONAL_DATABASE_ENABLED` reads, so the default
+        is what keeps the second engine from being built at import time.
+        """
         from app.core.settings import Settings
 
         s = Settings(
@@ -509,8 +544,7 @@ class TestAdditionalDatabaseURI:
             STORAGE_SECRET_KEY="test-storage-key",
         )
 
-        uri = str(s.ADDITIONAL_DATABASE_URI)
-        assert "additional" in uri
+        assert s.POSTGRESQL_ADDITIONAL_DATABASE == ""
 
 
 class TestDatabaseModeVariable:
