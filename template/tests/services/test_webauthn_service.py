@@ -141,7 +141,7 @@ class TestBeginAuthentication:
         self,
         service: WebAuthnService,
     ) -> None:
-        """Should return options with no session key when email resolves to a user."""
+        """Should return a session key even when the email resolves to a user."""
         user = make_user()
         service.user_repository.get_by_email = AsyncMock(return_value=user)
 
@@ -158,7 +158,9 @@ class TestBeginAuthentication:
 
         assert isinstance(options, dict)
         assert "challenge" in options
-        assert session_key is None  # email flow stores challenge under user_id
+        # Always returned. Omitting it for real accounts made its absence
+        # an account-existence oracle.
+        assert isinstance(session_key, str)
 
     @pytest.mark.asyncio
     async def test_anon_when_user_not_found(
@@ -205,7 +207,7 @@ class TestBeginAuthentication:
             )
 
         assert "allow_credentials" in options
-        assert session_key is None  # known user, challenge stored under user_id
+        assert isinstance(session_key, str)
         assert len(options["allow_credentials"]) == 1
 
 
@@ -631,3 +633,71 @@ class TestCompleteAuthenticationTenantContext:
             result = await service.complete_authentication(credential_payload)
 
         assert result.id == user.id
+
+
+class TestBeginAuthenticationHidesAccountExistence:
+    """The response must not answer "does this account exist?".
+
+    `/auth/webauthn/login/begin` is unauthenticated, so anyone who can
+    name an address can read every field it returns. Two of them used to
+    answer that question: `challenge_session_key` was `None` only for
+    real accounts, and `allowCredentials` was populated only for real
+    accounts, which also handed out their real credential IDs.
+    """
+
+    @pytest.mark.asyncio
+    async def test_known_and_unknown_addresses_look_the_same(
+        self,
+        service: WebAuthnService,
+    ) -> None:
+        """A real account and an unknown one must be indistinguishable.
+
+        Args:
+            service: WebAuthn service with a mocked repository.
+        """
+        mock_redis = AsyncMock()
+        mock_redis.setex = AsyncMock()
+
+        with patch("app.services.webauthn_service.get_redis", return_value=mock_redis):
+            service.user_repository.get_by_email = AsyncMock(return_value=make_user())
+            with patch.object(service, "_get_user_credentials", return_value=[]):
+                known_options, known_key = await service.begin_authentication(
+                    email="real@example.com"
+                )
+
+            service.user_repository.get_by_email = AsyncMock(return_value=None)
+            unknown_options, unknown_key = await service.begin_authentication(
+                email="nobody@example.com"
+            )
+
+        assert isinstance(known_key, str)
+        assert isinstance(unknown_key, str)
+        assert len(known_key) == len(unknown_key)
+        assert len(known_options["allow_credentials"]) == len(
+            unknown_options["allow_credentials"]
+        )
+
+    @pytest.mark.asyncio
+    async def test_decoys_are_stable_across_probes(
+        self,
+        service: WebAuthnService,
+    ) -> None:
+        """Repeated probes of one unknown address must agree.
+
+        A real account's credential IDs never change, so decoys that were
+        random per request would be an oracle of their own.
+
+        Args:
+            service: WebAuthn service with a mocked repository.
+        """
+        service.user_repository.get_by_email = AsyncMock(return_value=None)
+        mock_redis = AsyncMock()
+        mock_redis.setex = AsyncMock()
+
+        with patch("app.services.webauthn_service.get_redis", return_value=mock_redis):
+            first, _ = await service.begin_authentication(email="nobody@example.com")
+            second, _ = await service.begin_authentication(email="nobody@example.com")
+            other, _ = await service.begin_authentication(email="someone@example.com")
+
+        assert first["allow_credentials"] == second["allow_credentials"]
+        assert first["allow_credentials"] != other["allow_credentials"]
