@@ -18,12 +18,22 @@ class FeatureFlag(BaseModel, table=True):
     source of truth; they are synced to Redis on change for instant
     propagation across all application instances.
 
+    Flags are deployment-wide, not per tenant. ``name`` is globally
+    unique, ``feature_enabled()`` takes a bare name with no tenant, and
+    both of its cache tiers are keyed on that name alone, so one tenant
+    cannot hold a different state for a flag than another. The
+    ``tenant_id`` column inherited from ``BaseModel`` is therefore not a
+    scope here: ``FeatureFlagService`` writes every row under
+    ``SYSTEM_TENANT_ID`` and reads them all back through
+    ``system_context()``. Making flags genuinely per-tenant would need a
+    ``UNIQUE(tenant_id, name)`` constraint, tenant-aware cache keys, and a
+    tenant argument on ``feature_enabled()``.
+
     Attributes:
         id: UUID primary key
         name: Unique flag identifier (e.g. 'new_checkout_flow')
         state: Whether the feature is enabled
         description: Human-readable description of the feature
-        tenant_id: Optional tenant scope (null = global flag)
     """
 
     __tablename__ = "feature_flags"  # pyright: ignore[reportAssignmentType]
