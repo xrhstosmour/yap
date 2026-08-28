@@ -28,17 +28,23 @@ class FileRepository(BaseRepository[File]):
         super().__init__(session, File)
 
     async def get_by_content_hash(
-        self, content_hash: str, tenant_id: UUID | None = None
+        self,
+        content_hash: str,
+        uploaded_by: UUID,
+        tenant_id: UUID | None = None,
     ) -> File | None:
-        """Find a file record by its content hash, scoped to a tenant.
+        """Find a file record by its content hash, scoped to one uploader.
 
-        Deduplication is per-tenant (see the ``File`` docstring), so a
-        content-hash lookup without a tenant would either miss another
-        tenant's identical upload or, worse, match it and hand back a row
-        this caller does not own.
+        Deduplication is per-uploader (see the ``File`` docstring), so a
+        content-hash lookup scoped no tighter than the tenant would match a
+        colleague's identical upload and hand back a row this caller does
+        not own: their filename, their visibility, their file ID, and a
+        reference this caller can never release, since ``get_owned``
+        filters on ``uploaded_by``.
 
         Args:
             content_hash: SHA-256 hash to look up.
+            uploaded_by: Owner to scope the lookup to.
             tenant_id: Tenant to scope the lookup to. Defaults to the
                 current tenant context.
 
@@ -49,6 +55,7 @@ class FileRepository(BaseRepository[File]):
             tenant_id = get_current_tenant_id()
         query = select(File).where(
             File.content_hash == content_hash,  # type: ignore[arg-type]
+            File.uploaded_by == uploaded_by,  # type: ignore[arg-type]
             File.tenant_id == tenant_id,  # type: ignore[arg-type]
             File.deleted_at.is_(None),  # type: ignore[union-attr]
         )
@@ -57,12 +64,13 @@ class FileRepository(BaseRepository[File]):
 
     async def create_or_increment(self, data: dict[str, Any]) -> tuple[File, bool]:
         """Insert a new file record, or increment ``reference_count`` if one
-        with the same ``(tenant_id, content_hash)`` already exists.
+        with the same ``(tenant_id, uploaded_by, content_hash)`` already exists.
 
-        Uses ``INSERT ... ON CONFLICT (tenant_id, content_hash) DO UPDATE``
-        so the database resolves duplicate-content races atomically: two
-        concurrent uploads of identical content, by the same tenant, can no
-        longer both pass a stale existence check and create duplicate rows.
+        Uses ``INSERT ... ON CONFLICT (tenant_id, uploaded_by, content_hash)
+        DO UPDATE`` so the database resolves duplicate-content races
+        atomically: two concurrent uploads of identical content, by the same
+        user, can no longer both pass a stale existence check and create
+        duplicate rows.
 
         A soft-deleted row still wins that conflict, the unique constraint
         knows nothing about ``deleted_at``, so re-uploading content that was
@@ -92,10 +100,11 @@ class FileRepository(BaseRepository[File]):
         was_deleted = File.deleted_at.is_not(None)  # type: ignore[union-attr]
 
         # Resurrection takes the incoming upload's values for everything
-        # that describes the content and who owns it. Keeping the retired
-        # row's would hand the new uploader a row `get_owned` refuses to
-        # return (it filters on `uploaded_by`) and a `thumbnail_object_key`
-        # pointing at an object the delete already purged.
+        # that describes the content. Keeping the retired row's would hand
+        # the uploader a `thumbnail_object_key` pointing at an object the
+        # delete already purged. `uploaded_by` is not in the list: it is
+        # part of the conflict target now, so a conflicting row already
+        # carries the same value.
         adopted: dict[str, Any] = {
             column: case((was_deleted, excluded[column]), else_=getattr(File, column))
             for column in (
@@ -108,7 +117,6 @@ class FileRepository(BaseRepository[File]):
                 "image_width",
                 "image_height",
                 "is_public",
-                "uploaded_by",
                 "resource_type",
                 "resource_id",
                 "created_at",
@@ -116,7 +124,7 @@ class FileRepository(BaseRepository[File]):
         }
 
         statement = statement.on_conflict_do_update(
-            index_elements=["tenant_id", "content_hash"],
+            index_elements=["tenant_id", "uploaded_by", "content_hash"],
             set_={
                 **adopted,
                 "deleted_at": None,
@@ -169,13 +177,20 @@ class FileRepository(BaseRepository[File]):
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
-    async def increment_reference_count(self, content_hash: str) -> None:
-        """Increment the reference count for a content hash, within the
-        current tenant.
+    async def increment_reference_count(
+        self, content_hash: str, uploaded_by: UUID
+    ) -> None:
+        """Increment the reference count for one uploader's content hash,
+        within the current tenant.
 
-        Deduplication is per-tenant (see the ``File`` docstring): without
-        the tenant filter, this would match and increment every tenant's
-        row sharing this ``content_hash``, not just the caller's own.
+        Deduplication is per-uploader (see the ``File`` docstring): scoped
+        any wider, this would match and increment rows sharing this
+        ``content_hash`` that belong to other users, or other tenants,
+        rather than only the caller's own.
+
+        Args:
+            content_hash: SHA-256 hash of the content.
+            uploaded_by: Owner of the row to increment.
         """
         from sqlalchemy import update
 
@@ -184,6 +199,7 @@ class FileRepository(BaseRepository[File]):
             update(File)
             .where(
                 File.content_hash == content_hash,  # type: ignore[arg-type]
+                File.uploaded_by == uploaded_by,  # type: ignore[arg-type]
                 File.tenant_id == tenant_id,  # type: ignore[arg-type]
             )
             .values(reference_count=File.reference_count + 1)

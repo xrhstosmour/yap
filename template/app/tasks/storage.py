@@ -59,12 +59,14 @@ def generate_thumbnail_task(self, file_id: str) -> dict:
                     _build_thumbnail, content, record.mimetype
                 )
 
-                # Keyed off the record's own tenant, not the context: this
-                # runs inside `system_context()`, so the ambient tenant is
-                # the system one and would collide across tenants again.
+                # Keyed off the record's own uploader and tenant, not the
+                # context: this runs inside `system_context()`, so the
+                # ambient tenant is the system one and would collide across
+                # tenants again.
                 thumbnail_object_key = build_object_key(
                     "thumbnails",
                     record.content_hash,
+                    record.uploaded_by,
                     record.tenant_id,
                 )
                 await upload_object(

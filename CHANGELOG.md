@@ -90,6 +90,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Scope file deduplication to the uploader, not the tenant, uploading content a colleague had already uploaded returned their row, exposing their filename and visibility and stranding a reference the caller could never release
 - Enforce tenant deactivation and deletion at every auth path, offboarding an organization revoked nothing, so its members' access tokens kept working until they expired and its API keys kept working forever
 - Verify API keys through `APIKeyService`, the repository path it replaced ran `bcrypt` synchronously on the event loop, returned early for an unknown key ID so response time revealed which IDs exist, and never stamped `last_used_at`
 - Namespace blob object keys by tenant, deduplication is per tenant but the keys were global, so one tenant's file purge deleted the bytes another tenant's rows still pointed at
