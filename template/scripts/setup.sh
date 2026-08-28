@@ -267,7 +267,8 @@ elif command -v docker >/dev/null 2>&1; then
     fi
 
     info "Starting core services..."
-    docker network create internal 2>/dev/null || true
+    # No `docker network create` here any more: the compose network is named
+    # after the project and owned by it, so Compose brings it up itself.
     if docker compose ps -q 2>/dev/null | grep -q .; then
         warn "Stopping any existing containers, volumes preserved..."
     fi
