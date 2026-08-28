@@ -7,15 +7,24 @@ docker-compose.yml resolve correctly.
 """
 
 import os
+import re
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any
 
 REPO_URL = "https://github.com/xrhstosmour/containers.git"
 # Pin to a specific commit instead of floating on the default branch tip.
 # Bump this deliberately when the containers repo needs to be updated.
 REPO_COMMIT = "1b3ae03609525e35544967671f14a7308d653b47"
+
+
+# Matched against the vendored compose files to namespace them per project.
+# Anchored and quote-aware so they only ever touch the exact keys intended.
+CONTAINER_NAME_PATTERN = re.compile(r'^(\s*)container_name:\s*"([^"]+)"\s*$')
+NAME_PATTERN = re.compile(r'^(\s*)name:\s*"([^"]+)"\s*$')
+EXTERNAL_TRUE_PATTERN = re.compile(r"^\s*external:\s*true\s*$")
 
 
 def run_openssl(*args: Any) -> None:  # noqa: ANN401
@@ -146,9 +155,96 @@ def read_services(containers_directory) -> list[str]:
     return services
 
 
+def read_project_slug() -> str:
+    """Read the project slug out of the generated .env.example.
+
+    Returns:
+        The slug, or "yap" when .env.example is missing or has no user line.
+    """
+    project_slug = "yap"
+    env_example = os.path.join(os.getcwd(), ".env.example")
+    if os.path.isfile(env_example):
+        with open(env_example) as f:
+            for line in f:
+                if line.startswith("POSTGRESQL_USER="):
+                    project_slug = line.split("=", 1)[1].strip()
+                    break
+    return project_slug
+
+
+def namespace_compose_file(compose_path: str, project_slug: str) -> None:
+    """Prefix container, volume and network names with the project slug.
+
+    The containers repository is a single-host collection: each directory is
+    its own Compose project, one instance of each service per machine, so
+    `container_name: "postgresql"`, a volume literally named `postgresql` and
+    a shared external network called `internal` are all correct there.
+
+    A generated project vendors those files and wires them together, so two
+    projects on one machine would fight over exactly those three names. The
+    failure is quiet and nasty rather than loud: Compose attaches the second
+    project's services to the first project's network and data volume, and a
+    service ends up talking to another project's database.
+
+    Rewritten line by line rather than through a YAML round trip, because
+    these files carry explanatory comments and a hand-maintained key order
+    that a dump would throw away.
+
+    Args:
+        compose_path: Path to a vendored docker-compose.yml.
+        project_slug: Prefix to apply, the generated project's slug.
+    """
+    prefix = f"{project_slug}-"
+    lines = Path(compose_path).read_text().splitlines()
+    output: list[str] = []
+    # Tracks whether the current line sits under a top-level `volumes:` or
+    # `networks:` mapping, which is where a bare `name:` is an object name
+    # rather than, say, a service's own key.
+    in_named_block = False
+
+    for line in lines:
+        stripped = line.strip()
+
+        if line and not line[0].isspace() and not stripped.startswith("#"):
+            in_named_block = stripped in ("volumes:", "networks:")
+
+        container = CONTAINER_NAME_PATTERN.match(line)
+        if container:
+            indent, name = container.group(1), container.group(2)
+            if not name.startswith(prefix):
+                name = prefix + name
+            output.append(f'{indent}container_name: "{name}"')
+            continue
+
+        if in_named_block:
+            # `external: true` says another Compose project owns the network.
+            # Once it is namespaced per project, this project owns it, and
+            # Compose creates it instead of requiring `docker network create`.
+            if EXTERNAL_TRUE_PATTERN.match(line):
+                continue
+
+            # The upstream comments in this block all explain that externality,
+            # so they would be left describing a key that is no longer here.
+            if stripped.startswith("#") and "external" in stripped.lower():
+                continue
+
+            named = NAME_PATTERN.match(line)
+            if named:
+                indent, name = named.group(1), named.group(2)
+                if not name.startswith(prefix):
+                    name = prefix + name
+                output.append(f'{indent}name: "{name}"')
+                continue
+
+        output.append(line)
+
+    Path(compose_path).write_text("\n".join(output) + "\n")
+
+
 def main() -> None:
     containers_directory = "containers"
     services = read_services(containers_directory)
+    project_slug = read_project_slug()
 
     # Find the containers repo: check adjacent path first, then cached
     # clone at /tmp/containers, then clone fresh if neither exists.
@@ -195,6 +291,11 @@ def main() -> None:
         print(f"  Copying {MAP[name]} -> {dst}")
         shutil.copytree(src, dst, dirs_exist_ok=True)
 
+        compose_path = os.path.join(dst, "docker-compose.yml")
+        if os.path.isfile(compose_path):
+            namespace_compose_file(compose_path, project_slug)
+            print(f"  Namespaced {compose_path} under '{project_slug}-'")
+
     # Rename all template.* files (template.env -> .env, etc.),
     # except in the certificates directory which we handle separately.
     for root, _, files in os.walk(containers_directory):
@@ -209,16 +310,6 @@ def main() -> None:
                 dst_path = os.path.join(root, name)
                 print(f"  Renaming {src_path} -> {dst_path}")
                 os.rename(src_path, dst_path)
-
-    # Read project slug from generated .env.example.
-    project_slug = "yap"
-    env_example = os.path.join(os.getcwd(), ".env.example")
-    if os.path.isfile(env_example):
-        with open(env_example) as f:
-            for line in f:
-                if line.startswith("POSTGRESQL_USER="):
-                    project_slug = line.split("=", 1)[1].strip()
-                    break
 
     # Generate htpasswd for Traefik dashboard basic auth.
     for root, _, files in os.walk(containers_directory):
