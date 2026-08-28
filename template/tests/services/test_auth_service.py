@@ -10,6 +10,7 @@ from uuid import uuid7
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import TokenRateLimitError
 from app.core.security import decode_token
 from app.core.security import generate_password_hash
 from app.core.tenant import system_context
@@ -929,3 +930,57 @@ class TestEmailTokens:
             await auth_service.send_password_reset_email("unknown@example.com")
 
         mock_send.assert_not_called()
+
+
+class TestTokenCooldownIsNotAnEnumerationOracle:
+    """A throttled send must look identical to an unknown address.
+
+    The per-user cooldown on `create_password_reset_token` and
+    `create_magic_link_token` only fires for addresses that exist, so
+    letting `TokenRateLimitError` surface defeated the "always 204"
+    promise both endpoints document: submit an address twice, a 429 on
+    the second attempt meant the account was real and two 204s meant it
+    was not.
+    """
+
+    @pytest.mark.asyncio
+    async def test_password_reset_swallows_the_cooldown(
+        self, session: AsyncSession
+    ) -> None:
+        """A throttled reset must return, not raise.
+
+        Args:
+            session: Async database session fixture.
+        """
+        auth_service = _auth_service(session)
+        user = await auth_service.register(
+            RegisterRequest(email="throttled-reset@example.com", password="password123")
+        )
+
+        with patch.object(
+            auth_service,
+            "_send_token_email",
+            AsyncMock(side_effect=TokenRateLimitError("cooldown")),
+        ):
+            await auth_service.send_password_reset_email(user.email)
+
+    @pytest.mark.asyncio
+    async def test_magic_link_swallows_the_cooldown(
+        self, session: AsyncSession
+    ) -> None:
+        """A throttled magic link must return, not raise.
+
+        Args:
+            session: Async database session fixture.
+        """
+        auth_service = _auth_service(session)
+        user = await auth_service.register(
+            RegisterRequest(email="throttled-magic@example.com", password="password123")
+        )
+
+        with patch.object(
+            auth_service,
+            "_send_token_email",
+            AsyncMock(side_effect=TokenRateLimitError("cooldown")),
+        ):
+            await auth_service.send_magic_link(user.email)

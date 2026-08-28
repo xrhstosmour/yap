@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import SYSTEM_TENANT_ID
 from app.core.logging import get_logger
 from app.core.security import DUMMY_PASSWORD_HASH
+from app.core.security import TokenRateLimitError
 from app.core.security import blacklist_token
 from app.core.security import create_access_token
 from app.core.security import create_refresh_token
@@ -529,6 +530,13 @@ class AuthService:
         prevent user enumeration, callers should always return 204.
         Generates a single-use Redis-backed token with a 1-hour TTL.
 
+        The per-user cooldown is swallowed for the same reason. It only
+        fires for addresses that exist, so letting it surface turned the
+        endpoint into an enumeration oracle: submit an address twice and a
+        429 on the second attempt meant the account was real, while two
+        204s meant it was not. The cooldown still does its job, no second
+        email goes out, it just stops being observable from outside.
+
         Args:
             email: Email address of the account to reset.
         """
@@ -539,14 +547,19 @@ class AuthService:
             # Do not reveal whether the account exists.
             return
 
-        await self._send_token_email(
-            user=user,
-            token_factory=create_password_reset_token(user.id),
-            url_path="/auth/reset-password",
-            subject=f"Reset your password, {settings.PROJECT_NAME}",
-            template_name="password_reset.html",
-            url_field_name="reset_url",
-        )
+        try:
+            await self._send_token_email(
+                user=user,
+                token_factory=create_password_reset_token(user.id),
+                url_path="/auth/reset-password",
+                subject=f"Reset your password, {settings.PROJECT_NAME}",
+                template_name="password_reset.html",
+                url_field_name="reset_url",
+            )
+        except TokenRateLimitError:
+            logger.info("password_reset_email_throttled", user_id=str(user.id))
+            return
+
         logger.info("password_reset_email_queued", user_id=str(user.id))
 
     async def reset_password(self, token: str, new_password: str) -> None:
@@ -753,7 +766,9 @@ class AuthService:
         """Queue a passwordless login link email if the account exists.
 
         Silently does nothing when the email is not registered to
-        prevent user enumeration, callers should always return 204.
+        prevent user enumeration, callers should always return 204. The
+        per-user cooldown is swallowed for the same reason, see
+        ``send_password_reset_email``.
 
         Args:
             email: Email address of the account to send the link to.
@@ -764,14 +779,19 @@ class AuthService:
         if not user:
             return
 
-        await self._send_token_email(
-            user=user,
-            token_factory=create_magic_link_token(user.id),
-            url_path="/auth/magic-link",
-            subject=f"Sign in to {settings.PROJECT_NAME}",
-            template_name="magic_link.html",
-            url_field_name="login_url",
-        )
+        try:
+            await self._send_token_email(
+                user=user,
+                token_factory=create_magic_link_token(user.id),
+                url_path="/auth/magic-link",
+                subject=f"Sign in to {settings.PROJECT_NAME}",
+                template_name="magic_link.html",
+                url_field_name="login_url",
+            )
+        except TokenRateLimitError:
+            logger.info("magic_link_throttled", user_id=str(user.id))
+            return
+
         logger.info("magic_link_sent", user_id=str(user.id))
 
     async def verify_magic_link(self, token: str) -> LoginResponse:
