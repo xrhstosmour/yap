@@ -7,6 +7,8 @@ external services (JWT decode, DB repositories, rate limiting).
 
 from __future__ import annotations
 
+from datetime import UTC
+from datetime import datetime
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
 from unittest.mock import patch
@@ -14,6 +16,7 @@ from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException
+from fastapi import WebSocketException
 from fastapi import status
 from jwt import ExpiredSignatureError
 from jwt import InvalidTokenError
@@ -22,8 +25,10 @@ from app.core.security import DUMMY_PASSWORD_HASH
 from app.dependencies import get_api_key_auth
 from app.dependencies import get_current_superuser
 from app.dependencies import get_current_user
+from app.dependencies import get_current_user_ws
 from app.dependencies import get_optional_current_user
 from app.models.api_key import APIKey
+from app.models.tenant import Tenant
 from app.models.user import User
 from app.models.user import UserRole
 from app.repositories.api_key_repository import APIKeyRepository
@@ -717,3 +722,181 @@ class TestGetCurrentUserUncovered:
             )
 
         mock_rate_limit.assert_awaited_once_with(str(user.id))
+
+
+# Tenant offboarding
+
+
+def _make_tenant(
+    *,
+    is_active: bool = True,
+    deleted_at: datetime | None = None,
+) -> Tenant:
+    """Build a Tenant instance for testing.
+
+    Args:
+        is_active: Whether the tenant is active.
+        deleted_at: Soft-delete timestamp, or None.
+
+    Returns:
+        A transient Tenant.
+    """
+    return Tenant(
+        id=uuid4(),
+        name="Offboarded Org",
+        slug=f"offboarded-{uuid4().hex[:8]}",
+        is_active=is_active,
+        deleted_at=deleted_at,
+    )
+
+
+class TestOffboardedTenantIsRejected:
+    """Deactivating or deleting a tenant must cut off its members.
+
+    Offboarding an organization sets `is_active=False` or stamps
+    `deleted_at`, but nothing revokes the access tokens and API keys
+    already issued to its users. Every auth path therefore has to check
+    the tenant itself, or a suspended organization keeps full access to
+    its own data until each credential happens to expire, and API keys
+    never expire at all.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "tenant",
+        [
+            _make_tenant(is_active=False),
+            _make_tenant(deleted_at=datetime.now(UTC)),
+        ],
+        ids=["deactivated", "soft_deleted"],
+    )
+    async def test_bearer_token_is_rejected(self, tenant: Tenant) -> None:
+        """A JWT belonging to an offboarded tenant must 403.
+
+        Args:
+            tenant: An offboarded tenant.
+        """
+        user = _make_user(tenant_id=tenant.id)
+        user.tenant = tenant
+        request = _mock_request()
+        session = AsyncMock()
+
+        with (
+            patch(
+                "app.dependencies.decode_token",
+                return_value=_valid_payload(sub=str(user.id)),
+            ),
+            patch.object(
+                UserRepository, "get", new_callable=AsyncMock, return_value=user
+            ),
+        ):
+            with pytest.raises(HTTPException) as exc_info:
+                await get_current_user(
+                    session=session,
+                    token="valid_token",
+                    request=request,
+                )
+
+        assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
+
+    @pytest.mark.asyncio
+    async def test_optional_bearer_token_is_rejected(self) -> None:
+        """The optional variant must return None, not the user."""
+        tenant = _make_tenant(is_active=False)
+        user = _make_user(tenant_id=tenant.id)
+        user.tenant = tenant
+        request = _mock_request(headers={"Authorization": "Bearer valid_token"})
+        session = AsyncMock()
+
+        with (
+            patch(
+                "app.dependencies.decode_token",
+                return_value=_valid_payload(sub=str(user.id)),
+            ),
+            patch.object(
+                UserRepository, "get", new_callable=AsyncMock, return_value=user
+            ),
+        ):
+            result = await get_optional_current_user(
+                session=session,
+                request=request,
+            )
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_websocket_ticket_is_rejected(self) -> None:
+        """A WebSocket handshake must be closed, not accepted."""
+        tenant = _make_tenant(is_active=False)
+        user = _make_user(tenant_id=tenant.id)
+        user.tenant = tenant
+        session = AsyncMock()
+
+        with (
+            patch(
+                "app.dependencies.consume_ws_ticket",
+                new_callable=AsyncMock,
+                return_value=str(user.id),
+            ),
+            patch.object(
+                UserRepository, "get", new_callable=AsyncMock, return_value=user
+            ),
+        ):
+            with pytest.raises(WebSocketException) as exc_info:
+                await get_current_user_ws(session=session, ticket="valid_ticket")
+
+        assert exc_info.value.code == status.WS_1008_POLICY_VIOLATION
+
+    @pytest.mark.asyncio
+    async def test_api_key_is_rejected(self) -> None:
+        """An API key is the credential that never expires on its own."""
+        tenant = _make_tenant(is_active=False)
+        api_key = APIKey(
+            id=uuid4(),
+            key_id="key_test123",
+            key_hash="hashed_in_test",
+            key_prefix="sk_testab",
+            name="Test Key",
+            scopes=[],
+            tenant_id=tenant.id,
+            user_id=uuid4(),
+        )
+        api_key.tenant = tenant
+        request = _mock_request(headers={"X-API-Key": "key_test123:test_secret_value"})
+        session = AsyncMock()
+
+        with patch.object(
+            APIKeyService, "verify", new_callable=AsyncMock, return_value=api_key
+        ):
+            result = await get_api_key_auth(session=session, request=request)
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_user_without_a_tenant_still_authenticates(self) -> None:
+        """No tenant is not an offboarded tenant.
+
+        OAuth signups can land without a tenant and fall back to
+        `SYSTEM_TENANT_ID`, which has no row to inspect. Treating that
+        as offboarded would lock every one of them out.
+        """
+        user = _make_user(tenant_id=None)
+        request = _mock_request()
+        session = AsyncMock()
+
+        with (
+            patch(
+                "app.dependencies.decode_token",
+                return_value=_valid_payload(sub=str(user.id)),
+            ),
+            patch.object(
+                UserRepository, "get", new_callable=AsyncMock, return_value=user
+            ),
+        ):
+            result = await get_current_user(
+                session=session,
+                token="valid_token",
+                request=request,
+            )
+
+        assert result is user
