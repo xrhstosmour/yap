@@ -12,6 +12,7 @@ from httpx import ASGITransport
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import TokenRateLimitError
 from app.core.security import create_access_token
 from app.core.security import create_refresh_token
 from app.core.tenant import system_context
@@ -908,6 +909,62 @@ class TestAuthRateLimit:
 
         assert response.status_code == 429
         assert response.headers["retry-after"] == "30"
+
+
+class TestThrottledSendStillReturns204:
+    """A throttled send must be indistinguishable from an unknown address.
+
+    Both endpoints document "always 204 regardless of whether the address
+    is registered". The per-user token cooldown only fires for addresses
+    that exist, so a leaked 429 answered the question the 204 exists to
+    hide.
+    """
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_forgot_password_throttled_returns_204(
+        self, client: AsyncClient, session
+    ) -> None:
+        """POST /auth/forgot-password must not surface the cooldown.
+
+        The address has to be registered, or the service returns early on
+        the unknown-user branch and never reaches the cooldown at all.
+        """
+        auth_service = _auth_service(session)
+        await auth_service.register(
+            RegisterRequest(email="throttled@{{ project_slug }}.com", password="password123")
+        )
+
+        with patch(
+            "app.services.auth_service.AuthService._send_token_email",
+            AsyncMock(side_effect=TokenRateLimitError("cooldown")),
+        ):
+            response = await client.post(
+                "/api/v1/auth/forgot-password",
+                json={"email": "throttled@{{ project_slug }}.com"},
+            )
+
+        assert response.status_code == 204
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_magic_link_throttled_returns_204(
+        self, client: AsyncClient, session
+    ) -> None:
+        """POST /auth/magic-link must not surface the cooldown."""
+        auth_service = _auth_service(session)
+        await auth_service.register(
+            RegisterRequest(email="throttled-link@{{ project_slug }}.com", password="password123")
+        )
+
+        with patch(
+            "app.services.auth_service.AuthService._send_token_email",
+            AsyncMock(side_effect=TokenRateLimitError("cooldown")),
+        ):
+            response = await client.post(
+                "/api/v1/auth/magic-link",
+                json={"email": "throttled-link@{{ project_slug }}.com"},
+            )
+
+        assert response.status_code == 204
 
 
 class TestWebSocketTicket:
