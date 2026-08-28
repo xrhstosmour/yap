@@ -1,7 +1,9 @@
-"""Tests for initial_data module: system tenant and superuser seeding."""
+"""Tests for initial_data: tenant and superuser seeding, Metabase provisioning."""
 
 from __future__ import annotations
 
+import os
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
 from unittest.mock import patch
@@ -190,3 +192,242 @@ class TestInit:
         # Both tenant and user were created.
         assert session.add.call_count == 2
         assert session.commit.call_count == 2
+
+
+class TestSqlstate:
+    """Tests for _sqlstate(), which decides what a failure may be shrugged off as."""
+
+    def test_reads_the_code_off_a_wrapped_driver_error(self) -> None:
+        """A SQLAlchemy error wrapping a psycopg error exposes its SQLSTATE."""
+        from app.initial_data import _sqlstate
+
+        error = Exception("wrapper")
+        error.orig = SimpleNamespace(sqlstate="42P04")  # type: ignore[attr-defined]
+
+        assert _sqlstate(error) == "42P04"
+
+    def test_returns_none_for_an_error_with_no_driver_underneath(self) -> None:
+        """A plain exception has no SQLSTATE, so nothing may be tolerated."""
+        from app.initial_data import _sqlstate
+
+        assert _sqlstate(ValueError("not a database error")) is None
+
+    def test_returns_none_when_the_driver_error_has_no_code(self) -> None:
+        """An orig without sqlstate must not be mistaken for a match."""
+        from app.initial_data import _sqlstate
+
+        error = Exception("wrapper")
+        error.orig = SimpleNamespace()  # type: ignore[attr-defined]
+
+        assert _sqlstate(error) is None
+
+
+class TestSetupMetabase:
+    """Tests for the provisioning branches that only a broken cluster reaches.
+
+    On a cluster the project owns, the app role is a superuser and every
+    statement here succeeds, so the happy path never enters the error handling.
+    These drive it directly instead.
+    """
+
+    # Helpers
+
+    @staticmethod
+    def _make_engine_mock(execute_effects: list[object]) -> MagicMock:
+        """Build a create_engine mock whose connections replay execute_effects.
+
+        Both engines opened by _setup_metabase share one connection mock, so
+        execute_effects is the whole statement sequence in order: CREATE
+        DATABASE, CREATE USER, GRANT CONNECT, GRANT SELECT, ALTER DEFAULT
+        PRIVILEGES, then the pg_roles check. An entry that is an Exception is
+        raised, anything else is returned.
+        """
+
+        def execute(_statement: object) -> object:
+            effect = execute_effects.pop(0)
+            if isinstance(effect, Exception):
+                raise effect
+            return effect
+
+        conn = MagicMock()
+        conn.execute = MagicMock(side_effect=execute)
+
+        context = MagicMock()
+        context.__enter__ = MagicMock(return_value=conn)
+        context.__exit__ = MagicMock(return_value=None)
+
+        engine = MagicMock()
+        engine.connect = MagicMock(return_value=context)
+        return MagicMock(return_value=engine)
+
+    @staticmethod
+    def _role_found(found: bool = True) -> MagicMock:
+        """Result object for the pg_roles verification query."""
+        result = MagicMock()
+        result.scalar_one_or_none = MagicMock(return_value=1 if found else None)
+        return result
+
+    @staticmethod
+    def _database_error(sqlstate: str) -> Exception:
+        """A driver-shaped error carrying the given SQLSTATE."""
+        error = Exception(f"database error {sqlstate}")
+        error.orig = SimpleNamespace(sqlstate=sqlstate)  # type: ignore[attr-defined]
+        return error
+
+    @staticmethod
+    def _patch_settings() -> object:
+        """Patch settings with the three attributes provisioning reads."""
+        return patch(
+            "app.initial_data.settings",
+            MagicMock(
+                DATABASE_URI="postgresql+psycopg://user:pass@host:5432/appdb",
+                POSTGRESQL_DATABASE="appdb",
+                POSTGRESQL_USER="app",
+            ),
+        )
+
+    # Tolerated failures
+
+    def test_tolerates_the_database_already_existing(self) -> None:
+        """42P04 on CREATE DATABASE is what a re-run looks like."""
+        from app.initial_data import _setup_metabase
+
+        effects: list[object] = [
+            self._database_error("42P04"),
+            None,
+            None,
+            None,
+            None,
+            self._role_found(),
+        ]
+        with (
+            self._patch_settings(),
+            patch("app.initial_data.create_engine", self._make_engine_mock(effects)),
+        ):
+            _setup_metabase("secret")
+
+    def test_tolerates_the_role_already_existing(self) -> None:
+        """42710 on CREATE USER is what a re-run looks like."""
+        from app.initial_data import _setup_metabase
+
+        effects: list[object] = [
+            None,
+            self._database_error("42710"),
+            None,
+            None,
+            None,
+            self._role_found(),
+        ]
+        with (
+            self._patch_settings(),
+            patch("app.initial_data.create_engine", self._make_engine_mock(effects)),
+        ):
+            _setup_metabase("secret")
+
+    # Failures that must not be tolerated
+
+    def test_reraises_when_the_role_cannot_be_created(self) -> None:
+        """42501 is insufficient privilege, the case that used to be swallowed.
+
+        This is the regression: a connecting user without CREATEROLE was
+        reported as "already exists" and then as "setup complete".
+        """
+        from app.initial_data import _setup_metabase
+
+        # Padded past the failure so that a swallowed error reports as
+        # "DID NOT RAISE" rather than running the mock out of effects.
+        effects: list[object] = [
+            None,
+            self._database_error("42501"),
+            None,
+            None,
+            None,
+            self._role_found(),
+        ]
+        with (
+            self._patch_settings(),
+            patch("app.initial_data.create_engine", self._make_engine_mock(effects)),
+            pytest.raises(Exception, match="42501"),
+        ):
+            _setup_metabase("secret")
+
+    def test_reraises_when_the_database_cannot_be_created(self) -> None:
+        """A CREATE DATABASE failure that is not 42P04 stops provisioning."""
+        from app.initial_data import _setup_metabase
+
+        effects: list[object] = [
+            self._database_error("42501"),
+            None,
+            None,
+            None,
+            None,
+            self._role_found(),
+        ]
+        with (
+            self._patch_settings(),
+            patch("app.initial_data.create_engine", self._make_engine_mock(effects)),
+            pytest.raises(Exception, match="42501"),
+        ):
+            _setup_metabase("secret")
+
+    def test_raises_when_the_role_is_absent_after_provisioning(self) -> None:
+        """Every statement can pass and the role still not be there."""
+        from app.initial_data import _setup_metabase
+
+        effects: list[object] = [
+            None,
+            None,
+            None,
+            None,
+            None,
+            self._role_found(found=False),
+        ]
+        with (
+            self._patch_settings(),
+            patch("app.initial_data.create_engine", self._make_engine_mock(effects)),
+            pytest.raises(RuntimeError, match="does not exist after provisioning"),
+        ):
+            _setup_metabase("secret")
+
+    def test_completes_when_the_role_is_present(self) -> None:
+        """The happy path returns without raising."""
+        from app.initial_data import _setup_metabase
+
+        effects: list[object] = [None, None, None, None, None, self._role_found()]
+        with (
+            self._patch_settings(),
+            patch("app.initial_data.create_engine", self._make_engine_mock(effects)),
+        ):
+            _setup_metabase("secret")
+
+    # The public wrapper
+
+    def test_skips_provisioning_without_a_password(self) -> None:
+        """Metabase is optional, so no password means nothing to do."""
+        from app.initial_data import setup_metabase
+
+        inner = MagicMock()
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch("app.initial_data._setup_metabase", inner),
+        ):
+            setup_metabase()
+
+        inner.assert_not_called()
+
+    def test_reports_failure_without_propagating(self) -> None:
+        """A failure is logged at error level and the rest of seeding continues."""
+        from app.initial_data import setup_metabase
+
+        inner = MagicMock(side_effect=RuntimeError("no CREATEROLE"))
+        with (
+            patch.dict(
+                os.environ, {"METABASE_READ_ONLY_PASSWORD": "secret"}, clear=True
+            ),
+            patch("app.initial_data._setup_metabase", inner),
+            patch("app.initial_data.logger") as logger,
+        ):
+            setup_metabase()
+
+        inner.assert_called_once_with("secret")
+        logger.error.assert_called_once()
