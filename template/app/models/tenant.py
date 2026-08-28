@@ -53,12 +53,18 @@ class Tenant(TenantBase, BaseModel, table=True):
         nullable=False,
     )
 
-    # Relationships.
+    # Relationships. Collections are `raise`, not `selectin`: a tenant's
+    # child tables grow with the tenant, and `User.tenant` is eager, so
+    # eager-loading these meant every authenticated request pulled every
+    # API key in the tenant to serve one user. Ask for one explicitly where
+    # it is genuinely needed:
+    #
+    #     select(Tenant).options(selectinload(Tenant.users))
     users: list[User] = Relationship(
         sa_relationship=relationship(
             "User",
             back_populates="tenant",
-            lazy="selectin",
+            lazy="raise",
         ),
     )
 
@@ -66,6 +72,6 @@ class Tenant(TenantBase, BaseModel, table=True):
         sa_relationship=relationship(
             "APIKey",
             back_populates="tenant",
-            lazy="selectin",
+            lazy="raise",
         ),
     )

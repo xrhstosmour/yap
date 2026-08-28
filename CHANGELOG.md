@@ -36,6 +36,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Stop eager-loading collection relationships, `User` and `Tenant` collections are `lazy="raise"` so one user fetch runs 2 statements instead of 5, and no longer pulls every API key in the tenant on every authenticated request
 - Move settings-driven database pool and Celery tuning into `settings.py`
 - Standardize on whole-word names across the codebase, no abbreviations
 - Standardize SQLModel imports to one symbol per line
