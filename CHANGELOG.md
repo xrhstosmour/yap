@@ -90,6 +90,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Stop the WebSocket broadcast relay dying permanently when a client connects or disconnects mid-broadcast, the fan-out iterated the live connection set across `await`s, so `RuntimeError: Set changed size during iteration` escaped the relay task and no broadcast was delivered again until the process restarted
 - Fix the docs `Content-Security-Policy` blocking `Swagger` and `ReDoc`, `Swagger` rendered a completely blank page because its inline bootstrap script was refused, and `ReDoc` rendered "Something went wrong"
 - Stop `backup.sh` sourcing `.env` as shell, an ordinary superuser name containing a space killed the nightly backup silently under `set -e`, and a `$(...)` in any value executed on every run
 - Gitignore `backups/` and `*.sql.gz`, database dumps were landing in the working tree where `git add -A` would sweep them up
