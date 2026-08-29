@@ -31,6 +31,19 @@ from app.core.settings import settings
 
 logger = get_logger("cache")
 
+
+class _Missing:
+    """Sentinel type for "this key is not in the cache"."""
+
+    def __repr__(self) -> str:
+        """Render as a readable marker in assertion output."""
+        return "MISSING"
+
+
+# Distinct from a cached `None`, which is a real value a `compute()` may
+# legitimately return. See `CacheService._get_or_missing`.
+MISSING = _Missing()
+
 # Stampede-protection lock defaults for get_or_set().
 LOCK_TTL_SECONDS = 10
 WAIT_TIMEOUT_SECONDS = 5.0
@@ -144,14 +157,21 @@ class CacheService:
         """Create namespaced cache key."""
         return f"{self.prefix}:{key}"
 
-    async def get(self, key: str) -> Any:  # noqa: ANN401
-        """Get value from cache.
+    async def _get_or_missing(self, key: str) -> Any:  # noqa: ANN401
+        """Read a key, distinguishing "absent" from "cached as null".
+
+        `get()` collapses both onto `None`, which is fine for its own
+        contract but not for `get_or_set()`: a `compute()` that legitimately
+        returns `None` would be stored, then read back as `None`, treated as
+        a miss, and recomputed on every single call. See `get_or_set` for
+        what that costs.
 
         Args:
             key: Cache key (without prefix)
 
         Returns:
-            Cached value or None if not found
+            The decoded value, which may be `None`, or `MISSING` when the
+            key is absent or Redis is unreachable.
         """
         import json
 
@@ -168,20 +188,32 @@ class CacheService:
                 key=full_key,
                 error=str(error),
             )
-            return None
+            return MISSING
 
-        if value is not None:
-            try:
-                return json.loads(value)
-            except json.JSONDecodeError:
-                logger.warning(
-                    "cache_deserialize_failed",
-                    key=full_key,
-                    value_preview=str(value)[:100],
-                )
-                return value
+        if value is None:
+            return MISSING
 
-        return None
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            logger.warning(
+                "cache_deserialize_failed",
+                key=full_key,
+                value_preview=str(value)[:100],
+            )
+            return value
+
+    async def get(self, key: str) -> Any:  # noqa: ANN401
+        """Get value from cache.
+
+        Args:
+            key: Cache key (without prefix)
+
+        Returns:
+            Cached value or None if not found
+        """
+        value = await self._get_or_missing(key)
+        return None if value is MISSING else value
 
     async def set(
         self,
@@ -262,11 +294,20 @@ class CacheService:
                 winner's result before computing independently
             retry_interval: Seconds between cache-read retries while waiting
 
+        A `compute()` that returns `None` is cached and served like any
+        other value. Testing the read against `None` instead of presence
+        meant such a value was stored and then read back as a miss on every
+        call, so it was recomputed every time and never served. The waiters
+        below had it worse: they poll for a value that by construction never
+        appears, so each one burned the full `wait_timeout` and then
+        computed anyway. The stampede protection guaranteed a stampede, and
+        added latency doing it.
+
         Returns:
             The cached or freshly computed value
         """
-        cached = await self.get(key)
-        if cached is not None:
+        cached = await self._get_or_missing(key)
+        if cached is not MISSING:
             return cached
 
         full_key = self._make_key(key)
@@ -306,8 +347,8 @@ class CacheService:
         deadline = time.monotonic() + wait_timeout
         while time.monotonic() < deadline:
             await asyncio.sleep(retry_interval)
-            cached = await self.get(key)
-            if cached is not None:
+            cached = await self._get_or_missing(key)
+            if cached is not MISSING:
                 return cached
 
         # The winner did not publish a value in time; compute independently.
