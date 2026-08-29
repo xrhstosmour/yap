@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.encryption import decrypt
 from app.core.encryption import encrypt
+from app.core.security import generate_password_hash
 from app.core.security import generate_recovery_codes
 from app.core.security import generate_totp_secret
 from app.core.settings import settings
@@ -413,14 +414,22 @@ class TestVerifyChallengeWithRecovery:
             await service.verify_challenge_with_recovery("token", "some-code")
 
     @pytest.mark.asyncio
-    async def test_matching_codes_are_locked_for_update(
+    async def test_the_consuming_update_is_a_compare_and_swap(
         self,
         service: TwoFactorAuthService,
     ) -> None:
-        """The candidate-code lookup should lock rows against a concurrent claim."""
+        """Single use is enforced by the UPDATE, not by a row lock.
+
+        This replaces a test that asserted the opposite, that the lookup
+        carried `with_for_update()`. That lock was held across up to ten
+        sequential bcrypt comparisons, so it pinned every unused code the
+        user owns for seconds on every attempt, right or wrong. The
+        conditional UPDATE gives the same single-use guarantee: two
+        requests presenting one code both reach it, but only one matches a
+        row with `used_at IS NULL` and gets an id back.
+        """
         user = make_user(is_2fa_enabled=True, totp_secret_encrypted=encrypt("test"))
         recovery_codes = generate_recovery_codes(1)
-        from app.core.security import generate_password_hash
 
         rc = MagicMock()
         rc.code_hash = generate_password_hash(recovery_codes[0])
@@ -448,7 +457,11 @@ class TestVerifyChallengeWithRecovery:
             await service.verify_challenge_with_recovery("token", recovery_codes[0])
 
         select_statement = mock_execute.await_args_list[0].args[0]
-        assert select_statement._for_update_arg is not None
+        assert select_statement._for_update_arg is None
+
+        update_statement = str(mock_execute.await_args_list[1].args[0]).lower()
+        assert "used_at is null" in update_statement
+        assert "returning" in update_statement
 
 
 class TestRegenerateRecoveryCodes:
@@ -541,3 +554,110 @@ class TestConsumeChallengeTenantContext:
             resolved = await service._consume_challenge("challenge-token")
 
         assert resolved.id == user.id
+
+
+class TestRecoveryCodeLookupHoldsNoLock:
+    """Hashing must not happen with rows locked.
+
+    `with_for_update()` was taken before the comparison loop and held for
+    the rest of the transaction, so it spanned up to ten sequential bcrypt
+    comparisons at roughly a quarter second each. Every attempt, right or
+    wrong, pinned all of the user's unused codes for seconds, and
+    concurrent attempts queued behind it. Single use is now enforced by a
+    conditional UPDATE instead, which needs no lock to be correct.
+    """
+
+    @pytest.fixture
+    def anyio_backend(self) -> str:
+        """Provide the asyncio backend for anyio-marked tests.
+
+        Returns:
+            The backend name.
+        """
+        return "asyncio"
+
+    @pytest.mark.anyio
+    async def test_the_lookup_does_not_lock_rows(self, session: AsyncSession) -> None:
+        """No statement issued may carry `FOR UPDATE`.
+
+        Args:
+            session: Async database session fixture.
+        """
+        from sqlalchemy import event
+
+        from app.models.totp_recovery_code import TotpRecoveryCode
+        from app.models.user import User
+        from app.services.two_factor_service import InvalidTOTPError
+        from app.services.two_factor_service import TwoFactorAuthService
+
+        user = User(email="recovery-lock@example.com", hashed_password="hash")
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+
+        session.add(
+            TotpRecoveryCode(
+                user_id=user.id,
+                code_hash=generate_password_hash("AAAA-BBBB"),
+            )
+        )
+        await session.commit()
+
+        statements: list[str] = []
+
+        @event.listens_for(session.sync_session, "do_orm_execute")
+        def _record(state: object) -> None:
+            statements.append(str(getattr(state, "statement", "")).lower())
+
+        service = TwoFactorAuthService(session)
+        with (
+            patch.object(
+                service, "_consume_challenge", new_callable=AsyncMock, return_value=user
+            ),
+            patch.object(service, "_check_totp_rate_limit", new_callable=AsyncMock),
+        ):
+            with pytest.raises(InvalidTOTPError):
+                await service.verify_challenge_with_recovery("token", "ZZZZ-ZZZZ")
+
+        assert statements
+        assert not any("for update" in statement for statement in statements), (
+            statements
+        )
+
+    @pytest.mark.anyio
+    async def test_a_code_still_cannot_be_used_twice(
+        self, session: AsyncSession
+    ) -> None:
+        """The property the lock protected must survive without it.
+
+        Args:
+            session: Async database session fixture.
+        """
+        from app.models.totp_recovery_code import TotpRecoveryCode
+        from app.models.user import User
+        from app.services.two_factor_service import InvalidTOTPError
+        from app.services.two_factor_service import TwoFactorAuthService
+
+        user = User(email="recovery-single-use@example.com", hashed_password="hash")
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+
+        code = "CCCC-DDDD"
+        session.add(
+            TotpRecoveryCode(user_id=user.id, code_hash=generate_password_hash(code))
+        )
+        await session.commit()
+
+        service = TwoFactorAuthService(session)
+        with (
+            patch.object(
+                service, "_consume_challenge", new_callable=AsyncMock, return_value=user
+            ),
+            patch.object(service, "_check_totp_rate_limit", new_callable=AsyncMock),
+            patch.object(service, "_reset_totp_rate_limit", new_callable=AsyncMock),
+        ):
+            assert await service.verify_challenge_with_recovery("token", code) is user
+
+            with pytest.raises(InvalidTOTPError):
+                await service.verify_challenge_with_recovery("token", code)
