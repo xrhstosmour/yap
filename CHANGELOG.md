@@ -90,6 +90,8 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Stop `backup.sh` sourcing `.env` as shell, an ordinary superuser name containing a space killed the nightly backup silently under `set -e`, and a `$(...)` in any value executed on every run
+- Gitignore `backups/` and `*.sql.gz`, database dumps were landing in the working tree where `git add -A` would sweep them up
 - Refuse to start a staging or production deployment whose CORS origins point at the local machine, `FRONTEND_HOST` defaults to `http://localhost:5173` and is served with `allow_credentials=True`, so an unset value returned authenticated responses to whatever the victim ran on that port, and mailed reset links pointing at their own machine
 - Stop `/auth/webauthn/login/begin` disclosing whether an address has an account, `challenge_session_key` was omitted only for real accounts and `allowCredentials` was populated only for real accounts, which also handed out their credential IDs, and rate limit both WebAuthn login endpoints per client IP
 - Close a user-enumeration oracle on `/auth/forgot-password` and `/auth/magic-link`, the per-user token cooldown only fires for addresses that exist, so a 429 on a repeated request confirmed the account was real despite both endpoints documenting an unconditional 204
