@@ -90,6 +90,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Fix the docs `Content-Security-Policy` blocking `Swagger` and `ReDoc`, `Swagger` rendered a completely blank page because its inline bootstrap script was refused, and `ReDoc` rendered "Something went wrong"
 - Stop `backup.sh` sourcing `.env` as shell, an ordinary superuser name containing a space killed the nightly backup silently under `set -e`, and a `$(...)` in any value executed on every run
 - Gitignore `backups/` and `*.sql.gz`, database dumps were landing in the working tree where `git add -A` would sweep them up
 - Refuse to start a staging or production deployment whose CORS origins point at the local machine, `FRONTEND_HOST` defaults to `http://localhost:5173` and is served with `allow_credentials=True`, so an unset value returned authenticated responses to whatever the victim ran on that port, and mailed reset links pointing at their own machine
