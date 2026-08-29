@@ -61,3 +61,9 @@ Thumbs.db
 
 # Celery beat local schedule database, written when beat runs locally.
 celerybeat-schedule
+
+# Database dumps written by scripts/backup.sh. Never committed: they are
+# the entire database in plaintext, including every encrypted column's
+# ciphertext and every password hash.
+backups/
+*.sql.gz

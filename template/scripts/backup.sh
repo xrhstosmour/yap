@@ -20,24 +20,52 @@ warn()  { echo -e "${YELLOW}[BACKUP]${NC} $(date '+%Y-%m-%d %H:%M:%S') $*"; }
 error() { echo -e "${RED}[BACKUP]${NC} $(date '+%Y-%m-%d %H:%M:%S') $*"; exit 1; }
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-BACKUP_DIRECTORY="${BACKUP_DIRECTORY:-$PROJECT_DIR/backups}"
-RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-30}"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
-mkdir -p "$BACKUP_DIRECTORY"
-
 # ─── Load environment ────────────────────────────────────────────────────────
-if [ -f "$PROJECT_DIR/.env" ]; then
-    set -a
-    . "$PROJECT_DIR/.env"
-    set +a
+# Reads the handful of keys needed with plain grep+cut rather than
+# `source .env`, matching scripts/synchronize.sh. Sourcing requires every
+# line of .env to be valid shell: a free-text value containing a space, and
+# FIRST_SUPERUSER_FULL_NAME is exactly that, makes bash read the second word
+# as a command, which under `set -e` kills the script. A nightly cron backup
+# would stop running and say nothing. Worse, `$(...)` or a backtick in any
+# value executes on every run.
+#
+# None of the keys below are free text, so a plain grep+cut is exact.
+read_env_scalar() {
+    local key="$1"
+    local file="$2"
+    local fallback="${3:-}"
+    local value
+    value=$(grep "^${key}=" "$file" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' || true)
+    if [ -n "$value" ]; then
+        echo "$value"
+    else
+        echo "$fallback"
+    fi
+}
+
+ENVIRONMENT_FILE="$PROJECT_DIR/.env"
+if [ ! -f "$ENVIRONMENT_FILE" ]; then
+    ENVIRONMENT_FILE=/dev/null
 fi
 
-DATABASE_HOST="${POSTGRESQL_SERVER:-localhost}"
-DATABASE_PORT="${POSTGRESQL_PORT:-5432}"
-DATABASE_USER="${POSTGRESQL_USER:-postgresql}"
-DATABASE_PASSWORD="${POSTGRESQL_PASSWORD:-}"
-DATABASE_NAME="${POSTGRESQL_DATABASE:-postgresql}"
+# The environment still wins, so a cron entry or container can override any
+# of these without editing .env, which sourcing also allowed.
+DATABASE_HOST="${POSTGRESQL_SERVER:-$(read_env_scalar POSTGRESQL_SERVER "$ENVIRONMENT_FILE" localhost)}"
+DATABASE_PORT="${POSTGRESQL_PORT:-$(read_env_scalar POSTGRESQL_PORT "$ENVIRONMENT_FILE" 5432)}"
+DATABASE_USER="${POSTGRESQL_USER:-$(read_env_scalar POSTGRESQL_USER "$ENVIRONMENT_FILE" postgresql)}"
+DATABASE_PASSWORD="${POSTGRESQL_PASSWORD:-$(read_env_scalar POSTGRESQL_PASSWORD "$ENVIRONMENT_FILE")}"
+DATABASE_NAME="${POSTGRESQL_DATABASE:-$(read_env_scalar POSTGRESQL_DATABASE "$ENVIRONMENT_FILE" postgresql)}"
+
+# Read after .env, not before it. Set earlier, `mkdir` ran against the
+# default while everything downstream used whatever .env said, so a project
+# that configured BACKUP_DIRECTORY got an empty ./backups created next to
+# its real one.
+BACKUP_DIRECTORY="${BACKUP_DIRECTORY:-$(read_env_scalar BACKUP_DIRECTORY "$ENVIRONMENT_FILE" "$PROJECT_DIR/backups")}"
+RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-$(read_env_scalar BACKUP_RETENTION_DAYS "$ENVIRONMENT_FILE" 30)}"
+
+mkdir -p "$BACKUP_DIRECTORY"
 
 if [ -z "$DATABASE_PASSWORD" ]; then
     error "POSTGRESQL_PASSWORD not set. Cannot connect to database."
