@@ -296,6 +296,101 @@ class TestDeliverToLocalConnections:
             ws_module._active_connections = original_connections
 
 
+class TestDeliverySurvivesConcurrentConnectionChanges:
+    """A connect or disconnect mid-broadcast must not kill the relay.
+
+    Every `send_json` yields to the event loop, and the socket endpoints
+    add to and discard from the very set being iterated. Iterating it
+    directly raised `RuntimeError: Set changed size during iteration` out
+    of the `for` itself, past the `try` that only guards the send, which
+    ended the relay task for the lifetime of the process.
+    """
+
+    @pytest.mark.anyio
+    async def test_a_client_connecting_mid_broadcast_does_not_raise(self) -> None:
+        """Mutating the set during a send must be tolerated."""
+        from app.api.v1 import websocket as ws_module
+
+        joiner = AsyncMock()
+        first = AsyncMock()
+
+        original_connections = dict(ws_module._active_connections)
+        try:
+            live: set[Any] = {first}
+            ws_module._active_connections["general"] = live
+
+            # Exactly what an endpoint does while the relay is awaiting.
+            async def _send_and_join(payload: dict[str, Any]) -> None:
+                live.add(joiner)
+
+            first.send_json.side_effect = _send_and_join
+
+            await ws_module._deliver_to_local_connections("general", {"a": 1})
+
+            # And the newcomer is still registered afterwards.
+            assert joiner in ws_module._active_connections["general"]
+        finally:
+            ws_module._active_connections = original_connections
+
+    @pytest.mark.anyio
+    async def test_a_client_disconnecting_mid_broadcast_does_not_raise(self) -> None:
+        """Removal during a send must be tolerated too."""
+        from app.api.v1 import websocket as ws_module
+
+        leaver = AsyncMock()
+        first = AsyncMock()
+
+        original_connections = dict(ws_module._active_connections)
+        try:
+            live: set[Any] = {first, leaver}
+            ws_module._active_connections["general"] = live
+
+            async def _send_and_leave(payload: dict[str, Any]) -> None:
+                live.discard(leaver)
+
+            first.send_json.side_effect = _send_and_leave
+
+            await ws_module._deliver_to_local_connections("general", {"a": 1})
+        finally:
+            ws_module._active_connections = original_connections
+
+    @pytest.mark.anyio
+    async def test_pruning_keeps_a_client_that_joined_during_the_fan_out(
+        self,
+    ) -> None:
+        """Pruning must not resurrect a stale snapshot over the live set.
+
+        Rebinding to `connections - dead` rebuilt the set from a snapshot
+        taken before the awaits, so a socket that connected during them was
+        silently dropped from the registry and never saw another broadcast.
+        """
+        from app.api.v1 import websocket as ws_module
+
+        joiner = AsyncMock()
+        good = AsyncMock()
+        bad = AsyncMock()
+
+        original_connections = dict(ws_module._active_connections)
+        try:
+            live: set[Any] = {good, bad}
+            ws_module._active_connections["general"] = live
+
+            async def _send_and_join(payload: dict[str, Any]) -> None:
+                live.add(joiner)
+
+            good.send_json.side_effect = _send_and_join
+            bad.send_json.side_effect = RuntimeError("connection lost")
+
+            await ws_module._deliver_to_local_connections("general", {"a": 1})
+
+            remaining = ws_module._active_connections["general"]
+            assert joiner in remaining
+            assert good in remaining
+            assert bad not in remaining
+        finally:
+            ws_module._active_connections = original_connections
+
+
 class _FakePubSub:
     """Minimal stand-in for `redis.asyncio.client.PubSub` used by the relay tests."""
 
