@@ -35,6 +35,13 @@ from app.schemas.user import UserUpdateMe
 
 logger = get_logger("service.user")
 
+# GDPR export sizing. `_EXPORT_PAGE_SIZE` only sets how many API keys are
+# fetched per round trip, never how many are returned: `export_my_data`
+# pages until it has them all. `_ACTIVITY_EXPORT_LIMIT` is a real cap, and
+# the export says so when it bites.
+_EXPORT_PAGE_SIZE = 100
+_ACTIVITY_EXPORT_LIMIT = 500
+
 
 class UserServiceError(Exception):
     """Base exception for user service errors."""
@@ -462,9 +469,14 @@ class UserService:
 
         tenant_id = user.tenant_id or SYSTEM_TENANT_ID
 
-        # Fetch audit activity for this user (up to 500 most recent entries).
-        activity_logs, _ = await self.audit_repository.get_by_actor(
-            actor_id=str(user.id), skip=0, limit=500
+        # Audit activity, capped. Unlike the API keys below this cap is
+        # deliberate, an actor's audit trail is unbounded and this response
+        # is built in memory. It is reported in the payload rather than
+        # applied silently, so the recipient can tell a complete export
+        # from a truncated one, which an Article 20 export has to be
+        # honest about.
+        activity_logs, activity_total = await self.audit_repository.get_by_actor(
+            actor_id=str(user.id), skip=0, limit=_ACTIVITY_EXPORT_LIMIT
         )
 
         profile: dict[str, Any] = {
@@ -479,10 +491,23 @@ class UserService:
 
         # Explicitly load API keys since the relationship may not be
         # loaded through the current_user dependency.
+        #
+        # Paged to completeness. `list()` defaults to `limit=20`, and
+        # nothing here overrode it, so a user with more than twenty keys
+        # silently got the first twenty and no indication the rest existed.
+        # An Article 20 export that quietly omits data is the one thing it
+        # cannot be.
         api_key_repo = APIKeyRepository(self.session)
-        keys, _ = await api_key_repo.list(
-            filters={"user_id": user.id},
-        )
+        keys: list[Any] = []
+        while True:
+            page, total = await api_key_repo.list(
+                filters={"user_id": user.id},
+                skip=len(keys),
+                limit=_EXPORT_PAGE_SIZE,
+            )
+            keys.extend(page)
+            if not page or len(keys) >= total:
+                break
         api_keys = [
             {
                 "name": k.name,
@@ -523,4 +548,6 @@ class UserService:
             "profile": profile,
             "api_keys": api_keys,
             "activity": activity,
+            "activity_total": activity_total,
+            "activity_truncated": activity_total > len(activity),
         }
