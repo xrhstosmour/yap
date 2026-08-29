@@ -27,6 +27,20 @@ services:
       - "POSTGRESQL_SERVER=postgresql"
       - "REDIS_HOST=redis"
       - "RABBITMQ_HOST=rabbitmq"
+      # Which peers may set X-Forwarded-For. `uvicorn` reads this variable
+      # and defaults it to 127.0.0.1, but the reverse proxy is a separate
+      # container, so its address never matches and the header is ignored:
+      # `request.client.host` becomes the proxy's own IP for every request.
+      # That makes the per-IP limiter on the unauthenticated auth endpoints
+      # a single bucket for the entire internet, and puts one address in
+      # every access and audit log line.
+      #
+      # Scoped to Docker's private bridge range rather than `*`. `*` trusts
+      # the header from anyone who can open a socket to this container, and
+      # port 8000 is published, so a client reaching it directly could
+      # forge any address and sidestep rate limiting entirely.
+      # Loopback is kept alongside it so a proxy on the host still works.
+      - "FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS:-127.0.0.1,172.16.0.0/12}"
     ports:
       - "8000:8000"
     networks:
