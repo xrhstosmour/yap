@@ -90,6 +90,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Run the `Celery` worker probes off the event loop and stop reporting a broker outage as a healthy idle cluster, three inline `inspect` calls froze the whole process for up to three seconds per request, and any failure was swallowed into a `200` with zeros
 - Stop `CacheService.get_or_set` treating a cached `None` as a miss, a `compute()` returning `None` was recomputed on every call and never served, and lock-losing callers polled for a value that could never appear, so the stampede protection guaranteed a stampede
 - Stop holding a `FOR UPDATE` lock across recovery-code hashing, every attempt pinned all of a user's unused codes for up to ten sequential `bcrypt` comparisons, so anyone with a challenge token could stall the account's recovery path, single use is now enforced by a conditional update
 - Set `FORWARDED_ALLOW_IPS` for the app container, `uvicorn` defaults it to `127.0.0.1` and the reverse proxy is a separate container, so `X-Forwarded-For` was ignored and every request looked like it came from the proxy, collapsing the per-IP auth rate limiter into one bucket for the whole internet
