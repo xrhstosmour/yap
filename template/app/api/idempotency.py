@@ -121,7 +121,19 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
     async def _buffer_and_cache(
         raw_key: str, response: Response
     ) -> tuple[bytes | None, bool]:
-        if response.status_code >= 500:
+        # Only successes and redirects are replayable. Caching 4xx too meant
+        # a transient rejection stuck to the key for
+        # `IDEMPOTENCY_TTL_HOURS` (24 by default): a 429 from the rate
+        # limiter, or a 401 from an expired token, was replayed for the rest
+        # of the day even once the client had waited or re-authenticated,
+        # and a 422 kept being returned after the payload was corrected. The
+        # only escape was to change the idempotency key, which is exactly
+        # what the key exists to make unnecessary.
+        #
+        # Nothing is lost by not caching them. Idempotency exists to stop a
+        # retry repeating a side effect, and a rejected request did not have
+        # one to repeat.
+        if response.status_code >= 400:
             return None, False
 
         body: Any = []
