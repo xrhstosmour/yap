@@ -144,21 +144,39 @@ async def broadcast_notification(message: str, channel: str = "general") -> None
 async def _deliver_to_local_connections(channel: str, payload: dict[str, Any]) -> None:
     """Send `payload` to every WebSocket this process holds open for `channel`.
 
+    Iterates a snapshot, and prunes with `discard` on the live set rather
+    than rebinding it. Every `send_json` below yields to the event loop, and
+    the socket endpoints add to and discard from that same set object, so a
+    client connecting or disconnecting mid-broadcast used to raise
+    `RuntimeError: Set changed size during iteration` straight out of the
+    `for` (the `try` only guards the send). That escaped `_broadcast_relay`,
+    ran its `finally`, and killed the relay task for the lifetime of the
+    process, with `_relay_task` left non-None so nothing restarted it. One
+    ordinary connect during one broadcast silently ended notifications for
+    that worker.
+
+    Rebinding to `connections - dead` was wrong for the same reason: the
+    snapshot predates any socket that connected during the awaits, so the
+    assignment dropped it from the registry.
+
     Args:
         channel: Target channel
         payload: JSON-serializable message to send
     """
-    connections = _active_connections.get(channel, set())
-    dead: set[WebSocket] = set()
+    connections = _active_connections.get(channel)
+    if not connections:
+        return
 
-    for ws in connections:
+    dead: list[WebSocket] = []
+
+    for ws in tuple(connections):
         try:
             await ws.send_json(payload)
         except Exception:
-            dead.add(ws)
+            dead.append(ws)
 
-    if dead:
-        _active_connections[channel] = connections - dead
+    for ws in dead:
+        connections.discard(ws)
 
 
 async def _broadcast_relay() -> None:
@@ -186,7 +204,16 @@ async def _broadcast_relay() -> None:
                 logger.warning("ws_broadcast_relay_bad_payload", channel=channel)
                 continue
 
-            await _deliver_to_local_connections(channel, payload)
+            # Belt and braces around the snapshot fix in
+            # `_deliver_to_local_connections`. This task has no supervisor:
+            # anything that escapes here ends broadcasts for the whole
+            # process until it restarts, and `_relay_task` stays non-None so
+            # `start_broadcast_relay` will not bring it back. One bad
+            # delivery must not be able to do that.
+            try:
+                await _deliver_to_local_connections(channel, payload)
+            except Exception:
+                logger.exception("ws_broadcast_relay_delivery_failed", channel=channel)
     finally:
         with contextlib.suppress(Exception):
             await pubsub.punsubscribe(f"{_BROADCAST_CHANNEL_PREFIX}*")
