@@ -295,21 +295,22 @@ class TwoFactorAuthService:
         # codes are tenant-agnostic. Projects requiring tenant isolation
         # should add a tenant_id column and join through the User model.
         #
-        # `with_for_update()` locks the matching rows for the rest of this
-        # transaction, so a second, concurrent request presenting the same
-        # code cannot also read it as unused: it blocks until this
-        # transaction commits, then re-reads `used_at` as already set and
-        # finds nothing to consume. Without the lock, both requests could
-        # verify the same code and both succeed, defeating single use.
-        query = (
-            select(TotpRecoveryCode)
-            .where(
-                and_(
-                    TotpRecoveryCode.user_id == user.id,  # type: ignore[arg-type]
-                    TotpRecoveryCode.used_at.is_(None),  # type: ignore[union-attr]
-                )
+        # Read without `with_for_update()`. The lock used to be taken here
+        # and held for the rest of the transaction, which meant it spanned
+        # up to ten sequential bcrypt comparisons below, roughly a quarter
+        # of a second each. Every attempt, including a wrong one, pinned
+        # every unused code this user owns for seconds, and concurrent
+        # attempts queued behind it, so anyone holding a challenge token
+        # could stall the account's recovery path at will.
+        #
+        # Single use is enforced by the conditional update further down
+        # instead, which is a compare-and-swap and does not need a lock
+        # held across the hashing to be correct.
+        query = select(TotpRecoveryCode).where(
+            and_(
+                TotpRecoveryCode.user_id == user.id,  # type: ignore[arg-type]
+                TotpRecoveryCode.used_at.is_(None),  # type: ignore[union-attr]
             )
-            .with_for_update()
         )
         result = await self.session.execute(query)
         unused_codes = result.scalars().all()
@@ -318,14 +319,26 @@ class TwoFactorAuthService:
             if await asyncio.to_thread(
                 verify_password, recovery_code, code_record.code_hash
             ):
+                # `used_at IS NULL` in the WHERE clause is what makes this
+                # single-use: two requests presenting the same code both get
+                # here, but only one UPDATE matches a row and gets an id
+                # back. The loser sees an empty result and is rejected, the
+                # same answer the lock produced, without the lock.
                 statement = (
                     update(TotpRecoveryCode)
                     .where(
-                        TotpRecoveryCode.id == code_record.id,  # type: ignore[arg-type]
+                        and_(
+                            TotpRecoveryCode.id == code_record.id,  # type: ignore[arg-type]
+                            TotpRecoveryCode.used_at.is_(None),  # type: ignore[union-attr]
+                        )
                     )
                     .values(used_at=datetime.now(UTC))
+                    .returning(TotpRecoveryCode.id)  # type: ignore[call-overload]
                 )
-                await self.session.execute(statement)
+                consumed = await self.session.execute(statement)
+                if consumed.first() is None:
+                    raise InvalidTOTPError("Invalid recovery code.")
+
                 await self.session.flush()
                 await self._reset_totp_rate_limit(user.id)
                 logger.info(
