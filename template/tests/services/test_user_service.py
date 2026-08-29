@@ -963,3 +963,124 @@ class TestUserServiceErrors:
         assert result.email == "same@example.com"
         mock_user_service.user_repository.get_by_email.assert_not_called()
         mock_user_service.user_repository.update.assert_awaited_once()
+
+
+class TestExportIsComplete:
+    """An Article 20 export must not quietly leave data out.
+
+    `list()` defaults to `limit=20` and nothing overrode it, so a user
+    with more than twenty API keys received the first twenty and no
+    indication the rest existed. The audit cap is deliberate, but it was
+    equally silent.
+    """
+
+    @pytest.mark.asyncio
+    async def test_every_api_key_is_exported(
+        self, mock_user_service: UserService, mock_session: MagicMock
+    ) -> None:
+        """More keys than one page must still all come back.
+
+        Args:
+            mock_user_service: Service with mocked repositories.
+            mock_session: Mocked database session.
+        """
+        user = _make_user_mock(email="many-keys@example.com")
+        mock_user_service.audit_repository.get_by_actor = AsyncMock(
+            return_value=([], 0)
+        )
+        mock_user_service.audit_repository.log_user_action_safe = AsyncMock()
+
+        total = 250
+
+        def _make_key(index: int) -> MagicMock:
+            key = MagicMock()
+            key.name = f"key-{index}"
+            key.description = None
+            key.scopes = []
+            key.is_active = True
+            key.created_at = datetime.now(UTC)
+            key.last_used_at = None
+            key.expires_at = None
+            return key
+
+        all_keys = [_make_key(index) for index in range(total)]
+
+        async def _list(**kwargs: object) -> tuple[list[MagicMock], int]:
+            skip = int(kwargs.get("skip", 0))  # type: ignore[arg-type]
+            limit = int(kwargs.get("limit", 20))  # type: ignore[arg-type]
+            return all_keys[skip : skip + limit], total
+
+        mock_api_key_repo = MagicMock()
+        mock_api_key_repo.list = AsyncMock(side_effect=_list)
+
+        with patch(
+            "app.repositories.api_key_repository.APIKeyRepository",
+            return_value=mock_api_key_repo,
+        ):
+            result = await mock_user_service.export_my_data(user)
+
+        assert len(result["api_keys"]) == total
+        assert result["api_keys"][-1]["name"] == "key-249"
+
+    @pytest.mark.asyncio
+    async def test_a_truncated_activity_log_says_so(
+        self, mock_user_service: UserService, mock_session: MagicMock
+    ) -> None:
+        """The recipient must be able to tell the export is partial.
+
+        Args:
+            mock_user_service: Service with mocked repositories.
+            mock_session: Mocked database session.
+        """
+        user = _make_user_mock(email="busy@example.com")
+
+        log = MagicMock()
+        log.action = "login"
+        log.resource_type = "user"
+        log.resource_id = str(user.id)
+        log.status = "success"
+        log.created_at = datetime.now(UTC)
+
+        mock_user_service.audit_repository.get_by_actor = AsyncMock(
+            return_value=([log] * 500, 4321)
+        )
+        mock_user_service.audit_repository.log_user_action_safe = AsyncMock()
+
+        mock_api_key_repo = MagicMock()
+        mock_api_key_repo.list = AsyncMock(return_value=([], 0))
+
+        with patch(
+            "app.repositories.api_key_repository.APIKeyRepository",
+            return_value=mock_api_key_repo,
+        ):
+            result = await mock_user_service.export_my_data(user)
+
+        assert result["activity_total"] == 4321
+        assert result["activity_truncated"] is True
+
+    @pytest.mark.asyncio
+    async def test_a_complete_activity_log_is_not_flagged(
+        self, mock_user_service: UserService, mock_session: MagicMock
+    ) -> None:
+        """The flag must not cry wolf on a complete export.
+
+        Args:
+            mock_user_service: Service with mocked repositories.
+            mock_session: Mocked database session.
+        """
+        user = _make_user_mock(email="quiet@example.com")
+        mock_user_service.audit_repository.get_by_actor = AsyncMock(
+            return_value=([], 0)
+        )
+        mock_user_service.audit_repository.log_user_action_safe = AsyncMock()
+
+        mock_api_key_repo = MagicMock()
+        mock_api_key_repo.list = AsyncMock(return_value=([], 0))
+
+        with patch(
+            "app.repositories.api_key_repository.APIKeyRepository",
+            return_value=mock_api_key_repo,
+        ):
+            result = await mock_user_service.export_my_data(user)
+
+        assert result["activity_truncated"] is False
