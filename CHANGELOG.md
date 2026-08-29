@@ -90,6 +90,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Stop holding a `FOR UPDATE` lock across recovery-code hashing, every attempt pinned all of a user's unused codes for up to ten sequential `bcrypt` comparisons, so anyone with a challenge token could stall the account's recovery path, single use is now enforced by a conditional update
 - Set `FORWARDED_ALLOW_IPS` for the app container, `uvicorn` defaults it to `127.0.0.1` and the reverse proxy is a separate container, so `X-Forwarded-For` was ignored and every request looked like it came from the proxy, collapsing the per-IP auth rate limiter into one bucket for the whole internet
 - Stop the idempotency middleware caching `4xx` responses, a `429` or an expired-token `401` stuck to the key for `IDEMPOTENCY_TTL_HOURS` (24 by default) and was replayed long after the client had waited or re-authenticated
 - Stop the WebSocket broadcast relay dying permanently when a client connects or disconnects mid-broadcast, the fan-out iterated the live connection set across `await`s, so `RuntimeError: Set changed size during iteration` escaped the relay task and no broadcast was delivered again until the process restarted
