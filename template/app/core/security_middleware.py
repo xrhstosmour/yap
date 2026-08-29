@@ -63,12 +63,26 @@ _DEFAULT_CSP = (
     "frame-ancestors 'none'"
 )
 
+# Both docs pages ship an inline block that this policy has to allow, or
+# the page renders blank: FastAPI's Swagger HTML bootstraps the UI from an
+# inline `<script>` calling `SwaggerUIBundle(...)`, and its ReDoc HTML
+# carries an inline `<style>`. Neither is under this project's control, so
+# a hash would break on the next FastAPI upgrade. `'unsafe-inline'` is
+# scoped to these two paths, and since PR #168 those paths only exist when
+# ENVIRONMENT is `local`, so no deployed environment ever sends this header.
+#
+# The rest are third-party origins the two pages reference directly:
+# fastapi.tiangolo.com for both favicons, and Google Fonts for ReDoc's
+# stylesheet (fonts.googleapis.com) and the font files it in turn pulls
+# (fonts.gstatic.com). ReDoc also builds its highlighting worker from a
+# blob URL, hence `worker-src blob:`.
 _DOCS_CSP = (
     "default-src 'none'; "
-    "script-src 'self' cdn.jsdelivr.net; "
-    "style-src 'self' cdn.jsdelivr.net; "
-    "img-src 'self' data:; "
-    "font-src 'self' data: cdn.jsdelivr.net; "
+    "script-src 'self' 'unsafe-inline' cdn.jsdelivr.net; "
+    "style-src 'self' 'unsafe-inline' cdn.jsdelivr.net fonts.googleapis.com; "
+    "img-src 'self' data: fastapi.tiangolo.com; "
+    "font-src 'self' data: cdn.jsdelivr.net fonts.gstatic.com; "
+    "worker-src blob:; "
     "connect-src 'self'; "
     "frame-ancestors 'none'"
 )

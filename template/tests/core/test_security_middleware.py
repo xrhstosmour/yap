@@ -67,10 +67,50 @@ class TestSecurityHeaders:
         response = client.get(path)
         csp = response.headers["Content-Security-Policy"]
         assert "default-src 'none'" in csp
-        assert "script-src 'self' cdn.jsdelivr.net" in csp
-        assert "style-src 'self' cdn.jsdelivr.net" in csp
-        assert "font-src 'self' data: cdn.jsdelivr.net" in csp
+        assert "cdn.jsdelivr.net" in csp
         assert "frame-ancestors 'none'" in csp
+
+    @pytest.mark.parametrize("path", ["/try", "/documentation"])
+    def test_docs_csp_allows_what_the_docs_pages_actually_need(self, path: str) -> None:
+        """Every allowance here answers something in FastAPI's own docs HTML.
+
+        Verified in a browser against a running app: without these, Swagger
+        renders a completely blank page (its inline `SwaggerUIBundle(...)`
+        bootstrap is blocked) and ReDoc renders "Something went wrong...".
+
+        Args:
+            path: A docs path.
+        """
+        client = TestClient(_create_app())
+        csp = client.get(path).headers["Content-Security-Policy"]
+
+        # Swagger bootstraps from an inline <script>, ReDoc ships an inline
+        # <style>. Neither is under this project's control, so a hash would
+        # break on the next FastAPI upgrade.
+        assert "script-src" in csp
+        assert "style-src" in csp
+        script_src = csp.split("script-src")[1].split(";")[0]
+        style_src = csp.split("style-src")[1].split(";")[0]
+        assert "'unsafe-inline'" in script_src
+        assert "'unsafe-inline'" in style_src
+
+        # Both pages' favicon.
+        assert "fastapi.tiangolo.com" in csp
+        # ReDoc's Google Fonts stylesheet, and the font files it pulls.
+        assert "fonts.googleapis.com" in style_src
+        assert "fonts.gstatic.com" in csp.split("font-src")[1].split(";")[0]
+        # ReDoc builds its worker from a blob URL.
+        assert "worker-src blob:" in csp
+
+    def test_unsafe_inline_stays_off_every_other_route(self) -> None:
+        """The docs allowance must not leak into the API-wide policy."""
+        client = TestClient(_create_app())
+        csp = client.get("/").headers["Content-Security-Policy"]
+
+        assert "'unsafe-inline'" not in csp
+        assert "fastapi.tiangolo.com" not in csp
+        assert "fonts.googleapis.com" not in csp
+        assert "worker-src" not in csp
 
     def test_referrer_policy_header(self) -> None:
         """Referrer-Policy should be strict-origin-when-cross-origin."""
