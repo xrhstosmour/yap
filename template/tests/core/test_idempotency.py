@@ -233,6 +233,85 @@ class TestIdempotencyMiddleware:
         mock_service.set.assert_not_awaited()
 
 
+class TestClientErrorsAreNotCached:
+    """A rejection must not stick to the key for the rest of the day.
+
+    Caching 4xx meant a 429 from the rate limiter, a 401 from an expired
+    token, or a 422 from a bad payload was replayed for
+    `IDEMPOTENCY_TTL_HOURS` (24 by default), long after the client had
+    waited, re-authenticated or corrected the request. The only way out
+    was to change the idempotency key, which is what the key exists to
+    make unnecessary.
+    """
+
+    @pytest.mark.parametrize("status_code", [400, 401, 403, 409, 422, 429])
+    def test_client_error_is_not_cached(
+        self,
+        mock_service: IdempotencyService,
+        status_code: int,
+    ) -> None:
+        """No 4xx should ever be written to the idempotency store.
+
+        Args:
+            mock_service: Mocked idempotency service.
+            status_code: The 4xx status under test.
+        """
+        from fastapi import FastAPI
+        from fastapi.responses import JSONResponse
+
+        app = FastAPI()
+        app.add_middleware(IdempotencyMiddleware)
+
+        @app.post("/rejected")
+        async def rejected():
+            return JSONResponse({"detail": "no"}, status_code=status_code)
+
+        client = TestClient(app)
+        mock_service.set.reset_mock()
+
+        response = client.post(
+            "/rejected",
+            json={},
+            headers={"X-Idempotency-Key": f"test-key-{status_code}"},
+        )
+
+        assert response.status_code == status_code
+        mock_service.set.assert_not_awaited()
+
+    @pytest.mark.parametrize("status_code", [200, 201, 204, 302])
+    def test_success_and_redirect_are_still_cached(
+        self,
+        mock_service: IdempotencyService,
+        status_code: int,
+    ) -> None:
+        """Narrowing the rule must not stop caching real outcomes.
+
+        Args:
+            mock_service: Mocked idempotency service.
+            status_code: The non-error status under test.
+        """
+        from fastapi import FastAPI
+        from fastapi.responses import JSONResponse
+
+        app = FastAPI()
+        app.add_middleware(IdempotencyMiddleware)
+
+        @app.post("/done")
+        async def done():
+            return JSONResponse({"ok": True}, status_code=status_code)
+
+        client = TestClient(app)
+        mock_service.set.reset_mock()
+
+        client.post(
+            "/done",
+            json={},
+            headers={"X-Idempotency-Key": f"test-key-ok-{status_code}"},
+        )
+
+        mock_service.set.assert_awaited_once()
+
+
 # Service-level tests with mocked Redis (unit tests, no live Redis needed)
 
 
