@@ -767,3 +767,92 @@ class TestGetCacheReuse:
         finally:
             cache_module._redis_client = original_client
             cache_module._cache = original_cache
+
+
+class TestCachedNoneIsAValue:
+    """`None` is a result, not an absence.
+
+    `get_or_set` tested its read against `None`, which `get()` also
+    returns for a missing key. A `compute()` that legitimately returns
+    `None`, a lookup that found nothing, was therefore stored and then
+    read back as a miss forever: recomputed on every call, never served.
+    The waiters had it worse, polling for a value that by construction
+    never appears, so each burned the full `wait_timeout` before
+    computing anyway. The stampede protection guaranteed a stampede.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_cached_none_is_served_without_recomputing(
+        self, cache: CacheService, mock_redis: AsyncMock
+    ) -> None:
+        """A stored `null` must count as a hit.
+
+        Args:
+            cache: Cache service under test.
+            mock_redis: Mocked Redis client.
+        """
+        mock_redis.get.return_value = "null"
+        compute = AsyncMock(return_value="should not run")
+
+        result = await cache.get_or_set("mykey", compute)
+
+        assert result is None
+        compute.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_waiter_accepts_a_none_published_by_the_winner(
+        self, cache: CacheService, mock_redis: AsyncMock
+    ) -> None:
+        """The polling loop must stop on `null` too.
+
+        Args:
+            cache: Cache service under test.
+            mock_redis: Mocked Redis client.
+        """
+        # Missing on the first read, then the winner publishes `null`.
+        mock_redis.get.side_effect = [None, "null"]
+        # Lost the race for the lock.
+        mock_redis.set.return_value = None
+        compute = AsyncMock(return_value="should not run")
+
+        result = await cache.get_or_set(
+            "mykey", compute, wait_timeout=1.0, retry_interval=0.01
+        )
+
+        assert result is None
+        compute.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_truly_absent_key_still_computes(
+        self, cache: CacheService, mock_redis: AsyncMock
+    ) -> None:
+        """Distinguishing the two must not break the ordinary miss.
+
+        Args:
+            cache: Cache service under test.
+            mock_redis: Mocked Redis client.
+        """
+        mock_redis.get.return_value = None
+        mock_redis.set.return_value = True
+        compute = AsyncMock(return_value={"computed": True})
+
+        result = await cache.get_or_set("mykey", compute)
+
+        assert result == {"computed": True}
+        compute.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_get_still_reports_none_for_both(
+        self, cache: CacheService, mock_redis: AsyncMock
+    ) -> None:
+        """`get()`'s own contract is unchanged.
+
+        Args:
+            cache: Cache service under test.
+            mock_redis: Mocked Redis client.
+        """
+        mock_redis.get.return_value = None
+        assert await cache.get("absent") is None
+
+        mock_redis.get.return_value = "null"
+        assert await cache.get("cached-null") is None
