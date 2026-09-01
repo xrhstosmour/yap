@@ -175,6 +175,16 @@ if [ -z "$_target" ]; then
     error "Could not resolve the latest 'YAP' commit to sync to"
 fi
 
+# Create it empty and lock it down before a single secret goes in. `cat >`
+# alone leaves it at 0644 under the default umask, and this file carries the
+# JWT signing key, the Fernet key and every service password. It is
+# short-lived, the EXIT trap below removes it, but the window spans a
+# `copier update` with network calls, and on a shared machine that is long
+# enough for any other local user to read it. Truncating an existing file
+# does not reset its mode, so the redirect below keeps 0600.
+: > .copier/.answers.yml
+chmod 600 .copier/.answers.yml
+
 cat > .copier/.answers.yml << YAML
 _src_path: gh:xrhstosmour/yap
 _commit: $_commit
