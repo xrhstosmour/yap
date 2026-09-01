@@ -51,6 +51,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Stop publishing an uncommitted feature-flag state to `Redis`, and give the keys a TTL, the service pushed the new state from inside the transaction, so a request that rolled back afterwards left every instance on a value the database never held, and with no expiry on the key it stayed that way until someone flushed `Redis` by hand
 - Answer an oversized upload with a `413` instead of a `500`, the size guard raised a plain `FileServiceError` and nothing on the route caught it, so sending a file over the 25MB limit read as a server fault
 - Reject an unknown `?role=` on `GET /users` and an unsortable `?sort_by=` on `GET /tenants` with a `422` instead of a `500`, the role went straight into `UserRole(...)` and raised `ValueError` inside the handler, and `sort_by` reached `getattr` unchecked, so `?sort_by=metadata` handed SQLAlchemy's `MetaData` object to `order_by`
 - Pass the list filters through user search, `?search=` built `is_active` and `role` and then dropped them on the way to the repository, so an admin narrowing a search still got deactivated users and every role back, with nothing to indicate the filter had been ignored
