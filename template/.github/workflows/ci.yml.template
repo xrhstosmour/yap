@@ -141,7 +141,13 @@ jobs:
           REDIS_PASSWORD: testpass
           ENVIRONMENT: local
           POSTGRESQL_AUTHENTICATION_METHOD: password
-      - run: uv run pytest tests/ -v --tb=short --cov=app --cov-report=xml
+      # `-m "not slow"` matches the template's own CI. The slow markers drive
+      # real processes and the assembled compose stack, which this workflow
+      # does not stand up, so a generated project's very first push went red
+      # on `test_core_compose_services_running` before anyone had written a
+      # line of their own code. The smoke test below is still run, by node
+      # ID, which `-m` does not filter.
+      - run: uv run pytest tests/ -v --tb=short --cov=app --cov-report=xml -m "not slow"
         env:
           POSTGRESQL_SERVER: localhost
           POSTGRESQL_HOST: localhost
