@@ -20,17 +20,23 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Closes the upload dedup race: without this constraint, two concurrent
-    # uploads of identical content can both miss each other's in-flight row
-    # in the application-level check and insert duplicate `files` rows.
-    op.drop_index(op.f("ix_files_content_hash"), table_name="files")
-    op.create_index(
-        op.f("ix_files_content_hash"), "files", ["content_hash"], unique=True
-    )
+    # Intentionally does nothing. This revision used to make
+    # `ix_files_content_hash` globally unique, to close the upload dedup
+    # race. Three revisions later that is replaced by a unique constraint on
+    # `(tenant_id, uploaded_by, content_hash)`, which is what the dedup is
+    # actually scoped to, and the global index is dropped.
+    #
+    # Enforcing global uniqueness on the way past therefore blocked upgrades
+    # on data the final schema accepts: two tenants holding the same content
+    # is legal at head, but aborted here with
+    # `could not create unique index "ix_files_content_hash"`, stranding the
+    # database three revisions short of head with no way forward.
+    #
+    # The revision is kept rather than deleted so existing `alembic_version`
+    # values stay resolvable. Databases that already ran it are unaffected,
+    # the index it created is dropped by `20260812103128195` either way.
+    pass
 
 
 def downgrade() -> None:
-    op.drop_index(op.f("ix_files_content_hash"), table_name="files")
-    op.create_index(
-        op.f("ix_files_content_hash"), "files", ["content_hash"], unique=False
-    )
+    pass
