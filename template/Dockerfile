@@ -37,7 +37,13 @@ USER appuser
 
 EXPOSE 8000
 
+# Probes /ready, not /live. Docker's health status is what
+# `depends_on: service_healthy` waits on, so it is a readiness signal, and
+# /live returns 200 unconditionally as long as the process is up. A
+# container whose database was unreachable reported healthy and was handed
+# traffic it could not serve. /ready runs a `SELECT 1` and answers 503 when
+# it cannot.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD curl -f http://localhost:8000/api/v1/live || exit 1
+    CMD curl -f http://localhost:8000/api/v1/ready || exit 1
 
 CMD ["fastapi", "run", "app/main.py", "--host", "0.0.0.0", "--port", "8000"]
