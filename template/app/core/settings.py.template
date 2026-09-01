@@ -345,7 +345,7 @@ class Settings(BaseSettings):
     STORAGE_ACCESS_KEY: str = ""
     STORAGE_SECRET_KEY: str = ""
     STORAGE_BUCKET: str = "{{ project_slug }}-files"
-    STORAGE_REGION: str = "us-east-1"
+    STORAGE_REGION: str = "{{ storage_region }}"
     STORAGE_MAX_FILE_SIZE: int = 10485760
     STORAGE_PUBLIC_URL: str = ""
 
