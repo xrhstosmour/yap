@@ -98,6 +98,11 @@ else
     info "Backfilling any placeholder secrets in existing .env..."
 fi
 
+# `cp` and the default umask leave this at 0644, and it holds the JWT signing
+# key, the Fernet key and every service password, permanently. Applied on
+# every run, not just on creation, so an existing project is tightened too.
+chmod 600 .env
+
 # Reset .env.example back to placeholders so real secrets never leak into it.
 # Unconditional on purpose: `copier update` (see synchronize.sh) re-renders
 # .env.example from the real answers on every sync, and .env already exists on
