@@ -187,3 +187,67 @@ async def test_duplicate_slug_rejected(client: AsyncClient, session) -> None:
         headers={"Authorization": f"Bearer {tokens.access_token}"},
     )
     assert response.status_code == 400
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("override_get_async_session")
+async def test_unknown_sort_by_rejected(client: AsyncClient, session) -> None:
+    """A `?sort_by=` that is not a sortable column is a bad request.
+
+    `metadata` is the case that mattered: it exists on every SQLModel
+    class, so the old `getattr` guard let it through and handed
+    SQLAlchemy's `MetaData` object to `order_by`.
+    """
+    from app.services.auth_service import AuthService
+
+    service = AuthService(session)
+    admin = User(
+        email="admin-sort@example.com",
+        hashed_password="hash",
+        role=UserRole.SUPERUSER,
+        is_active=True,
+    )
+    session.add(admin)
+    await session.commit()
+    tokens = service.create_tokens(admin)
+
+    response = await client.get(
+        "/api/v1/tenants",
+        params={"sort_by": "metadata"},
+        headers={"Authorization": f"Bearer {tokens.access_token}"},
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("override_get_async_session")
+async def test_known_sort_by_still_sorts(client: AsyncClient, session) -> None:
+    """A sortable column still sorts."""
+    from app.services.auth_service import AuthService
+
+    service = AuthService(session)
+    admin = User(
+        email="admin-sort-ok@example.com",
+        hashed_password="hash",
+        role=UserRole.SUPERUSER,
+        is_active=True,
+    )
+    session.add(admin)
+    await session.commit()
+    tokens = service.create_tokens(admin)
+
+    for slug in ("sort-b", "sort-a"):
+        await client.post(
+            "/api/v1/tenants",
+            json={"name": slug.upper(), "slug": slug},
+            headers={"Authorization": f"Bearer {tokens.access_token}"},
+        )
+
+    response = await client.get(
+        "/api/v1/tenants",
+        params={"sort_by": "slug", "sort_order": "desc"},
+        headers={"Authorization": f"Bearer {tokens.access_token}"},
+    )
+    assert response.status_code == 200
+    slugs = [tenant["slug"] for tenant in response.json()["data"]]
+    assert slugs.index("sort-b") < slugs.index("sort-a")

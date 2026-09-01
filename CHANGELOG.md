@@ -51,6 +51,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Reject an unknown `?role=` on `GET /users` and an unsortable `?sort_by=` on `GET /tenants` with a `422` instead of a `500`, the role went straight into `UserRole(...)` and raised `ValueError` inside the handler, and `sort_by` reached `getattr` unchecked, so `?sort_by=metadata` handed SQLAlchemy's `MetaData` object to `order_by`
 - Pass the list filters through user search, `?search=` built `is_active` and `role` and then dropped them on the way to the repository, so an admin narrowing a search still got deactivated users and every role back, with nothing to indicate the filter had been ignored
 - Fail closed when a tenant-scoped query runs with no tenant context, and add `system_context()` for deliberate cross-tenant access
 - Make `AuditLogRepository.get_recent_failures` fail closed too, it had its own hand-rolled tenant filter that silently returned every tenant's failed audit records when no tenant context was set
