@@ -760,7 +760,7 @@ class TestListUsers:
         await mock_user_service.list_users(search="john")
 
         mock_user_service.user_repository.search.assert_awaited_once_with(
-            "john", skip=0, limit=20
+            "john", skip=0, limit=20, filters=None
         )
         mock_user_service.user_repository.list.assert_not_called()
 
@@ -1084,3 +1084,47 @@ class TestExportIsComplete:
             result = await mock_user_service.export_my_data(user)
 
         assert result["activity_truncated"] is False
+
+
+class TestSearchHonoursFilters:
+    """A search must still respect the filters alongside it.
+
+    `filters` was assembled from `is_active` and `role` and then dropped
+    entirely on the search branch, so `?search=x&is_active=false` returned
+    active users too. Nothing in the response showed the filter had been
+    ignored.
+    """
+
+    @pytest.mark.asyncio
+    async def test_is_active_is_passed_to_search(
+        self, mock_user_service: UserService
+    ) -> None:
+        """A search combined with `is_active` must forward it.
+
+        Args:
+            mock_user_service: Service with mocked repositories.
+        """
+        mock_user_service.user_repository.search = AsyncMock(return_value=([], 0))
+
+        await mock_user_service.list_users(search="john", is_active=False)
+
+        mock_user_service.user_repository.search.assert_awaited_once_with(
+            "john", skip=0, limit=20, filters={"is_active": False}
+        )
+
+    @pytest.mark.asyncio
+    async def test_role_is_passed_to_search(
+        self, mock_user_service: UserService
+    ) -> None:
+        """A search combined with `role` must forward it too.
+
+        Args:
+            mock_user_service: Service with mocked repositories.
+        """
+        mock_user_service.user_repository.search = AsyncMock(return_value=([], 0))
+
+        await mock_user_service.list_users(search="john", role=UserRole.SUPERUSER)
+
+        mock_user_service.user_repository.search.assert_awaited_once_with(
+            "john", skip=0, limit=20, filters={"role": UserRole.SUPERUSER}
+        )
