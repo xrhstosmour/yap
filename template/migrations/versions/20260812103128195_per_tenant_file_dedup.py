@@ -1,8 +1,8 @@
 """Scope file dedup to `(tenant_id, content_hash)` instead of globally
 
-Existing data trivially satisfies the new constraint: content_hash was
-already globally unique before this migration, so no two rows can share
-a content_hash regardless of tenant_id, and no backfill is needed.
+Only the index drop is applied. The unique constraint this revision
+originally added is superseded by the next one and is no longer created
+here, see the comment in `upgrade`.
 
 Revision ID: 20260812103128195
 Revises: 20260812102141972
@@ -23,13 +23,14 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # Dropping the index is real and kept: the final schema has no
+    # `ix_files_content_hash`.
     op.drop_index(op.f("ix_files_content_hash"), table_name="files")
-    op.create_unique_constraint(
-        "uq_files_tenant_id_content_hash",
-        "files",
-        ["tenant_id", "content_hash"],
-        postgresql_nulls_not_distinct=True,
-    )
+
+    # Creating `uq_files_tenant_id_content_hash` is not. The very next
+    # revision replaces it with the triple, and this one is stricter, so it
+    # rejected two users in the same tenant uploading the same file, which
+    # head allows. Same reasoning as `20260731171240225`.
 
 
 def downgrade() -> None:
