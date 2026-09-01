@@ -51,6 +51,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Gate `setup.sh` on real container health, the readiness loop read `docker compose ps` by column position and landed on `CREATED`, so every container looked pending, the loop always ran its full thirty iterations, and setup ended with a flat sixty-second sleep that checked nothing and reported nothing
 - Record the generated `Traefik` dashboard password in `.env` instead of discarding it, `assemble.py` hashed it into `.htpasswd` and let the plaintext go out of scope, so the dashboard was protected by a password nobody could ever know, and it is now reused rather than rotated on every re-assemble
 - Move the vendored containers cache out of `/tmp/containers` and verify it against the pinned commit, the path was fixed under a world-writable directory and reused on existence alone, so any local user could plant compose files a project then ran, and a bumped `REPO_COMMIT` was silently ignored on any machine that had assembled before
 - Stop the file dedup migrations aborting an upgrade on data the final schema accepts, the chain enforced a global unique `content_hash` and then a `(tenant_id, content_hash)` constraint on the way to a schema that only requires `(tenant_id, uploaded_by, content_hash)`, so two tenants holding the same file stranded the database partway through with no way forward, only the final constraint is enforced now
