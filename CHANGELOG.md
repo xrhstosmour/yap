@@ -51,6 +51,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Bind the app's published port to loopback by default, `8000:8000` published on `0.0.0.0`, so with `Traefik` in front the app was still reachable directly in plaintext from anywhere that could route to the host, skipping the proxy's TLS and its middleware, override `APP_BIND_ADDRESS` to publish deliberately
 - Gate `setup.sh` on real container health, the readiness loop read `docker compose ps` by column position and landed on `CREATED`, so every container looked pending, the loop always ran its full thirty iterations, and setup ended with a flat sixty-second sleep that checked nothing and reported nothing
 - Record the generated `Traefik` dashboard password in `.env` instead of discarding it, `assemble.py` hashed it into `.htpasswd` and let the plaintext go out of scope, so the dashboard was protected by a password nobody could ever know, and it is now reused rather than rotated on every re-assemble
 - Move the vendored containers cache out of `/tmp/containers` and verify it against the pinned commit, the path was fixed under a world-writable directory and reused on existence alone, so any local user could plant compose files a project then ran, and a bumped `REPO_COMMIT` was silently ignored on any machine that had assembled before
