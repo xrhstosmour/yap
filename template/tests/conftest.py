@@ -75,7 +75,8 @@ def test_database() -> str:
     url = _database_url(database)
     alembic_config = Config(str(PROJECT_ROOT / "alembic.ini"))
     alembic_config.set_main_option("script_location", str(PROJECT_ROOT / "migrations"))
-    alembic_config.set_main_option("sqlalchemy.url", url)
+    # Doubled for configparser, which reads a bare `%` as an interpolation.
+    alembic_config.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
     command.upgrade(alembic_config, "head")
 
     # Seed the system tenant that production provisions via initial_data, so
