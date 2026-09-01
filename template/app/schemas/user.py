@@ -13,6 +13,7 @@ from pydantic import EmailStr
 from pydantic import Field
 
 from app.core.phone_number import PhoneNumberString
+from app.models.user import UserRole
 from app.schemas.base import BaseSchema
 from app.schemas.base import PaginatedResponse
 from app.schemas.base import PaginationParameters
@@ -100,5 +101,8 @@ class UserListParameters(PaginationParameters):
     """Query parameters for listing users."""
 
     is_active: bool | None = Field(default=None, description="Filter by active status")
-    role: str | None = Field(default=None, description="Filter by user role")
+    # Typed as the enum, not `str`. The endpoint used to do the conversion
+    # itself, so an unknown role raised `ValueError` deep in the handler and
+    # came back as a 500 rather than a 422.
+    role: UserRole | None = Field(default=None, description="Filter by user role")
     search: str | None = Field(default=None, description="Search in email/name")

@@ -278,8 +278,10 @@ class BaseRepository[T: SQLModel]:
             if filter_conditions:
                 query = query.where(and_(*filter_conditions))
 
-        # Apply sorting.
-        if sort_by and hasattr(self.model, sort_by):
+        # Apply sorting. Only mapped columns qualify: `hasattr` also matched
+        # `metadata` and every model method, which `order_by` then rejected
+        # at query-build time.
+        if sort_by and sort_by in cast(Any, self.model).__table__.columns:
             sort_column = cast(Any, getattr(self.model, sort_by))
             if sort_order.lower() == "desc":
                 sort_column = sort_column.desc()
