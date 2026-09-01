@@ -106,3 +106,53 @@ class TestRenameEventKey:
         event_dict: dict = {"other": "value"}
         result = rename_event_key(None, "info", event_dict)  # type: ignore[arg-type]
         assert result == {"other": "value"}
+
+
+class TestLoggingIsConfiguredBeforeAnythingLogs:
+    """`setup_logging()` has to run before the first log call.
+
+    `app/core/logging.py` says so in as many words, "This ensures structlog
+    is properly configured via setup_logging() before any logger is
+    created". The lifespan handler broke it by one line: it logged
+    `application_starting` first, so in production that line came out as
+    coloured console text in the middle of the JSON stream, with no
+    correlation ID and no service context.
+    """
+
+    def test_the_lifespan_configures_logging_first(self) -> None:
+        """Whatever else the lifespan does, logging is set up before it logs.
+
+        Walks the parsed function rather than the file text, so a comment
+        or docstring mentioning either call cannot satisfy the check.
+        """
+        import ast
+        from pathlib import Path
+
+        source = (Path(__file__).resolve().parents[2] / "app" / "main.py").read_text()
+        lifespan = next(
+            node
+            for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.AsyncFunctionDef) and node.name == "lifespan"
+        )
+
+        setup_at: int | None = None
+        first_log_at: int | None = None
+        for node in ast.walk(lifespan):
+            if not isinstance(node, ast.Call):
+                continue
+            function = node.func
+            if isinstance(function, ast.Name) and function.id == "setup_logging":
+                setup_at = min(setup_at or node.lineno, node.lineno)
+            if (
+                isinstance(function, ast.Attribute)
+                and isinstance(function.value, ast.Name)
+                and function.value.id == "logger"
+            ):
+                first_log_at = min(first_log_at or node.lineno, node.lineno)
+
+        assert setup_at is not None, "lifespan never calls setup_logging()"
+        assert first_log_at is not None, "expected the lifespan to log something"
+        assert setup_at < first_log_at, (
+            "lifespan logs before setup_logging(), so that line bypasses the "
+            "configured renderer"
+        )

@@ -102,9 +102,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     Handles startup and shutdown events for the application.
     Initializes and cleans up database and cache connections.
     """
-    # Startup.
-    logger.info("application_starting", environment=settings.ENVIRONMENT)
+    # Startup. `setup_logging()` comes first: anything logged before it runs
+    # goes through structlog's default configuration, so in production this
+    # line came out as coloured console text in the middle of the JSON log
+    # stream, with no correlation ID and no service context.
     setup_logging()
+    logger.info("application_starting", environment=settings.ENVIRONMENT)
 
     try:
         from app.core.telemetry import setup_tracing

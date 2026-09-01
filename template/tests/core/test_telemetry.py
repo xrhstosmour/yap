@@ -122,3 +122,61 @@ def test_tracing_sets_error_attributes_on_exception(memory_exporter) -> None:
     assert len(spans) == 1
     assert spans[0].attributes["error"] is True
     assert spans[0].attributes["error.message"] == "something broke"
+
+
+class TestSpansDoNotGoToStdoutInProduction:
+    """Spans must not be printed into the structured log stream.
+
+    `ConsoleSpanExporter` was attached unconditionally, so every traced
+    block wrote a multi-line JSON span to the same stdout carrying the
+    one-object-per-line log stream. Any shipper parsing those lines as JSON
+    fails on them.
+    """
+
+    def _console_exporters(self) -> list[object]:
+        """Collect the console exporters attached to the active provider.
+
+        Returns:
+            Every `ConsoleSpanExporter` reachable from the span processors.
+        """
+        from opentelemetry.sdk.trace.export import ConsoleSpanExporter
+
+        provider = trace.get_tracer_provider()
+        processors = provider._active_span_processor._span_processors  # type: ignore[union-attr]
+        return [
+            processor.span_exporter
+            for processor in processors
+            if isinstance(
+                getattr(processor, "span_exporter", None), ConsoleSpanExporter
+            )
+        ]
+
+    @pytest.mark.parametrize("environment", ["staging", "production"])
+    def test_no_console_exporter_when_deployed(
+        self, environment: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A deployed environment gets a provider with nothing printing.
+
+        Args:
+            environment: The deployed environment under test.
+            monkeypatch: Fixture used to set the environment.
+        """
+        monkeypatch.setattr("app.core.telemetry.settings.ENVIRONMENT", environment)
+
+        setup_tracing(service_name="test-service")
+
+        assert self._console_exporters() == []
+
+    def test_console_exporter_stays_in_local(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Printing spans is still useful while developing.
+
+        Args:
+            monkeypatch: Fixture used to set the environment.
+        """
+        monkeypatch.setattr("app.core.telemetry.settings.ENVIRONMENT", "local")
+
+        setup_tracing(service_name="test-service")
+
+        assert len(self._console_exporters()) == 1
