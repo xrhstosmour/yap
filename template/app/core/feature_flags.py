@@ -34,6 +34,13 @@ REDIS_PREFIX = "feature_flags"
 FALLBACK_STATE = False
 CACHE_TTL = 60
 
+# Expiry on the shared Redis tier. Every write path already refreshes it
+# explicitly, so this is the ceiling on how long a key that drifted from the
+# database can stay wrong. Without it a stale key, one written by a rolled-back
+# transaction, or one left behind by a flag deleted directly in the database,
+# survived until someone flushed Redis by hand.
+REDIS_CACHE_TTL = 300
+
 
 class CacheEntry(TypedDict):
     state: bool
@@ -154,6 +161,7 @@ async def feature_enabled(name: str) -> bool:
                     await redis_client.set(
                         f"{REDIS_PREFIX}:{name}",
                         "true" if state else "false",
+                        ex=REDIS_CACHE_TTL,
                     )
 
                 return state
@@ -223,8 +231,11 @@ async def refresh_cache(name: str) -> None:
 async def sync_to_redis(name: str, state: bool) -> None:
     """Immediately sync a flag state to Redis.
 
-    Called after any database change to ensure all instances
-    pick up the new state instantly.
+    Only safe once the state is committed. Writing a state read from an
+    open transaction publishes it to every instance before it is durable,
+    and a rollback then leaves the whole deployment on a value the
+    database never held. Call `refresh_cache` from inside a transaction
+    instead, it invalidates rather than publishes.
 
     Args:
         name: Feature flag name
@@ -235,6 +246,7 @@ async def sync_to_redis(name: str, state: bool) -> None:
         await redis_client.set(
             f"{REDIS_PREFIX}:{name}",
             "true" if state else "false",
+            ex=REDIS_CACHE_TTL,
         )
 
     async with _cache_lock:

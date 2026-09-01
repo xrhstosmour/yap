@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 import pytest
 
+from app.core.feature_flags import REDIS_CACHE_TTL
 from app.core.feature_flags import _in_memory_cache
 from app.core.feature_flags import feature_disabled
 from app.core.feature_flags import feature_enabled
@@ -148,8 +149,31 @@ async def test_sync_to_redis_sets_flag_in_redis() -> None:
     with patch("app.core.feature_flags._get_redis", return_value=mock_redis):
         await sync_to_redis("synced_redis_flag", True)
 
-    mock_redis.set.assert_awaited_once_with("feature_flags:synced_redis_flag", "true")
+    mock_redis.set.assert_awaited_once_with(
+        "feature_flags:synced_redis_flag", "true", ex=REDIS_CACHE_TTL
+    )
     assert _in_memory_cache["synced_redis_flag"]["state"] is True
+
+
+@pytest.mark.asyncio
+async def test_redis_keys_written_with_an_expiry() -> None:
+    """Every Redis write carries a TTL.
+
+    An immortal key means a flag that drifted from the database, through a
+    rolled-back write or a row deleted out of band, stays wrong until
+    someone flushes Redis by hand.
+    """
+    _in_memory_cache.clear()
+
+    mock_redis = MagicMock()
+    mock_redis.set = AsyncMock()
+
+    with patch("app.core.feature_flags._get_redis", return_value=mock_redis):
+        await sync_to_redis("ttl_flag", False)
+
+    _, kwargs = mock_redis.set.await_args
+    assert kwargs.get("ex") == REDIS_CACHE_TTL
+    assert REDIS_CACHE_TTL > 0
 
 
 @pytest.mark.asyncio
