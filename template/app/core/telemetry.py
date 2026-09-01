@@ -16,9 +16,19 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.sdk.trace.export import ConsoleSpanExporter
 
+from app.core.settings import settings
+
 
 def setup_tracing(service_name: str = "fastapi-app") -> trace.Tracer:
-    """Initialize OpenTelemetry tracing with console exporter.
+    """Initialize OpenTelemetry tracing.
+
+    Spans are printed to stdout in development only. In staging and
+    production the provider is installed without an exporter, so `tracing()`
+    keeps working and costs nothing. Printing there dumped a multi-line JSON
+    span for every traced block into the same stdout carrying the structured
+    log stream, which is a parse failure for any log shipper reading it as
+    one JSON object per line. Attach a real exporter, OTLP to a collector,
+    to send spans somewhere they can be read.
 
     Args:
         service_name: Name of this service for span attribution
@@ -29,7 +39,8 @@ def setup_tracing(service_name: str = "fastapi-app") -> trace.Tracer:
     resource = Resource.create({SERVICE_NAME: service_name})
     provider = TracerProvider(resource=resource)
 
-    provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
+    if settings.ENVIRONMENT not in ("staging", "production"):
+        provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
 
     trace.set_tracer_provider(provider)
 
