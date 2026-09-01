@@ -25,6 +25,12 @@ _cached_s3_client: Any | None = None
 # boto3/botocore error codes head_bucket raises when the bucket is missing.
 _BUCKET_NOT_FOUND_CODES = {"404", "NoSuchBucket"}
 
+# The only delete_object failures that mean "the object is already gone".
+# S3 and MinIO both answer a delete for a missing key with a success, so in
+# practice these are belt and braces. Anything outside this set, AccessDenied
+# above all, means the delete did not happen.
+_OBJECT_NOT_FOUND_CODES = {"404", "NoSuchKey"}
+
 
 def _s3_client() -> Any:  # noqa: ANN401
     """Return a cached boto3 S3 client, creating it on first call.
@@ -239,13 +245,38 @@ async def delete_object(
 ) -> None:
     """Delete an object from blob storage.
 
+    A missing object is not an error, the delete is idempotent. Anything
+    else is, and is raised. Swallowing every `ClientError` meant a bucket
+    policy that denied `s3:DeleteObject` turned every purge into a silent
+    no-op: the row went away, the blob stayed, and storage grew without
+    bound with nothing in the logs to show for it.
+
     Args:
         object_key: The object key to delete.
         bucket: Storage bucket. Defaults to ``settings.STORAGE_BUCKET``.
+
+    Raises:
+        ClientError: If the object could not be deleted.
     """
+    from botocore.exceptions import ClientError
+
     client = _s3_client()
     bucket = bucket or settings.STORAGE_BUCKET
     try:
         await asyncio.to_thread(client.delete_object, Bucket=bucket, Key=object_key)
-    except client.exceptions.ClientError:
-        pass  # Already deleted. Idempotent.
+    except ClientError as error:
+        error_code = error.response.get("Error", {}).get("Code", "")
+        if error_code not in _OBJECT_NOT_FOUND_CODES:
+            logger.error(
+                "storage_object_delete_failed",
+                bucket=bucket,
+                object_key=object_key,
+                error_code=error_code,
+                error=str(error),
+            )
+            raise
+        logger.debug(
+            "storage_object_already_absent",
+            bucket=bucket,
+            object_key=object_key,
+        )
