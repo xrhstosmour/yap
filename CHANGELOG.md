@@ -51,6 +51,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Create `.env` and the reconstructed `.copier/.answers.yml` with mode `600`, `cp` and `cat >` left both world-readable under the default umask while they hold the JWT signing key, the `Fernet` key and every service password, and `.env` kept those permissions for the life of the project
 - Point the container `HEALTHCHECK` at `/ready` instead of `/live`, Docker's health status is what `depends_on: service_healthy` waits on, and `/live` answers `200` for as long as the process is up, so a container that could not reach its database reported healthy and was handed traffic
 - Bind the app's published port to loopback by default, `8000:8000` published on `0.0.0.0`, so with `Traefik` in front the app was still reachable directly in plaintext from anywhere that could route to the host, skipping the proxy's TLS and its middleware, override `APP_BIND_ADDRESS` to publish deliberately
 - Gate `setup.sh` on real container health, the readiness loop read `docker compose ps` by column position and landed on `CREATED`, so every container looked pending, the loop always ran its full thirty iterations, and setup ended with a flat sixty-second sleep that checked nothing and reported nothing
