@@ -49,7 +49,14 @@ services:
       # Loopback is kept alongside it so a proxy on the host still works.
       - "FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS:-127.0.0.1,172.16.0.0/12}"
     ports:
-      - "8000:8000"
+      # Bound to loopback by default. `"8000:8000"` publishes on 0.0.0.0, so
+      # with Traefik in front the app was still reachable directly on port
+      # 8000 from anywhere that could route to the host, in plaintext,
+      # skipping the proxy's TLS and any middleware attached to it.
+      #
+      # Override APP_BIND_ADDRESS to 0.0.0.0 to publish deliberately, for a
+      # deployment with no reverse proxy that is fronted some other way.
+      - "${APP_BIND_ADDRESS:-127.0.0.1}:8000:8000"
     networks:
       - "internal"
     depends_on:
