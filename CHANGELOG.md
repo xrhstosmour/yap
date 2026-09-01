@@ -51,6 +51,8 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Stop `synchronize.sh` resetting `include_redbeat`, `timezone` and `storage_region` on every run, it rebuilds the answers from the project's own files and none of those three were readable back, so `celery-redbeat` being an unconditional dependency flipped every project to `RedBeat`, and the other two fell through to their defaults
+- Use the `storage_region` answer for `STORAGE_REGION`, the question was asked and the answer then discarded for a hardcoded `us-east-1`
 - Give `celery beat` a writable directory for its schedule, the default scheduler persists to the working directory and `/app` is root-owned while the container runs as `appuser`, so beat died at startup with `PermissionError` and no periodic task ever ran in a project using the default scheduler
 - Percent-encode the database credentials in `DATABASE_URI` and escape the URL for `Alembic`, a password holding `/`, `#` or `?` failed URL parsing so the application would not start at all, a `%` produced a malformed escape, and the encoded URL then killed every migration with `invalid interpolation syntax` because `Alembic` writes it through `configparser`
 - Stop `delete_object` reporting a failed delete as a successful one, every `ClientError` was swallowed as "already deleted", so a bucket policy without `s3:DeleteObject` turned each purge into a silent no-op that dropped the row, kept the blob and logged nothing

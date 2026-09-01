@@ -141,7 +141,11 @@ include_mailpit=$(has_extra "mailpit")
 include_redis_commander=$(has_extra "redis_commander")
 include_flower=$(has_extra "flower")
 include_minio=$(has_extra "minio")
-include_redbeat=$(grep -q "redbeat" pyproject.toml 2>/dev/null && echo "true" || echo "false")
+# Read from the compose command, not from pyproject.toml. `celery-redbeat` is
+# an unconditional dependency, so grepping pyproject matched every project and
+# flipped this to true on every sync, whatever the user had chosen. The
+# scheduler named in docker-compose.app.yml is the thing that actually varies.
+include_redbeat=$(grep -q "RedBeatScheduler" docker-compose.app.yml 2>/dev/null && echo "true" || echo "false")
 
 # Resolve nested mode from repository layout.
 nested="false"
