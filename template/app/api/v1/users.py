@@ -56,14 +56,11 @@ async def list_users(
     """
     service = UserService(session)
 
-    from app.models.user import UserRole
-
-    role = UserRole(parameters.role) if parameters.role else None
     users, total = await service.list_users(
         skip=parameters.skip,
         limit=parameters.limit,
         is_active=parameters.is_active,
-        role=role,
+        role=parameters.role,
         search=parameters.search,
     )
 

@@ -85,7 +85,11 @@ class TenantRepository(BaseRepository[Tenant]):
                 (Tenant.name.ilike(pattern)) | (Tenant.slug.ilike(pattern))  # type: ignore[union-attr,attr-defined]
             )
 
-        sort_column = getattr(Tenant, sort_by, None)
+        # Only mapped columns are sortable. `getattr` alone accepted anything
+        # that resolves on the class, including `metadata` and every model
+        # method, and handed the result straight to `order_by`.
+        sortable = Tenant.__table__.columns  # type: ignore[attr-defined]
+        sort_column = getattr(Tenant, sort_by) if sort_by in sortable else None
         if sort_column is not None and sort_order == "desc":
             query = query.order_by(sort_column.desc())  # type: ignore[union-attr]
         elif sort_column is not None:
