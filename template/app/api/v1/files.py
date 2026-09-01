@@ -21,6 +21,7 @@ from app.schemas.files import FileUploadResponse
 from app.schemas.files import FileUrlResponse
 from app.services.file_service import FileService
 from app.services.file_service import FileServiceError
+from app.services.file_service import FileTooLargeError
 
 router = APIRouter(prefix="/files", tags=["Files"])
 logger = get_logger("api.files")
@@ -48,13 +49,19 @@ async def upload_file(
     re-uploading.
     """
     service = FileService(session)
-    record = await service.upload(
-        file=file,
-        user=current_user,
-        is_public=is_public,
-        resource_type=resource_type,
-        resource_id=resource_id,
-    )
+    try:
+        record = await service.upload(
+            file=file,
+            user=current_user,
+            is_public=is_public,
+            resource_type=resource_type,
+            resource_id=resource_id,
+        )
+    except FileTooLargeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=str(e),
+        ) from e
     return FileUploadResponse(
         id=record.id,
         filename=record.filename,
