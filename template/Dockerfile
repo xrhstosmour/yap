@@ -13,8 +13,13 @@ FROM python:3.14-alpine@sha256:26730869004e2b9c4b9ad09cab8625e81d256d1ce97e72df5
 
 WORKDIR /app
 
+# `/app` stays root-owned so the running user cannot rewrite its own code.
+# `celery beat` needs somewhere to write its schedule though, and its default
+# is the working directory, so give it a directory of its own.
 RUN apk add --no-cache libpq ca-certificates tzdata curl \
-    && adduser -D -s /bin/sh appuser
+    && adduser -D -s /bin/sh appuser \
+    && mkdir -p /var/lib/celery \
+    && chown appuser:appuser /var/lib/celery
 
 COPY --from=builder --chown=appuser:appuser /app/.venv /app/.venv
 COPY --chown=appuser:appuser pyproject.toml uv.lock alembic.ini ./

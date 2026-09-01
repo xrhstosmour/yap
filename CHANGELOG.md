@@ -51,6 +51,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Give `celery beat` a writable directory for its schedule, the default scheduler persists to the working directory and `/app` is root-owned while the container runs as `appuser`, so beat died at startup with `PermissionError` and no periodic task ever ran in a project using the default scheduler
 - Percent-encode the database credentials in `DATABASE_URI` and escape the URL for `Alembic`, a password holding `/`, `#` or `?` failed URL parsing so the application would not start at all, a `%` produced a malformed escape, and the encoded URL then killed every migration with `invalid interpolation syntax` because `Alembic` writes it through `configparser`
 - Stop `delete_object` reporting a failed delete as a successful one, every `ClientError` was swallowed as "already deleted", so a bucket policy without `s3:DeleteObject` turned each purge into a silent no-op that dropped the row, kept the blob and logged nothing
 - Stop publishing an uncommitted feature-flag state to `Redis`, and give the keys a TTL, the service pushed the new state from inside the transaction, so a request that rolled back afterwards left every instance on a value the database never held, and with no expiry on the key it stayed that way until someone flushed `Redis` by hand
