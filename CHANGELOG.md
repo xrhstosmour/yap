@@ -51,6 +51,8 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Stop `OpenTelemetry` printing every span to stdout in staging and production, a multi-line JSON span landed in the middle of the one-object-per-line log stream and broke any shipper parsing it
+- Configure logging before the lifespan's first log line, `application_starting` went out through `structlog`'s default console renderer, so in production it appeared as coloured text among the JSON with no correlation ID and no service context
 - Stop `synchronize.sh` resetting `include_redbeat`, `timezone` and `storage_region` on every run, it rebuilds the answers from the project's own files and none of those three were readable back, so `celery-redbeat` being an unconditional dependency flipped every project to `RedBeat`, and the other two fell through to their defaults
 - Use the `storage_region` answer for `STORAGE_REGION`, the question was asked and the answer then discarded for a hardcoded `us-east-1`
 - Give `celery beat` a writable directory for its schedule, the default scheduler persists to the working directory and `/app` is root-owned while the container runs as `appuser`, so beat died at startup with `PermissionError` and no periodic task ever ran in a project using the default scheduler
