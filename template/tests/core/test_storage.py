@@ -337,21 +337,46 @@ class TestDeleteObject:
     """Tests for delete_object()."""
 
     @pytest.mark.asyncio
-    async def test_delete_object_idempotent_on_client_error(
+    async def test_delete_object_idempotent_when_already_gone(
         self, mock_s3_client: MagicMock
     ) -> None:
-        """Should not raise when ClientError occurs (already deleted)."""
+        """A missing object is not an error, the delete is idempotent."""
+        mock_s3_client.delete_object.side_effect = _client_error(
+            "NoSuchKey", "DeleteObject"
+        )
 
-        # Define a local ClientError class (botocore may not be installed directly).
-        class ClientError(Exception):
-            pass
-
-        mock_s3_client.exceptions.ClientError = ClientError
-        mock_s3_client.delete_object.side_effect = ClientError("NoSuchKey")
-
-        # Should not raise.
         await delete_object(object_key="non-existent-key")
 
         mock_s3_client.delete_object.assert_called_once_with(
             Bucket=ANY, Key="non-existent-key"
         )
+
+    @pytest.mark.asyncio
+    async def test_delete_object_raises_on_access_denied(
+        self, mock_s3_client: MagicMock
+    ) -> None:
+        """A denied delete must not be reported as a successful one.
+
+        This replaces a test that asserted the opposite. Swallowing every
+        `ClientError` meant a bucket policy without `s3:DeleteObject`
+        turned the purge into a silent no-op, the row went away, the blob
+        stayed, and nothing was logged.
+        """
+        mock_s3_client.delete_object.side_effect = _client_error(
+            "AccessDenied", "DeleteObject"
+        )
+
+        with pytest.raises(ClientError):
+            await delete_object(object_key="uploads/abc123")
+
+    @pytest.mark.asyncio
+    async def test_delete_object_raises_on_an_unexpected_error(
+        self, mock_s3_client: MagicMock
+    ) -> None:
+        """Any other failure surfaces too, rather than reading as success."""
+        mock_s3_client.delete_object.side_effect = _client_error(
+            "InternalError", "DeleteObject"
+        )
+
+        with pytest.raises(ClientError):
+            await delete_object(object_key="uploads/abc123")
