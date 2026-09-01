@@ -28,6 +28,14 @@ class FileServiceError(Exception):
     """Base exception for file service operations."""
 
 
+class FileTooLargeError(FileServiceError):
+    """Raised when an upload exceeds `MAX_UPLOAD_SIZE`.
+
+    Separate from the base error so the route can answer 413 rather than
+    letting an oversized upload read as a server fault.
+    """
+
+
 class FileService:
     """Service for file upload, download, and lifecycle management."""
 
@@ -78,8 +86,9 @@ class FileService:
             buffer.extend(chunk)
             hash_sha256.update(chunk)
             if len(buffer) > MAX_UPLOAD_SIZE:
-                raise FileServiceError(
-                    f"File exceeds maximum size of {MAX_UPLOAD_SIZE} bytes"
+                raise FileTooLargeError(
+                    f"File is too large. The maximum upload size is "
+                    f"{MAX_UPLOAD_SIZE} bytes."
                 )
         content = bytes(buffer)
         content_hash = hash_sha256.hexdigest()
