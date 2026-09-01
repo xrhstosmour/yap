@@ -61,8 +61,8 @@ class TestCreateFlag:
         service.repository.create = AsyncMock(return_value=flag)
 
         with patch(
-            "app.services.feature_flag_service.ff.sync_to_redis", new_callable=AsyncMock
-        ) as mock_sync:
+            "app.services.feature_flag_service.ff.refresh_cache", new_callable=AsyncMock
+        ) as mock_refresh:
             result = await service.create_flag(
                 FeatureFlagCreate(name="test_flag", state=True, description="Test flag")
             )
@@ -74,7 +74,7 @@ class TestCreateFlag:
         service.repository.create.assert_awaited_once_with(
             {"name": "test_flag", "state": True, "description": "Test flag"}
         )
-        mock_sync.assert_awaited_once_with("test_flag", True)
+        mock_refresh.assert_awaited_once_with("test_flag")
 
     @pytest.mark.asyncio
     async def test_create_flag_duplicate_name_raises(
@@ -146,15 +146,15 @@ class TestUpdateFlag:
 
     @pytest.mark.asyncio
     async def test_update_flag_description(self, service: FeatureFlagService) -> None:
-        """Should update only the description and not sync to Redis."""
+        """Should update only the description and not touch the cache."""
         existing = _make_flag(name="test_flag", description="Old desc")
         updated = _make_flag(name="test_flag", description="New desc")
         service.repository.get_by_name = AsyncMock(return_value=existing)
         service.repository.update = AsyncMock(return_value=updated)
 
         with patch(
-            "app.services.feature_flag_service.ff.sync_to_redis", new_callable=AsyncMock
-        ) as mock_sync:
+            "app.services.feature_flag_service.ff.refresh_cache", new_callable=AsyncMock
+        ) as mock_refresh:
             result = await service.update_flag(
                 "test_flag",
                 FeatureFlagUpdate(description="New desc"),
@@ -166,7 +166,7 @@ class TestUpdateFlag:
         service.repository.update.assert_awaited_once_with(
             existing.id, {"description": "New desc"}
         )
-        mock_sync.assert_not_awaited()
+        mock_refresh.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_update_flag_not_found(self, service: FeatureFlagService) -> None:
@@ -186,21 +186,21 @@ class TestToggleFlag:
 
     @pytest.mark.asyncio
     async def test_toggle_flag_true_to_false(self, service: FeatureFlagService) -> None:
-        """Should toggle state from True to False and sync to Redis."""
+        """Should toggle state from True to False and drop the cache entry."""
         existing = _make_flag(name="test_flag", state=True)
         toggled = _make_flag(name="test_flag", state=False)
         service.repository.get_by_name = AsyncMock(return_value=existing)
         service.repository.update = AsyncMock(return_value=toggled)
 
         with patch(
-            "app.services.feature_flag_service.ff.sync_to_redis", new_callable=AsyncMock
-        ) as mock_sync:
+            "app.services.feature_flag_service.ff.refresh_cache", new_callable=AsyncMock
+        ) as mock_refresh:
             result = await service.toggle_flag("test_flag", False)
 
         assert result is not None
         assert result.state is False
         service.repository.get_by_name.assert_awaited_once_with("test_flag")
-        mock_sync.assert_awaited_once_with("test_flag", False)
+        mock_refresh.assert_awaited_once_with("test_flag")
 
 
 class TestDeleteFlag:
@@ -301,7 +301,7 @@ class TestFlagsAreDeploymentWide:
 
         with tenant_context(owner):
             with patch(
-                "app.services.feature_flag_service.ff.sync_to_redis",
+                "app.services.feature_flag_service.ff.refresh_cache",
                 new_callable=AsyncMock,
             ):
                 await service.create_flag(
@@ -310,7 +310,7 @@ class TestFlagsAreDeploymentWide:
 
         with tenant_context(stranger):
             with patch(
-                "app.services.feature_flag_service.ff.sync_to_redis",
+                "app.services.feature_flag_service.ff.refresh_cache",
                 new_callable=AsyncMock,
             ):
                 updated = await service.toggle_flag("editable_anywhere", True)
@@ -338,3 +338,111 @@ class TestFlagsAreDeploymentWide:
 
         assert result is False
         mock_remove.assert_not_awaited()
+
+
+class TestCacheIsInvalidatedNotPublished:
+    """A write must not publish an uncommitted state to the shared cache.
+
+    The repository only flushes, the commit happens in the session
+    dependency after the route returns. Pushing the new state to Redis and
+    to the in-memory cache from inside the service put a value the database
+    might never hold in front of every instance, and with no TTL on the key
+    it stayed there.
+    """
+
+    @pytest.mark.asyncio
+    async def test_create_drops_the_cache_entry(
+        self, service: FeatureFlagService
+    ) -> None:
+        """Creating a flag evicts the entry instead of writing the new state.
+
+        Args:
+            service: Feature flag service with a mocked repository.
+        """
+        service.repository.name_exists = AsyncMock(return_value=False)
+        service.repository.create = AsyncMock(return_value=_make_flag(state=True))
+
+        with (
+            patch(
+                "app.services.feature_flag_service.ff.refresh_cache",
+                new_callable=AsyncMock,
+            ) as mock_refresh,
+            patch(
+                "app.services.feature_flag_service.ff.sync_to_redis",
+                new_callable=AsyncMock,
+            ) as mock_sync,
+        ):
+            await service.create_flag(FeatureFlagCreate(name="test_flag", state=True))
+
+        mock_refresh.assert_awaited_once_with("test_flag")
+        mock_sync.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_state_change_drops_the_cache_entry(
+        self, service: FeatureFlagService
+    ) -> None:
+        """Changing state evicts the entry instead of writing the new state.
+
+        Args:
+            service: Feature flag service with a mocked repository.
+        """
+        existing = _make_flag(name="test_flag", state=False)
+        service.repository.get_by_name = AsyncMock(return_value=existing)
+        service.repository.update = AsyncMock(
+            return_value=_make_flag(name="test_flag", state=True)
+        )
+
+        with (
+            patch(
+                "app.services.feature_flag_service.ff.refresh_cache",
+                new_callable=AsyncMock,
+            ) as mock_refresh,
+            patch(
+                "app.services.feature_flag_service.ff.sync_to_redis",
+                new_callable=AsyncMock,
+            ) as mock_sync,
+        ):
+            await service.toggle_flag("test_flag", True)
+
+        mock_refresh.assert_awaited_once_with("test_flag")
+        mock_sync.assert_not_awaited()
+
+    @pytest.mark.anyio
+    async def test_rolled_back_create_leaves_no_cached_state(
+        self, session: AsyncSession
+    ) -> None:
+        """A create that never commits must not leave the flag enabled.
+
+        Args:
+            session: Async database session fixture.
+        """
+        from app.core.feature_flags import _in_memory_cache
+        from app.core.feature_flags import feature_enabled
+
+        name = f"rolled_back_{uuid4().hex}"
+        service = FeatureFlagService(session)
+
+        redis_store: dict[str, str] = {}
+
+        class _FakeRedis:
+            async def get(self, key: str) -> str | None:
+                return redis_store.get(key)
+
+            async def set(self, key: str, value: str, ex: int | None = None) -> None:
+                redis_store[key] = value
+
+            async def delete(self, key: str) -> None:
+                redis_store.pop(key, None)
+
+        with patch("app.core.feature_flags._get_redis", return_value=_FakeRedis()):
+            with tenant_context(uuid4()):
+                await service.create_flag(FeatureFlagCreate(name=name, state=True))
+
+            # The write is flushed but not committed. This is what the
+            # session dependency does when anything later in the request
+            # raises.
+            await session.rollback()
+
+            assert name not in _in_memory_cache
+            assert redis_store.get(f"feature_flags:{name}") is None
+            assert await feature_enabled(name) is False

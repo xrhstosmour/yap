@@ -144,7 +144,12 @@ class FeatureFlagService:
                 }
             )
 
-        await ff.sync_to_redis(data.name, data.state)
+        # Invalidate rather than publish. The repository has only flushed at
+        # this point, the commit happens after the route returns, so pushing
+        # `data.state` here would put a state the database may never hold in
+        # front of every instance. Dropping the entry costs one database read
+        # on the next lookup and is correct whichever way the transaction goes.
+        await ff.refresh_cache(data.name)
         logger.info("feature_flag_created", name=data.name, state=data.state)
         return flag
 
@@ -176,7 +181,7 @@ class FeatureFlagService:
             if updated is None:
                 return None
             if data.state is not None:
-                await ff.sync_to_redis(name, data.state)
+                await ff.refresh_cache(name)
             logger.info("feature_flag_updated", name=name, changes=update_data)
             return updated
 
