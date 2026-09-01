@@ -286,6 +286,76 @@ def namespace_compose_file(compose_path: str, project_slug: str) -> None:
     Path(compose_path).write_text("\n".join(output) + "\n")
 
 
+TRAEFIK_PASSWORD_KEY = "TRAEFIK_DASHBOARD_PASSWORD"
+
+
+def read_environment_value(key: str, path: str) -> str:
+    """Read a single `KEY=value` out of an env file.
+
+    Args:
+        key: The variable name to look for.
+        path: The env file to read.
+
+    Returns:
+        The value, or an empty string when the file or key is absent.
+    """
+    if not os.path.isfile(path):
+        return ""
+
+    for line in Path(path).read_text().splitlines():
+        if line.startswith(f"{key}="):
+            return line.split("=", 1)[1].strip().strip('"')
+    return ""
+
+
+def traefik_dashboard_password(project_slug: str) -> str:
+    """Return the dashboard password, reusing one that is already set.
+
+    Reused rather than regenerated so a `copier update`, which re-vendors
+    the containers directory and so resets `.htpasswd` to its placeholder,
+    does not silently rotate the password out from under whoever is using
+    it.
+
+    Args:
+        project_slug: Used as the prefix of a freshly generated password.
+
+    Returns:
+        The existing password if there is one, otherwise a new one.
+    """
+    for path in (".env", ".env.example"):
+        existing = read_environment_value(TRAEFIK_PASSWORD_KEY, path)
+        if existing and not existing.startswith("your-"):
+            return existing
+
+    return project_slug + "-" + os.urandom(8).hex()
+
+
+def store_traefik_dashboard_password(password: str) -> None:
+    """Persist the plaintext password so somebody can actually log in.
+
+    Written to `.env` when it exists, and to `.env.example` otherwise,
+    since `assemble.py` runs before `setup.sh` creates `.env` on a first
+    generation. `setup.sh` copies `.env.example` across and then scrubs it,
+    so the value lands in `.env` either way and never stays in the
+    committed file.
+
+    Args:
+        password: The plaintext to record.
+    """
+    for path in (".env", ".env.example"):
+        if not os.path.isfile(path):
+            continue
+
+        lines = Path(path).read_text().splitlines()
+        for index, line in enumerate(lines):
+            if line.startswith(f"{TRAEFIK_PASSWORD_KEY}="):
+                lines[index] = f"{TRAEFIK_PASSWORD_KEY}={password}"
+                break
+        else:
+            lines.append(f"{TRAEFIK_PASSWORD_KEY}={password}")
+        Path(path).write_text("\n".join(lines) + "\n")
+
+
 def main() -> None:
     containers_directory = "containers"
     services = read_services(containers_directory)
@@ -358,14 +428,18 @@ def main() -> None:
                 print(f"  Renaming {src_path} -> {dst_path}")
                 os.rename(src_path, dst_path)
 
-    # Generate htpasswd for Traefik dashboard basic auth.
+    # Generate htpasswd for Traefik dashboard basic auth. The plaintext is
+    # kept in .env alongside every other generated credential: it used to be
+    # created here, hashed, and dropped when the function returned, so the
+    # dashboard was protected by a password that had never existed anywhere
+    # a person could read it.
     for root, _, files in os.walk(containers_directory):
         for f in files:
             if f == ".htpasswd":
                 htpasswd_path = os.path.join(root, f)
                 with open(htpasswd_path) as hf:
                     if "encoded_password" in hf.read():
-                        password = project_slug + "-" + os.urandom(4).hex()
+                        password = traefik_dashboard_password(project_slug)
                         result = subprocess.run(
                             ["openssl", "passwd", "-6", password],
                             capture_output=True,
@@ -374,7 +448,12 @@ def main() -> None:
                         if result.returncode == 0:
                             with open(htpasswd_path, "w") as hf:
                                 hf.write(f"admin:{result.stdout.strip()}\n")
-                            print("  Generated htpasswd")
+                            store_traefik_dashboard_password(password)
+                            print(
+                                "  Generated htpasswd, dashboard login is "
+                                "'admin' with TRAEFIK_DASHBOARD_PASSWORD "
+                                "from .env"
+                            )
                         else:
                             print(
                                 "  Warning: openssl not available, "
