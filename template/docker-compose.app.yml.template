@@ -13,6 +13,13 @@ networks:
   internal:
     name: "{{ project_slug }}-internal"
 
+{%- if not include_redbeat %}
+
+volumes:
+  celery-beat-schedule:
+    name: "{{ project_slug }}-celery-beat-schedule"
+{%- endif %}
+
 services:
   app:
     build:
@@ -83,7 +90,15 @@ services:
 {%- if include_redbeat %}
     command: ["celery", "-A", "app.celery_app", "beat", "-S", "redbeat.RedBeatScheduler", "-l", "info"]
 {%- else %}
-    command: ["celery", "-A", "app.celery_app", "beat", "--loglevel=info"]
+    # `--schedule` is explicit because the default writes `celerybeat-schedule`
+    # into the working directory, and `/app` is root-owned while the container
+    # runs as `appuser`. Beat died on startup with
+    # `PermissionError: [Errno 13] Permission denied: 'celerybeat-schedule'`,
+    # so no periodic task ever ran. The volume keeps the schedule across
+    # restarts, which is the point of the persistent scheduler.
+    command: ["celery", "-A", "app.celery_app", "beat", "--loglevel=info", "--schedule", "/var/lib/celery/celerybeat-schedule"]
+    volumes:
+      - "celery-beat-schedule:/var/lib/celery"
 {%- endif %}
     env_file:
       - ".env"
