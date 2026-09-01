@@ -240,9 +240,21 @@ if ! git rev-parse --git-dir >/dev/null 2>&1; then
     TEMP_GIT=true
 fi
 
-# Ensure a stale /tmp/containers from a previous run does not block the old
-# template version's assemble.py from cloning fresh.
-python3 -c "import shutil; shutil.rmtree('/tmp/containers', ignore_errors=True)"
+# Ensure a stale cache from a previous run does not block assemble.py from
+# cloning fresh. Both paths are cleared: the old shared `/tmp/containers`,
+# which the template used before the cache moved per-user, and the current
+# one, since the version of assemble.py that runs here is whichever the
+# project is still on.
+python3 - <<'PY'
+import os
+import shutil
+
+cache = os.environ.get("XDG_CACHE_HOME") or os.path.join(
+    os.path.expanduser("~"), ".cache"
+)
+for path in ("/tmp/containers", os.path.join(cache, "yap", "containers")):
+    shutil.rmtree(path, ignore_errors=True)
+PY
 
 # Sync mode: the setup.sh task only ensures .env and skips services/migrations,
 # so a template synchronize never requires Docker or a live database.
