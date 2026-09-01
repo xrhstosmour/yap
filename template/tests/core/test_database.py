@@ -149,6 +149,87 @@ class TestDatabaseURI:
         # We verify that the URI points at the correct host and port.
         assert "://" in uri and "localhost" in uri and "5432" in uri
 
+    @pytest.mark.parametrize(
+        "password",
+        ["pa/ss", "pa#ss", "pa?ss", "pa%ss", "p@ss", "p:ss", "pa ss"],
+    )
+    def test_database_uri_survives_a_password_with_reserved_characters(
+        self, password: str
+    ) -> None:
+        """A reserved character in the password must not break the URL.
+
+        `PostgresDsn.build` escapes `@` and `:` but interpolates `/`, `#`,
+        `?` and `%` raw. The first three failed URL parsing outright, so the
+        application could not start at all, and `%` produced a malformed
+        escape that decoded to something other than the real password.
+
+        Args:
+            password: A password holding one reserved character.
+        """
+        from urllib.parse import unquote
+
+        from app.core.settings import Settings
+
+        s = Settings(
+            SECRET_KEY="test-secret-key-for-testing-only",
+            POSTGRESQL_PASSWORD=password,
+            FIRST_SUPERUSER_PASSWORD="test-password",
+            RABBITMQ_PASSWORD="test-password",
+            CRYPTO_KEY="test-crypto-key",
+            GOOGLE_CLIENT_SECRET="test-secret",
+            SMTP_PASSWORD="test-smtp-pass",
+            STORAGE_SECRET_KEY="test-storage-key",
+            POSTGRESQL_USER="myuser",
+            POSTGRESQL_DATABASE="mydb",
+            POSTGRESQL_SERVER="myhost",
+            POSTGRESQL_PORT=5433,
+        )
+
+        uri = str(s.DATABASE_URI)
+        userinfo = uri.split("//", 1)[1].split("@" + "myhost")[0]
+        assert unquote(userinfo.split(":", 1)[1]) == password
+        assert "myhost" in uri
+        assert "mydb" in uri
+
+    def test_database_uri_is_usable_as_an_alembic_option(self) -> None:
+        """The built URL must survive `Config.set_main_option`.
+
+        Alembic writes it through configparser, which reads a bare `%` as
+        the start of an interpolation. Percent-encoding the password, which
+        any reserved character now triggers, made every migration die with
+        `ValueError: invalid interpolation syntax`.
+        """
+        from alembic.config import Config
+
+        from app.core.settings import Settings
+
+        s = Settings(
+            SECRET_KEY="test-secret-key-for-testing-only",
+            POSTGRESQL_PASSWORD="pa/ss",
+            FIRST_SUPERUSER_PASSWORD="test-password",
+            RABBITMQ_PASSWORD="test-password",
+            CRYPTO_KEY="test-crypto-key",
+            GOOGLE_CLIENT_SECRET="test-secret",
+            SMTP_PASSWORD="test-smtp-pass",
+            STORAGE_SECRET_KEY="test-storage-key",
+            POSTGRESQL_USER="myuser",
+            POSTGRESQL_DATABASE="mydb",
+            POSTGRESQL_SERVER="myhost",
+            POSTGRESQL_PORT=5433,
+        )
+
+        url = str(s.DATABASE_URI)
+        assert "%" in url, "the encoded password should carry a percent escape"
+
+        # The raw URL is what `migrations/env.py` used to hand over.
+        with pytest.raises(ValueError, match="interpolation"):
+            Config().set_main_option("sqlalchemy.url", url)
+
+        # Doubling it, as `migrations/env.py` now does, reads back unchanged.
+        config = Config()
+        config.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
+        assert config.get_main_option("sqlalchemy.url") == url
+
     def test_database_uri_includes_ssl_query_params(self) -> None:
         """DATABASE_URI appends sslmode and other SSL query parameters."""
         from app.core.settings import Settings
