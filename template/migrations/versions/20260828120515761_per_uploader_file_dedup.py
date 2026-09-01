@@ -6,10 +6,11 @@ for the same reason it narrowed the global one: a row carries a single
 first one's filename, visibility and file ID, and a reference they can
 never release.
 
-Existing data trivially satisfies the new constraint. It is strictly
-weaker than the one it replaces, every pair unique on
-`(tenant_id, content_hash)` is unique on the triple as well, so no
-backfill is needed.
+This is the constraint the final schema actually carries. The two
+stricter ones on the way here are no longer enforced, so a database
+whose data is legal at head reaches head instead of aborting partway.
+Data that genuinely violates this triple still fails, here, which is
+the correct place for it to fail.
 
 Revision ID: 20260828120515761
 Revises: 20260812103128195
@@ -30,7 +31,11 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.drop_constraint("uq_files_tenant_id_content_hash", "files", type_="unique")
+    # `IF EXISTS` because `20260812103128195` no longer creates it. Databases
+    # migrated before that change still carry it and still need it dropped.
+    op.execute(
+        "ALTER TABLE files DROP CONSTRAINT IF EXISTS uq_files_tenant_id_content_hash"
+    )
     op.create_unique_constraint(
         "uq_files_tenant_id_uploaded_by_content_hash",
         "files",
