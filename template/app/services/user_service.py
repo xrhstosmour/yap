@@ -115,10 +115,15 @@ class UserService:
             filters["role"] = role
 
         if search:
+            # `filters` goes through here too. It used to be built above and
+            # then dropped on this branch, so `?search=x&is_active=false`
+            # quietly ignored `is_active` and returned active users as well.
+            # An admin filtering a list has no way to see that happen.
             return await self.user_repository.search(
                 search,
                 skip=skip,
                 limit=limit,
+                filters=filters or None,
             )
 
         users, total = await self.user_repository.list(

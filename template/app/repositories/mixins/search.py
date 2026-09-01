@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlmodel import and_
 from sqlmodel import func
 from sqlmodel import or_
 from sqlmodel import select
@@ -28,6 +29,30 @@ class SearchMixin:
     ``self._apply_tenant_filter()``, and ``self._apply_soft_delete_filter()``.
     """
 
+    def _apply_search_filters(self, query, filters: dict[str, Any] | None):  # noqa: ANN001, ANN202
+        """Apply equality filters to a search query.
+
+        Mirrors `BaseRepository.list`: only real model attributes are
+        considered, and a `None` value means "not filtering on this",
+        not "match NULL".
+
+        Args:
+            query: The select to narrow.
+            filters: Field/value pairs to require.
+
+        Returns:
+            The query, narrowed if there was anything to narrow by.
+        """
+        if not filters:
+            return query
+
+        conditions = [
+            getattr(self.model, field) == value
+            for field, value in filters.items()
+            if value is not None and hasattr(self.model, field)
+        ]
+        return query.where(and_(*conditions)) if conditions else query
+
     async def search_fts(
         self,
         query_str: str,
@@ -36,6 +61,7 @@ class SearchMixin:
         skip: int = 0,
         limit: int = 20,
         include_deleted: bool = False,
+        filters: dict[str, Any] | None = None,
     ) -> tuple[list[Any], int]:
         """Search records with PostgreSQL full-text search conditions.
 
@@ -46,6 +72,7 @@ class SearchMixin:
             skip: Number of matching rows to skip.
             limit: Maximum number of rows to return.
             include_deleted: Whether to include soft-deleted rows.
+            filters: Field/value pairs to require alongside the search.
 
         Returns:
             Tuple containing matched records and total count.
@@ -80,6 +107,8 @@ class SearchMixin:
         count_query = self._apply_tenant_filter(count_query)
         query = self._apply_soft_delete_filter(query, include_deleted)
         count_query = self._apply_soft_delete_filter(count_query, include_deleted)
+        query = self._apply_search_filters(query, filters)
+        count_query = self._apply_search_filters(count_query, filters)
 
         count_result = await self.session.execute(count_query)
         total = count_result.scalar() or 0
@@ -98,6 +127,7 @@ class SearchMixin:
         skip: int = 0,
         limit: int = 20,
         include_deleted: bool = False,
+        filters: dict[str, Any] | None = None,
     ) -> tuple[list[Any], int]:
         """Search records with trigram similarity conditions.
 
@@ -108,6 +138,7 @@ class SearchMixin:
             skip: Number of matching rows to skip.
             limit: Maximum number of rows to return.
             include_deleted: Whether to include soft-deleted rows.
+            filters: Field/value pairs to require alongside the search.
 
         Returns:
             Tuple containing matched records and total count.
@@ -135,6 +166,8 @@ class SearchMixin:
         count_query = self._apply_tenant_filter(count_query)
         query = self._apply_soft_delete_filter(query, include_deleted)
         count_query = self._apply_soft_delete_filter(count_query, include_deleted)
+        query = self._apply_search_filters(query, filters)
+        count_query = self._apply_search_filters(count_query, filters)
 
         count_result = await self.session.execute(count_query)
         total = count_result.scalar() or 0
@@ -155,6 +188,7 @@ class SearchMixin:
         skip: int = 0,
         limit: int = 20,
         include_deleted: bool = False,
+        filters: dict[str, Any] | None = None,
     ) -> tuple[list[Any], int]:
         """Dispatch search to FTS or trigram based on query length.
 
@@ -167,6 +201,7 @@ class SearchMixin:
             skip: Number of matching rows to skip.
             limit: Maximum number of rows to return.
             include_deleted: Whether to include soft-deleted rows.
+            filters: Field/value pairs to require alongside the search.
 
         Returns:
             Tuple containing matched records and total count.
@@ -180,6 +215,7 @@ class SearchMixin:
                 skip=skip,
                 limit=limit,
                 include_deleted=include_deleted,
+                filters=filters,
             )
 
         return await self.search_fts(
@@ -189,4 +225,5 @@ class SearchMixin:
             skip=skip,
             limit=limit,
             include_deleted=include_deleted,
+            filters=filters,
         )

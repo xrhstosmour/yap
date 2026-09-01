@@ -391,3 +391,78 @@ class TestUserRepository:
             found = await repo.get_by_email("gone@example.com")
 
         assert found is None
+
+
+class TestSearchNarrowsByFilters:
+    """A filter passed alongside a search must actually narrow the result.
+
+    `UserService.list_users` built `filters` from `is_active` and `role`
+    and then dropped them on the search branch, because
+    `UserRepository.search` had nowhere to put them. So
+    `?search=x&is_active=false` returned active users too, with nothing
+    in the response to show the filter had been ignored.
+    """
+
+    @pytest.fixture
+    def anyio_backend(self) -> str:
+        """Provide the asyncio backend for anyio-marked tests.
+
+        Returns:
+            The backend name.
+        """
+        return "asyncio"
+
+    @pytest.mark.anyio
+    async def test_search_applies_an_is_active_filter(
+        self, monkeypatch: pytest.MonkeyPatch, session: AsyncSession
+    ) -> None:
+        """Only the inactive match may come back, and the count must agree.
+
+        Args:
+            monkeypatch: Pytest monkeypatch fixture.
+            session: Async database session fixture.
+        """
+        from app.repositories.mixins import search as search_mod
+
+        monkeypatch.setattr(
+            search_mod,
+            "build_fts_condition",
+            lambda col, query_str, language=None: col.contains(query_str),
+        )
+        monkeypatch.setattr(
+            search_mod,
+            "build_trigram_condition",
+            lambda col, query_str, threshold=None: col.contains(query_str),
+        )
+        monkeypatch.setattr(
+            search_mod,
+            "fts_rank_expr",
+            lambda col, query_str, language=None: literal(0),
+        )
+        monkeypatch.setattr(
+            search_mod,
+            "choose_mode",
+            lambda query_str, min_fts_length=3: (search_mod.SearchMode.FTS, query_str),
+        )
+
+        repo = UserRepository(session)
+        with system_context():
+            await repo.create_user(
+                email="active-smith@example.com",
+                password_hash="hash",
+                full_name="Active Smith",
+            )
+            inactive = await repo.create_user(
+                email="inactive-smith@example.com",
+                password_hash="hash",
+                full_name="Inactive Smith",
+            )
+            await repo.update(inactive.id, {"is_active": False})
+
+            unfiltered, unfiltered_total = await repo.search("Smith")
+            assert unfiltered_total == 2
+
+            users, total = await repo.search("Smith", filters={"is_active": False})
+
+            assert total == 1, [user.full_name for user in users]
+            assert [user.full_name for user in users] == ["Inactive Smith"]
