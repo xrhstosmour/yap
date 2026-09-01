@@ -341,12 +341,37 @@ elif command -v docker >/dev/null 2>&1; then
         done
 
         # Wait for containers to report healthy status.
+        #
+        # Read through `--format` rather than by column position. The old
+        # `awk '$5'` over the table landed on the CREATED column ("13 seconds
+        # ago"), so `$5` was a number, never matched "healthy" or "running",
+        # and the loop always ran its full 30 iterations. That made this a
+        # flat 60-second sleep that gated on nothing and reported nothing.
+        #
+        # A service counts as ready when it is running and either passes its
+        # healthcheck or does not define one, which is what an empty Health
+        # field means.
         info "Waiting for services to become healthy..."
+        services_ready=false
         for _ in $(seq 1 30); do
-            unhealthy=$(docker compose ps 2>/dev/null | awk 'NR>1 && $5!="healthy" && $5!="running"' | wc -l || echo 0)
-            if [ "$unhealthy" -eq 0 ]; then break; fi
+            pending=$(docker compose ps --format '{{.State}}|{{.Health}}' 2>/dev/null \
+                | awk -F'|' 'NF && !($1 == "running" && ($2 == "" || $2 == "healthy"))' \
+                | wc -l | tr -d ' ')
+            if [ "${pending:-1}" -eq 0 ]; then
+                services_ready=true
+                break
+            fi
             sleep 2
         done
+
+        if [ "$services_ready" != true ]; then
+            warn "Some services are not healthy:"
+            docker compose ps --format '{{.Service}}|{{.State}}|{{.Health}}' 2>/dev/null \
+                | awk -F'|' 'NF && !($2 == "running" && ($3 == "" || $3 == "healthy"))' \
+                | while IFS='|' read -r name state health; do
+                    warn "  ${name}: ${state} ${health}"
+                done
+        fi
     else
         warn "Skipping migrations and seeding..."
     fi
