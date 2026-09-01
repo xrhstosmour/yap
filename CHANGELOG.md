@@ -51,6 +51,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Move the vendored containers cache out of `/tmp/containers` and verify it against the pinned commit, the path was fixed under a world-writable directory and reused on existence alone, so any local user could plant compose files a project then ran, and a bumped `REPO_COMMIT` was silently ignored on any machine that had assembled before
 - Stop the file dedup migrations aborting an upgrade on data the final schema accepts, the chain enforced a global unique `content_hash` and then a `(tenant_id, content_hash)` constraint on the way to a schema that only requires `(tenant_id, uploaded_by, content_hash)`, so two tenants holding the same file stranded the database partway through with no way forward, only the final constraint is enforced now
 - Stop `OpenTelemetry` printing every span to stdout in staging and production, a multi-line JSON span landed in the middle of the one-object-per-line log stream and broke any shipper parsing it
 - Configure logging before the lifespan's first log line, `application_starting` went out through `structlog`'s default console renderer, so in production it appeared as coloured text among the JSON with no correlation ID and no service context
