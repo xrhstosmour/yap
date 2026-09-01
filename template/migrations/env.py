@@ -17,7 +17,14 @@ target_metadata = SQLModel.metadata
 # Respect an externally injected URL such as the test harness targeting a
 # per-worker database. Otherwise fall back to the application settings.
 if not config.get_main_option("sqlalchemy.url"):
-    config.set_main_option("sqlalchemy.url", str(settings.DATABASE_URI))
+    # `set_main_option` writes through configparser, which treats `%` as the
+    # start of an interpolation. A percent-encoded credential, which is what
+    # any password holding a reserved character produces, raised
+    # `ValueError: invalid interpolation syntax` and killed every migration.
+    # Doubling it is the documented escape and reads back unchanged.
+    config.set_main_option(
+        "sqlalchemy.url", str(settings.DATABASE_URI).replace("%", "%%")
+    )
 
 
 def run_migrations_offline() -> None:

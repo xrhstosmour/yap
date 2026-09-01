@@ -12,6 +12,7 @@ from typing import Annotated
 from typing import Any
 from typing import Literal
 from typing import Self
+from urllib.parse import quote
 from urllib.parse import urlsplit
 
 from pydantic import AnyUrl
@@ -173,8 +174,8 @@ class Settings(BaseSettings):
             query = "&".join(f"{k}={v}" for k, v in query_params.items())
         return PostgresDsn.build(
             scheme="postgresql+psycopg",
-            username=self.POSTGRESQL_USER,
-            password=self.POSTGRESQL_PASSWORD,
+            username=quote(self.POSTGRESQL_USER, safe=""),
+            password=quote(self.POSTGRESQL_PASSWORD, safe=""),
             host=self.POSTGRESQL_SERVER,
             port=self.POSTGRESQL_PORT,
             path=self.POSTGRESQL_ADDITIONAL_DATABASE,
@@ -200,10 +201,15 @@ class Settings(BaseSettings):
         if query_params:
             query = "&".join(f"{k}={v}" for k, v in query_params.items())
 
+        # Percent-encode the credentials. `PostgresDsn.build` escapes `@`
+        # and `:` but interpolates `/`, `#`, `?` and `%` raw, so a password
+        # holding any of the first three failed URL parsing outright and the
+        # application could not start, while a `%` produced a malformed
+        # escape that later consumers decoded to something else.
         return PostgresDsn.build(
             scheme="postgresql+psycopg",
-            username=self.POSTGRESQL_USER,
-            password=self.POSTGRESQL_PASSWORD,
+            username=quote(self.POSTGRESQL_USER, safe=""),
+            password=quote(self.POSTGRESQL_PASSWORD, safe=""),
             host=self.POSTGRESQL_SERVER,
             port=self.POSTGRESQL_PORT,
             path=self.POSTGRESQL_DATABASE,
