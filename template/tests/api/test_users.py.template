@@ -86,6 +86,45 @@ class TestUsersList:
         assert "link" in response.headers
         assert response.headers["link"].startswith("<")
 
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_unknown_role_is_rejected(
+        self, client: AsyncClient, session: AsyncSession
+    ) -> None:
+        """An unknown `?role=` is a bad request, not a server error."""
+        auth_service = _auth_service(session)
+        superuser = await _create_superuser(auth_service)
+        token = create_access_token(subject=superuser.id)
+
+        response = await client.get(
+            "/api/v1/users",
+            params={"role": "admin"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 422
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_known_role_still_filters(
+        self, client: AsyncClient, session: AsyncSession
+    ) -> None:
+        """A valid `?role=` still narrows the list."""
+        auth_service = _auth_service(session)
+        await auth_service.register(
+            RegisterRequest(email="user@{{ project_slug }}.com", password="password123")
+        )
+        superuser = await _create_superuser(auth_service)
+        token = create_access_token(subject=superuser.id)
+
+        response = await client.get(
+            "/api/v1/users",
+            params={"role": UserRole.SUPERUSER.value},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        roles = {user["role"] for user in response.json()["data"]}
+        assert roles == {UserRole.SUPERUSER.value}
+
 
 class TestUsersRead:
     """Tests for GET /api/v1/users/{user_id}."""

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
+from typing import Literal
 from uuid import UUID
 
 from pydantic import Field
@@ -60,6 +61,13 @@ class TenantListParameters(PaginationParameters):
 
     is_active: bool | None = Field(default=None, description="Filter by active status")
     search: str | None = Field(default=None, description="Search in name/slug")
+    # Narrowed from the inherited free-form `str`. Any attribute name used to
+    # reach `getattr(Tenant, sort_by)`, and `metadata` resolves on every
+    # SQLModel class, so `?sort_by=metadata` handed SQLAlchemy's `MetaData`
+    # object to `order_by` and returned a 500.
+    sort_by: Literal["name", "slug", "is_active", "created_at", "updated_at"] | None = (
+        Field(default=None, description="Column to sort by")
+    )
 
 
 class TenantListResponse(PaginatedResponse[TenantResponse]):
