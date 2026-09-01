@@ -51,6 +51,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Point the container `HEALTHCHECK` at `/ready` instead of `/live`, Docker's health status is what `depends_on: service_healthy` waits on, and `/live` answers `200` for as long as the process is up, so a container that could not reach its database reported healthy and was handed traffic
 - Bind the app's published port to loopback by default, `8000:8000` published on `0.0.0.0`, so with `Traefik` in front the app was still reachable directly in plaintext from anywhere that could route to the host, skipping the proxy's TLS and its middleware, override `APP_BIND_ADDRESS` to publish deliberately
 - Gate `setup.sh` on real container health, the readiness loop read `docker compose ps` by column position and landed on `CREATED`, so every container looked pending, the loop always ran its full thirty iterations, and setup ended with a flat sixty-second sleep that checked nothing and reported nothing
 - Record the generated `Traefik` dashboard password in `.env` instead of discarding it, `assemble.py` hashed it into `.htpasswd` and let the plaintext go out of scope, so the dashboard was protected by a password nobody could ever know, and it is now reused rather than rotated on every re-assemble
