@@ -6,6 +6,7 @@ user-related database operations.
 
 from __future__ import annotations
 
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import update
@@ -102,6 +103,7 @@ class UserRepository(SearchMixin, BaseRepository[User]):
         query_str: str,
         skip: int = 0,
         limit: int = 20,
+        filters: dict[str, Any] | None = None,
     ) -> tuple[list[User], int]:
         """Search users by name.
 
@@ -116,6 +118,8 @@ class UserRepository(SearchMixin, BaseRepository[User]):
             query_str: Search query
             skip: Pagination offset
             limit: Maximum results
+            filters: Field/value pairs to require alongside the search,
+                the same shape `list()` takes.
 
         Returns:
             Tuple of (users, total_count)
@@ -125,6 +129,7 @@ class UserRepository(SearchMixin, BaseRepository[User]):
             fields=["full_name"],
             skip=skip,
             limit=limit,
+            filters=filters,
         )
 
         return users, total
