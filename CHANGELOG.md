@@ -51,6 +51,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Stop `copier copy` failing at its very last step when the template remote is unreachable, the version-recording task indexed straight into an empty `git ls-remote` result and the `IndexError` aborted an otherwise complete generation, it now keeps the placeholder and says so
 - Pin every `GitHub Actions` reference to a commit SHA in both the template's own workflow and the generated one, a tag can be repointed by whoever owns the action, so a compromised or simply retagged upstream would run in CI with its `GITHUB_TOKEN` without anything changing here
 - Make `FeatureFlagRepository.list_active` return every flag, it asked for `limit=1000` which `BaseRepository.list` clamps to a hundred, so it returned the first hundred and presented them as all of them
 - Remove the unregistered `TenantContextMiddleware` duplicate from `app/core/tenant.py`, the middleware that actually runs is the one in `main.py`
