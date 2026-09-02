@@ -51,6 +51,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fail open when `Redis` is unavailable to the rate limiter, it had no error handling at all while running on every authenticated request, so a `Redis` blip surfaced as a `500` across the whole API, and revocation already fails open for the same reason
 - Rotate refresh tokens atomically, the blacklist was checked and then written as two separate steps with the whole token mint in between, so two requests carrying the same refresh token both passed the check and both walked away with a fresh pair, and the reuse the blacklist exists to catch went unnoticed
 - Exclude the `slow` markers from a generated project's CI, matching the template's own, they drive real processes and the assembled compose stack that the workflow never stands up, so a new project's first push went red on `test_core_compose_services_running` before its author had written any code
 - Create `.env` and the reconstructed `.copier/.answers.yml` with mode `600`, `cp` and `cat >` left both world-readable under the default umask while they hold the JWT signing key, the `Fernet` key and every service password, and `.env` kept those permissions for the life of the project
