@@ -14,6 +14,8 @@ from unittest.mock import AsyncMock
 from unittest.mock import patch
 
 import pytest
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 
 # Import module BEFORE the autouse disable_rate_limit fixture in conftest
 # replaces check_user_rate_limit / check_api_key_rate_limit with no-ops.
@@ -319,3 +321,82 @@ async def test_check_api_key_rate_limit_forwards_identifier() -> None:
     with patch.object(_rl_mod.api_key_rate_limiter, "check_rate_limit", mock_check):
         await _original_check_api_key("api-key-xyz-789")
         mock_check.assert_awaited_once_with("api-key-xyz-789")
+
+
+class TestRateLimiterFailsOpen:
+    """A Redis outage must not take the authenticated API down with it.
+
+    `check_user_rate_limit` runs on every authenticated request and had no
+    error handling, so a Redis blip surfaced as a 500 across the whole API.
+    Revocation already fails open for exactly this reason, see
+    `is_token_blacklisted`.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "error",
+        [
+            RedisConnectionError("redis is down"),
+            RedisTimeoutError("redis timed out"),
+        ],
+    )
+    async def test_a_failing_command_allows_the_request(self, error: Exception) -> None:
+        """Redis is reachable but the command fails.
+
+        Args:
+            error: A failure the limiter may hit running its script.
+        """
+        broken = AsyncMock()
+        broken.eval = AsyncMock(side_effect=error)
+
+        with patch("app.core.rate_limit.get_redis", AsyncMock(return_value=broken)):
+            await _original_check_user("user-1")
+
+    @pytest.mark.asyncio
+    async def test_an_unavailable_client_allows_the_request(self) -> None:
+        """Redis cannot be reached at all, so `get_redis` itself raises."""
+        with patch(
+            "app.core.rate_limit.get_redis",
+            AsyncMock(side_effect=RuntimeError("Redis client not initialized")),
+        ):
+            await _original_check_user("user-1")
+
+    @pytest.mark.asyncio
+    async def test_the_auth_limiter_fails_open_too(self) -> None:
+        """Sign-in must not become impossible during a Redis outage."""
+        from fastapi import Request
+
+        from app.core.rate_limit import check_auth_rate_limit
+
+        broken = AsyncMock()
+        broken.eval = AsyncMock(side_effect=RedisConnectionError("redis is down"))
+
+        request = Request(
+            {
+                "type": "http",
+                "method": "POST",
+                "path": "/api/v1/auth/login",
+                "headers": [],
+                "client": ("203.0.113.5", 1234),
+            }
+        )
+
+        with patch("app.core.rate_limit.get_redis", AsyncMock(return_value=broken)):
+            await check_auth_rate_limit(request)
+
+    @pytest.mark.asyncio
+    async def test_a_reachable_redis_still_limits(self) -> None:
+        """Failing open must not mean never limiting."""
+        from app.core.rate_limit import RateLimiter
+
+        limiter = RateLimiter(requests_per_minute=1, key_prefix="ratelimit:test")
+
+        over_limit = AsyncMock()
+        over_limit.eval = AsyncMock(return_value=[1, 0, 30])
+
+        with patch("app.core.rate_limit.get_redis", AsyncMock(return_value=over_limit)):
+            allowed, remaining, retry_after = await limiter.check_rate_limit("user-1")
+
+        assert allowed is False
+        assert remaining == 0
+        assert retry_after > 0
