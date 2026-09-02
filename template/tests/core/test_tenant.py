@@ -4,20 +4,20 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
-from unittest.mock import AsyncMock
-from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
 
 from app.core.tenant import SystemContext
 from app.core.tenant import TenantContext
-from app.core.tenant import TenantContextMiddleware
 from app.core.tenant import get_current_tenant_id
 from app.core.tenant import is_system_access
 from app.core.tenant import set_current_tenant_id
 from app.core.tenant import system_context
 from app.core.tenant import tenant_context
+
+# Stands in for an authenticated caller's tenant.
+SCOPED_TENANT = uuid4()
 
 
 def test_get_current_tenant_id_defaults_to_none() -> None:
@@ -214,56 +214,106 @@ def test_system_context_independent_of_tenant_context() -> None:
         assert get_current_tenant_id() == tenant_id
 
 
-class TestTenantContextMiddleware:
-    """Tests for TenantContextMiddleware."""
+class TestTenantContextIsScopedToOneRequest:
+    """`tenant_middleware` in `main.py` looks dead and is not.
+
+    `request.state.tenant_id` is set by `get_current_user`, a dependency,
+    which runs downstream of every middleware. So the value the middleware
+    reads is always `None`, and the middleware appears to do nothing. What
+    it actually does is scope the tenant ContextVar to the request: without
+    the `with` block, the tenant one request's dependency set stays set for
+    the next request handled on the same task, and an unauthenticated
+    request inherits the previous caller's tenant.
+
+    An audit of this repository flagged the middleware as dead code. These
+    tests are what showed it was not.
+    """
+
+    @staticmethod
+    def _build(with_middleware: bool):  # noqa: ANN205
+        """Build a minimal app with and without the middleware under test.
+
+        Args:
+            with_middleware: Whether to register the tenant middleware.
+
+        Returns:
+            The configured application.
+        """
+        from collections.abc import Awaitable
+        from collections.abc import Callable
+
+        from fastapi import Depends
+        from fastapi import FastAPI
+        from fastapi import Request
+        from fastapi import Response
+
+        application = FastAPI()
+
+        if with_middleware:
+
+            @application.middleware("http")
+            async def tenant_middleware(
+                request: Request,
+                call_next: Callable[[Request], Awaitable[Response]],
+            ) -> Response:
+                tenant_id = getattr(request.state, "tenant_id", None)
+                with tenant_context(tenant_id):
+                    return await call_next(request)
+
+        # Mirrors what `get_current_user` does. Async on purpose: a sync
+        # dependency runs in a threadpool with its own context, which would
+        # hide the leak this is testing for.
+        async def authenticate() -> None:
+            set_current_tenant_id(SCOPED_TENANT)
+
+        @application.get("/authenticated", dependencies=[Depends(authenticate)])
+        async def authenticated() -> dict[str, str | None]:
+            current = get_current_tenant_id()
+            return {"tenant": str(current) if current else None}
+
+        @application.get("/anonymous")
+        async def anonymous() -> dict[str, str | None]:
+            current = get_current_tenant_id()
+            return {"tenant": str(current) if current else None}
+
+        return application
+
+    async def _observe(self, with_middleware: bool) -> tuple[str | None, str | None]:
+        """Make an authenticated request, then an anonymous one.
+
+        Args:
+            with_middleware: Whether to register the tenant middleware.
+
+        Returns:
+            The tenant each request observed.
+        """
+        from httpx import ASGITransport
+        from httpx import AsyncClient
+
+        application = self._build(with_middleware)
+        transport = ASGITransport(app=application)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            first = (await client.get("/authenticated")).json()["tenant"]
+            second = (await client.get("/anonymous")).json()["tenant"]
+        return first, second
 
     @pytest.mark.asyncio
-    async def test_sets_tenant_context_from_request_state(self) -> None:
-        """Middleware should set tenant context from request.state.tenant_id."""
-        tenant_id = uuid4()
-        request = MagicMock()
-        request.state.tenant_id = tenant_id
+    async def test_the_tenant_does_not_leak_into_the_next_request(self) -> None:
+        """With the middleware, each request starts clean."""
+        authenticated, anonymous = await self._observe(with_middleware=True)
 
-        observed: dict[str, object] = {}
-
-        async def call_next(_request) -> str:  # noqa: ANN001
-            observed["tenant_id"] = get_current_tenant_id()
-            return "response"
-
-        middleware = TenantContextMiddleware()
-        response = await middleware(request, call_next)
-
-        assert response == "response"
-        assert observed["tenant_id"] == tenant_id
-        # Context should be cleared again after the middleware returns.
-        assert get_current_tenant_id() is None
+        assert authenticated == str(SCOPED_TENANT)
+        assert anonymous is None
 
     @pytest.mark.asyncio
-    async def test_defaults_to_none_when_request_has_no_tenant_state(self) -> None:
-        """Middleware should default to None when request.state has no tenant_id."""
-        request = MagicMock(spec=["state"])
-        request.state = MagicMock(spec=[])
+    async def test_without_the_middleware_the_tenant_leaks(self) -> None:
+        """Removing it is a cross-tenant data leak, not a cleanup.
 
-        observed: dict[str, object] = {}
+        This is the test that makes the middleware's purpose legible. If it
+        ever starts passing with `anonymous is None`, the isolation moved
+        somewhere else and the middleware may genuinely be redundant.
+        """
+        authenticated, anonymous = await self._observe(with_middleware=False)
 
-        async def call_next(_request) -> str:  # noqa: ANN001
-            observed["tenant_id"] = get_current_tenant_id()
-            return "response"
-
-        middleware = TenantContextMiddleware()
-        await middleware(request, call_next)
-
-        assert observed["tenant_id"] is None
-
-    @pytest.mark.asyncio
-    async def test_calls_call_next_with_request(self) -> None:
-        """Middleware should forward the request to call_next."""
-        request = MagicMock()
-        request.state.tenant_id = None
-        call_next = AsyncMock(return_value="ok")
-
-        middleware = TenantContextMiddleware()
-        result = await middleware(request, call_next)
-
-        call_next.assert_awaited_once_with(request)
-        assert result == "ok"
+        assert authenticated == str(SCOPED_TENANT)
+        assert anonymous == str(SCOPED_TENANT)
