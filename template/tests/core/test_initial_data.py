@@ -9,6 +9,8 @@ from unittest.mock import MagicMock
 from unittest.mock import patch
 
 import pytest
+from sqlalchemy.engine import URL
+from sqlalchemy.engine import make_url
 
 from app.core import SYSTEM_TENANT_ID
 from app.models.user import UserRole
@@ -431,3 +433,125 @@ class TestSetupMetabase:
 
         inner.assert_called_once_with("secret")
         logger.error.assert_called_once()
+
+
+class TestAdminConnection:
+    """Tests the connection `_setup_metabase` opens to create the database.
+
+    `CREATE DATABASE` cannot run inside the database being created, so
+    provisioning reconnects to `postgres` first. That URL was derived with
+    `base_url.rsplit("/", 1)[0] + "/postgres"`, which throws away everything
+    after the last slash. With `POSTGRESQL_SSL_MODE` set that is the whole
+    query string, so the admin connection silently dropped TLS. With a
+    `sslrootcert` path the last slash is inside the path itself, so the
+    database was never switched and the certificate path was mangled.
+    """
+
+    APP_URI_PLAIN = "postgresql+psycopg://user:pass@host:5432/appdb"
+    APP_URI_SSL = "postgresql+psycopg://user:pass@host:5432/appdb?sslmode=require"
+    APP_URI_CERTIFICATE = (
+        "postgresql+psycopg://user:pass@host:5432/appdb"
+        "?sslmode=verify-full&sslrootcert=/etc/ssl/ca.pem"
+    )
+
+    @staticmethod
+    def _provision(application_uri: str) -> MagicMock:
+        """Run provisioning against a stubbed engine and return the factory.
+
+        Args:
+            application_uri: What `settings.DATABASE_URI` resolves to.
+
+        Returns:
+            The `create_engine` mock, carrying both calls it received.
+        """
+        from app.initial_data import _setup_metabase
+
+        effects: list[object] = [
+            None,
+            None,
+            None,
+            None,
+            None,
+            TestSetupMetabase._role_found(),
+        ]
+        engine_factory = TestSetupMetabase._make_engine_mock(effects)
+        settings_patch = patch(
+            "app.initial_data.settings",
+            MagicMock(
+                DATABASE_URI=application_uri,
+                POSTGRESQL_DATABASE="appdb",
+                POSTGRESQL_USER="app",
+            ),
+        )
+        with settings_patch, patch("app.initial_data.create_engine", engine_factory):
+            _setup_metabase("secret")
+
+        return engine_factory
+
+    def _admin_url(self, application_uri: str) -> URL:
+        """The URL provisioning uses for its administrative connection.
+
+        Args:
+            application_uri: What `settings.DATABASE_URI` resolves to.
+
+        Returns:
+            The parsed URL of the first `create_engine` call.
+        """
+        engine_factory = self._provision(application_uri)
+        return make_url(engine_factory.call_args_list[0].args[0])
+
+    @pytest.mark.parametrize(
+        "application_uri",
+        [APP_URI_PLAIN, APP_URI_SSL, APP_URI_CERTIFICATE],
+    )
+    def test_it_connects_to_the_maintenance_database(
+        self, application_uri: str
+    ) -> None:
+        """`CREATE DATABASE metabase` has to run from outside `appdb`.
+
+        Args:
+            application_uri: What `settings.DATABASE_URI` resolves to.
+        """
+        assert self._admin_url(application_uri).database == "postgres"
+
+    @pytest.mark.parametrize(
+        "application_uri",
+        [APP_URI_PLAIN, APP_URI_SSL, APP_URI_CERTIFICATE],
+    )
+    def test_the_connection_parameters_are_kept(self, application_uri: str) -> None:
+        """A cluster reachable only over TLS refuses the plaintext attempt.
+
+        Args:
+            application_uri: What `settings.DATABASE_URI` resolves to.
+        """
+        expected = dict(make_url(application_uri).query)
+
+        assert dict(self._admin_url(application_uri).query) == expected
+
+    @pytest.mark.parametrize(
+        "application_uri",
+        [APP_URI_PLAIN, APP_URI_SSL, APP_URI_CERTIFICATE],
+    )
+    def test_only_the_database_changes(self, application_uri: str) -> None:
+        """Host, port and credentials are the application's own.
+
+        Args:
+            application_uri: What `settings.DATABASE_URI` resolves to.
+        """
+        application_url = make_url(application_uri)
+        admin_url = self._admin_url(application_uri)
+
+        assert (admin_url.host, admin_url.port) == (
+            application_url.host,
+            application_url.port,
+        )
+        assert (admin_url.username, admin_url.password) == (
+            application_url.username,
+            application_url.password,
+        )
+
+    def test_the_second_connection_is_the_application_database(self) -> None:
+        """The grants have to run inside `appdb`, not the maintenance one."""
+        engine_factory = self._provision(self.APP_URI_CERTIFICATE)
+
+        assert engine_factory.call_args_list[1].args[0] == self.APP_URI_CERTIFICATE
