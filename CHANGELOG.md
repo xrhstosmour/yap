@@ -51,6 +51,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Gate `celery-redbeat` on `include_redbeat` instead of installing it in every project, importing it registers a `beat_init` handler that reads `scheduler.lock_key`, which only `RedBeatScheduler` has, so beat on the default scheduler logged a swallowed `AttributeError` on every start while advertising a distributed lock it never took
 - Document the outbox as at-least-once rather than exactly-once, the dispatcher publishes to the broker before committing the row that records it, so an interrupted worker republishes, and the batch commit means the replay unit is the whole batch, consumers have to be idempotent
 - Keep the connection parameters when `initial_data` reconnects to the `postgres` database for Metabase provisioning, it derived that URL by slicing at the last `/`, which dropped the whole query string, so a deployment with `POSTGRESQL_SSL_MODE` set connected in plaintext and one with a `sslrootcert` path never switched database at all
 - Drop the dead `create_type=False` keyword from the `userrole` migration, it belongs to `postgresql.ENUM` and the generic `sa.Enum` swallowed it without setting an attribute, a dialect option or a warning, so it read as a deliberate guard while doing nothing

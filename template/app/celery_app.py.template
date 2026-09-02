@@ -62,12 +62,22 @@ celery_app.conf.update(
         else {}
     ),
 )
-try:
-    import redbeat  # noqa
+{%- if include_redbeat %}
 
-    celery_app.conf.redbeat_redis_url = settings.REDIS_URL
-except ImportError:
-    pass
+# RedBeat keeps the schedule in Redis and takes a lock there on startup, so
+# only one beat instance fires each tick. Importing it also registers a
+# `beat_init` handler that reads `scheduler.lock_key`, which exists only on
+# `RedBeatScheduler`, so beat must be started with `-S redbeat.RedBeatScheduler`.
+import redbeat  # noqa: E402, F401
+
+celery_app.conf.redbeat_redis_url = settings.REDIS_URL
+{%- else %}
+
+# Beat runs on Celery's default `PersistentScheduler`, which reads the schedule
+# below at startup and tracks last-run times in a local file. That is correct
+# for exactly one beat process, which is what this project runs. Regenerate
+# with `include_redbeat` to run several, see the README.
+{%- endif %}
 
 # Beat schedule for periodic tasks. Crontab hours are configurable via
 # settings for production scheduling flexibility.
