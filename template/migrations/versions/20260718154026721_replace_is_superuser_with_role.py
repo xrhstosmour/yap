@@ -21,9 +21,13 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     op.execute("CREATE TYPE userrole AS ENUM ('superuser', 'user')")
+    # The type is created by the statement above. `op.add_column` emits only
+    # the `ALTER TABLE`, never a `CREATE TYPE`, so nothing has to suppress
+    # one. `create_type=False` belongs to `postgresql.ENUM`, and `sa.Enum`
+    # swallowed it without setting an attribute or a dialect option.
     op.add_column(
         "users",
-        sa.Column("role", sa.Enum("superuser", "user", name="userrole", create_type=False), nullable=True),
+        sa.Column("role", sa.Enum("superuser", "user", name="userrole"), nullable=True),
     )
     op.execute("UPDATE users SET role = 'superuser' WHERE is_superuser = TRUE")
     op.execute("UPDATE users SET role = 'user' WHERE role IS NULL")
