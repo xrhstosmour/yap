@@ -22,6 +22,7 @@ from app.core.logging import get_logger
 from app.core.security import DUMMY_PASSWORD_HASH
 from app.core.security import TokenRateLimitError
 from app.core.security import blacklist_token
+from app.core.security import claim_token_for_rotation
 from app.core.security import create_access_token
 from app.core.security import create_refresh_token
 from app.core.security import decode_token
@@ -121,6 +122,30 @@ class AuthService:
 
         expires_at = datetime.fromtimestamp(token_expiration, tz=UTC)
         await blacklist_token(token_identifier, expires_at)
+
+    @staticmethod
+    async def _claim_payload_token(payload: dict[str, Any]) -> bool:
+        """Atomically blacklist a decoded token, reporting whether we won.
+
+        Args:
+            payload: Decoded JWT payload.
+
+        Returns:
+            True when this caller claimed the token, False when it had
+            already been used. A payload without usable claims cannot be
+            claimed and is treated as won, matching the previous
+            behaviour of `_blacklist_payload_token`.
+        """
+        token_identifier = payload.get("jti")
+        token_expiration = payload.get("exp")
+
+        if not isinstance(token_identifier, str):
+            return True
+        if not isinstance(token_expiration, (int, float)):
+            return True
+
+        expires_at = datetime.fromtimestamp(token_expiration, tz=UTC)
+        return await claim_token_for_rotation(token_identifier, expires_at)
 
     async def _update_password_and_invalidate(
         self, user: User, new_password: str
@@ -385,13 +410,23 @@ class AuthService:
             if token_version is not None and token_version != user.token_version:
                 raise AuthenticationError("Token invalidated due to password change")
 
-            token_response = self.create_tokens(user)
-            # Only the refresh token is blacklisted.  Access tokens are
+            # Claim the old token before minting its replacement, in one
+            # atomic operation. Checking the blacklist above and writing to
+            # it afterwards left a window where two concurrent refreshes
+            # both passed the check and both got a fresh pair, so a stolen
+            # token replayed alongside the real one succeeded and the
+            # blacklist caught nothing.
+            #
+            # Placed after every read-only validation so a rejected refresh
+            # does not burn a token that was never exchanged.
+            #
+            # Only the refresh token is blacklisted. Access tokens are
             # short-lived and expire naturally; blacklisting them adds
             # Redis overhead with minimal security benefit.
-            await self._blacklist_payload_token(payload)
+            if not await self._claim_payload_token(payload):
+                raise AuthenticationError("Refresh token has been revoked")
 
-            return token_response
+            return self.create_tokens(user)
 
         except (
             InvalidTokenError,
