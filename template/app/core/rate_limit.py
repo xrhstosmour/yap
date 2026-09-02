@@ -13,6 +13,9 @@ import time
 from fastapi import HTTPException
 from fastapi import Request
 from fastapi import status
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import RedisError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from app.core.cache import get_redis
 from app.core.logging import get_logger
@@ -109,20 +112,29 @@ class RateLimiter:
             - remaining: Remaining requests in window
             - retry_after: Seconds until oldest entry expires (0 if allowed)
         """
-        redis_client = await get_redis()
         key = self._make_key(identifier)
         now = time.time()
         member = f"{now}:{secrets.token_hex(4)}"
 
-        result = await redis_client.eval(  # type: ignore[misc]
-            self._RATE_LIMIT_SCRIPT,
-            1,
-            key,
-            str(now),
-            str(self.window),
-            str(self.limit),
-            member,
-        )
+        try:
+            redis_client = await get_redis()
+            result = await redis_client.eval(  # type: ignore[misc]
+                self._RATE_LIMIT_SCRIPT,
+                1,
+                key,
+                str(now),
+                str(self.window),
+                str(self.limit),
+                member,
+            )
+        except (RedisConnectionError, RedisTimeoutError, RedisError, RuntimeError):
+            # Fail open, the same stance `is_token_blacklisted` takes and for
+            # the same reason: this runs on every authenticated request, so a
+            # Redis blip used to turn into a 500 across the whole API. An
+            # unthrottled window during an outage is the smaller problem, and
+            # authentication itself is unaffected.
+            logger.warning("rate_limit_unavailable", key=key, exc_info=True)
+            return True, self.limit, 0
 
         allowed_flag, remaining_raw, retry_after_raw = result[0], result[1], result[2]
         if allowed_flag == 0:
