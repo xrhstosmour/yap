@@ -26,8 +26,8 @@ jobs:
       run:
         working-directory: {% if nested %}{{ _folder_name }}{% else %}.{% endif %}
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
       - run: uv sync --frozen --extra dev
       - run: uv run ruff check app/ tests/
       - run: uv run ruff format --check app/ tests/
@@ -90,8 +90,8 @@ jobs:
           --health-retries 5
         command: redis-server --requirepass testpass
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
       - name: Generate secrets
         run: |
           cp .env.example .env
@@ -176,7 +176,7 @@ jobs:
           REDIS_PASSWORD: testpass
           ENVIRONMENT: local
           POSTGRESQL_AUTHENTICATION_METHOD: password
-      - uses: codecov/codecov-action@v5
+      - uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5
         if: github.event_name == 'pull_request'
         with:
           files: {% if nested %}./{{ _folder_name }}/coverage.xml{% else %}./coverage.xml{% endif %}
@@ -185,16 +185,16 @@ jobs:
     needs: lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           scan-ref: {% if nested %}{{ _folder_name }}{% else %}.{% endif %}
           severity: CRITICAL,HIGH
           exit-code: 1
       - name: Report medium-severity findings
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           scan-ref: {% if nested %}{{ _folder_name }}{% else %}.{% endif %}

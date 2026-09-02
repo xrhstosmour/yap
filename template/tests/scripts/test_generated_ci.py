@@ -64,3 +64,26 @@ class TestGeneratedWorkflow:
             "tests/test_startup.py::test_api_smoke" in command
             for command in _pytest_steps()
         )
+
+    def test_every_action_is_pinned_to_a_commit(self) -> None:
+        """A tag can be repointed by whoever owns the action.
+
+        Pinning by tag means a compromised or simply retagged upstream runs
+        in this project's CI, with its `GITHUB_TOKEN`, without anything
+        changing here. A commit SHA cannot be moved.
+        """
+        workflow = yaml.safe_load(WORKFLOW.read_text())
+
+        used = [
+            step["uses"]
+            for job in workflow["jobs"].values()
+            for step in job.get("steps", [])
+            if "uses" in step
+        ]
+        assert used, "no actions found in the workflow"
+
+        for reference in used:
+            _, _, version = reference.partition("@")
+            assert re.fullmatch(r"[0-9a-f]{40}", version), (
+                f"{reference} is pinned by tag, not by commit"
+            )
