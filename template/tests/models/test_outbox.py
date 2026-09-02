@@ -234,3 +234,116 @@ class TestOutbox:
                     delete(OutboxEvent).where(OutboxEvent.event_type == event_type)
                 )
                 await cleanup_session.commit()
+
+
+class TestDeliveryGuarantee:
+    """Pins the guarantee the outbox actually provides.
+
+    The module documented itself as publishing "exactly-once". It does not,
+    and cannot: the dispatcher publishes to the broker and only afterwards
+    commits the row saying it did, so anything that interrupts the two leaves
+    the event pending and it goes out again. These tests make the real
+    guarantee, at-least-once, visible rather than leaving a consumer author
+    to discover it from a duplicate in production.
+    """
+
+    @pytest.mark.anyio
+    async def test_an_uncommitted_dispatch_is_published_again(
+        self, engine: AsyncEngine
+    ) -> None:
+        """The duplicate window is broker publish until commit.
+
+        Args:
+            engine: Async engine fixture, used to open independent sessions.
+
+        Returns:
+            None.
+        """
+        event_type = "at.least.once.single"
+
+        async with AsyncSession(engine, expire_on_commit=False) as setup_session:
+            await Outbox(setup_session).publish(event_type, {"index": 0})
+            await setup_session.commit()
+
+        try:
+            # A dispatch that reached the broker, marked the row in memory,
+            # and then lost its worker before committing.
+            async with AsyncSession(engine, expire_on_commit=False) as first:
+                outbox = Outbox(first)
+                events = await outbox.get_pending(limit=10)
+                claimed = [e for e in events if e.event_type == event_type]
+                assert len(claimed) == 1
+                claimed_id = claimed[0].id
+                await outbox.mark_published(claimed[0])
+                await first.rollback()
+
+            async with AsyncSession(engine, expire_on_commit=False) as second:
+                events = await Outbox(second).get_pending(limit=10)
+                republished = [e.id for e in events if e.event_type == event_type]
+                await second.rollback()
+
+            assert republished == [claimed_id]
+        finally:
+            async with AsyncSession(engine, expire_on_commit=False) as cleanup:
+                await cleanup.execute(
+                    delete(OutboxEvent).where(OutboxEvent.event_type == event_type)
+                )
+                await cleanup.commit()
+
+    @pytest.mark.anyio
+    async def test_a_crash_mid_batch_republishes_the_whole_batch(
+        self, engine: AsyncEngine
+    ) -> None:
+        """The dispatcher commits per batch, not per event.
+
+        Committing per event would release the `FOR UPDATE SKIP LOCKED`
+        claim on everything not yet handled, so the batch commit is the
+        right call. The cost is that the replay unit is the batch.
+
+        Args:
+            engine: Async engine fixture, used to open independent sessions.
+
+        Returns:
+            None.
+        """
+        event_type = "at.least.once.batch"
+
+        async with AsyncSession(engine, expire_on_commit=False) as setup_session:
+            outbox = Outbox(setup_session)
+            for index in range(3):
+                await outbox.publish(event_type, {"index": index})
+            await setup_session.commit()
+
+        try:
+            async with AsyncSession(engine, expire_on_commit=False) as first:
+                outbox = Outbox(first)
+                events = await outbox.get_pending(limit=10)
+                claimed = [e for e in events if e.event_type == event_type]
+                assert len(claimed) == 3
+                claimed_ids = [event.id for event in claimed]
+                # Two published, then the worker dies on the third.
+                await outbox.mark_published(claimed[0])
+                await outbox.mark_published(claimed[1])
+                await first.rollback()
+
+            async with AsyncSession(engine, expire_on_commit=False) as second:
+                events = await Outbox(second).get_pending(limit=10)
+                republished = [e.id for e in events if e.event_type == event_type]
+                await second.rollback()
+
+            assert sorted(republished) == sorted(claimed_ids)
+        finally:
+            async with AsyncSession(engine, expire_on_commit=False) as cleanup:
+                await cleanup.execute(
+                    delete(OutboxEvent).where(OutboxEvent.event_type == event_type)
+                )
+                await cleanup.commit()
+
+    def test_the_module_does_not_promise_exactly_once(self) -> None:
+        """A wrong guarantee in a docstring is a bug in the consumer's code."""
+        import app.models.outbox as module
+
+        documentation = (module.__doc__ or "").lower()
+
+        assert "at-least-once" in documentation
+        assert "idempotent" in documentation
