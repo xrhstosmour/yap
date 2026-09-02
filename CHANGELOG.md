@@ -51,6 +51,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Pin every `GitHub Actions` reference to a commit SHA in both the template's own workflow and the generated one, a tag can be repointed by whoever owns the action, so a compromised or simply retagged upstream would run in CI with its `GITHUB_TOKEN` without anything changing here
 - Make `FeatureFlagRepository.list_active` return every flag, it asked for `limit=1000` which `BaseRepository.list` clamps to a hundred, so it returned the first hundred and presented them as all of them
 - Remove the unregistered `TenantContextMiddleware` duplicate from `app/core/tenant.py`, the middleware that actually runs is the one in `main.py`
 - Fail open when `Redis` is unavailable to the rate limiter, it had no error handling at all while running on every authenticated request, so a `Redis` blip surfaced as a `500` across the whole API, and revocation already fails open for the same reason
