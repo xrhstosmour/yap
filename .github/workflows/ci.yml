@@ -21,8 +21,8 @@ jobs:
       run:
         working-directory: template
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
       - name: Generate project via copier
         run: |
           pip install copier
@@ -76,7 +76,7 @@ jobs:
           print(f'Single Alembic head: {next(iter(heads))}')
           "
       - name: Dependency Review
-        uses: actions/dependency-review-action@v4
+        uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4
         if: github.event_name == 'pull_request'
         with:
           allow-ghsas: GHSA-69fq-xp46-6x23
@@ -112,8 +112,8 @@ jobs:
           --health-retries 5
         command: redis-server --requirepass testpass
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
       - name: Generate project via copier
         run: |
           pip install copier
@@ -195,7 +195,7 @@ jobs:
           REDIS_PASSWORD: testpass
           REDIS_URL: redis://:testpass@localhost:6379/0
           ENVIRONMENT: local
-      - uses: codecov/codecov-action@v5
+      - uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5
         if: github.event_name == 'pull_request' || github.event_name == 'push'
         with:
           files: ./coverage.xml
@@ -204,16 +204,16 @@ jobs:
     needs: lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           scan-ref: template
           severity: CRITICAL,HIGH
           exit-code: 1
       - name: Report medium-severity findings
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           scan-ref: template
