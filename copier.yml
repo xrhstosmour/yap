@@ -201,7 +201,7 @@ _tasks:
   - "python3 scripts/assemble.py"
   - "./scripts/setup.sh"
   - "{% if nested %}ROOT=$(git rev-parse --show-toplevel 2>/dev/null || (cd .. && pwd)) && mkdir -p \"$ROOT/.github/workflows\" && mv .github/workflows/ci.yml \"$ROOT/.github/workflows/{{ _folder_name }}.yml\" && rm -rf .github{% endif %}"
-  - 'python3 -c "import subprocess,re; r=subprocess.run([\"git\",\"ls-remote\",\"https://github.com/xrhstosmour/yap.git\",\"HEAD\"],capture_output=True,text=True); sha=r.stdout.split()[0]; v=open(\".copier/.version\").read(); open(\".copier/.version\",\"w\").write(re.sub(r\"_commit: .*\",f\"_commit: {sha}\",v))"'
+  - "./scripts/record_template_version.sh"
 
 _answers_file: .copier/.answers.yml
 
