@@ -207,12 +207,21 @@ def create_app() -> FastAPI:
         return response
 
     # Tenant context middleware.
+    #
+    # This looks like a no-op and is not. `request.state.tenant_id` is set by
+    # `get_current_user`, a dependency, which runs downstream of every
+    # middleware, so the value read here is always None. What matters is the
+    # `with` block: it scopes the tenant ContextVar to this request and
+    # restores it afterwards. Without it, the tenant set by one request's
+    # dependency stays set for the next request handled on the same task, so
+    # an unauthenticated request inherits the previous caller's tenant.
+    # `tests/core/test_tenant.py` covers exactly that.
     @app.middleware("http")
     async def tenant_middleware(
         request: Request,
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
-        """Extract and set tenant context from request."""
+        """Scope the tenant context to this request."""
         tenant_id = getattr(request.state, "tenant_id", None)
 
         with tenant_context(tenant_id):
