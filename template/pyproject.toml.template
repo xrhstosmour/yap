@@ -61,7 +61,7 @@ packages = ["app"]
 [tool.mypy]
 python_version = "3.14"
 strict = true
-exclude = ["venv", ".venv", "alembic/versions"]
+exclude = ["venv", ".venv", "migrations/versions"]
 
 [[tool.mypy.overrides]]
 module = [
@@ -85,7 +85,7 @@ ignore_missing_imports = true
 # unparenthesized PEP 758 form, which several ruff releases then emit
 # inconsistently. Revert to "py314" once astral-sh/ruff#23090 is fixed.
 target-version = "py313"
-exclude = ["venv", ".venv", "alembic/versions"]
+exclude = ["venv", ".venv", "migrations/versions"]
 
 [tool.ruff.lint]
 select = [
