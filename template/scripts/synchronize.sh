@@ -296,7 +296,18 @@ info "Running copier update..."
 
     echo ""
     info "Checking for changes..."
-    if git diff --stat; then
+
+    # `git diff --stat` exits 0 whether or not anything differs, so the "no
+    # changes" branch was unreachable and a sync that changed nothing still
+    # told the user to review and commit. `git status --porcelain` reports
+    # the truth, and unlike `git diff` it also sees the files a template
+    # update adds, which are exactly the ones worth looking at.
+    changes=$(git status --porcelain 2>/dev/null || true)
+
+    if [ "$TEMP_GIT" = true ]; then
+        info "Project updated. This directory is not tracked by git, so there is nothing to diff."
+    elif [ -n "$changes" ]; then
+        git status --short
         echo ""
         info "Review changes, resolve any inline conflict markers (<<<<<<<), then commit."
         echo "  git diff"
