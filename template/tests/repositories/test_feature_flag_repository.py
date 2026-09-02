@@ -157,6 +157,38 @@ class TestFeatureFlagRepository:
         assert "flag_two" in names
 
     @pytest.mark.anyio
+    async def test_list_active_returns_more_than_one_page(
+        self, session: AsyncSession
+    ) -> None:
+        """list_active() must not stop at the page-size clamp.
+
+        It asked for `limit=1000`, which `BaseRepository.list` clamps to
+        `MAX_PAGE_SIZE`, so it returned the first hundred flags and
+        presented them as all of them.
+
+        Args:
+            session: Async database session fixture.
+
+        Returns:
+            None.
+        """
+        from app.core.pagination import MAX_PAGE_SIZE
+
+        tenant = await self._create_tenant(session)
+        repo = FeatureFlagRepository(session)
+        expected = MAX_PAGE_SIZE + 5
+
+        with tenant_context(tenant.id):
+            for index in range(expected):
+                await repo.create({"name": f"paged_flag_{index:03d}", "state": True})
+
+            flags = await repo.list_active()
+
+        names = {flag.name for flag in flags}
+        assert len(names) == expected, len(names)
+        assert f"paged_flag_{expected - 1:03d}" in names
+
+    @pytest.mark.anyio
     async def test_update_flag(self, session: AsyncSession) -> None:
         """update() should update the specified fields.
 
