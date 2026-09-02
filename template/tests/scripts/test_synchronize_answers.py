@@ -61,15 +61,14 @@ class TestAnswersAreRecoverable:
 
 
 class TestRedbeatIsInferredFromCompose:
-    """`include_redbeat` has to be read from something that varies with it."""
+    """`include_redbeat` has to be read from what decides the scheduler.
 
-    def test_pyproject_cannot_answer_the_question(self) -> None:
-        """`celery-redbeat` is an unconditional dependency.
-
-        This is why the old `grep redbeat pyproject.toml` flipped every
-        project to `include_redbeat: true` on its first sync.
-        """
-        assert "redbeat" in (PROJECT_ROOT / "pyproject.toml").read_text()
+    The original bug was `grep redbeat pyproject.toml`, where the dependency
+    was unconditional, so every project flipped to `include_redbeat: true` on
+    its first sync. The dependency is gated now, so that grep would happen to
+    work, but the Compose command is still the authority: it carries the `-S`
+    flag that picks the scheduler beat actually runs.
+    """
 
     def test_compose_reflects_the_chosen_scheduler(self) -> None:
         """The compose command names RedBeat only when it is in use."""
