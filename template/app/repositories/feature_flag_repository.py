@@ -7,6 +7,7 @@ from sqlmodel import and_
 from sqlmodel import select
 
 from app.core.logging import get_logger
+from app.core.pagination import MAX_PAGE_SIZE
 from app.models.feature_flag import FeatureFlag
 from app.repositories.base import BaseRepository
 
@@ -61,8 +62,24 @@ class FeatureFlagRepository(BaseRepository[FeatureFlag]):
     async def list_active(self) -> list[FeatureFlag]:
         """List all active (non-deleted) feature flags.
 
+        Pages through rather than asking for one oversized page.
+        `BaseRepository.list` clamps `limit` to `MAX_PAGE_SIZE`, so the
+        previous `list(limit=1000)` quietly returned at most the first
+        hundred flags and presented them as all of them.
+
         Returns:
-            List of active feature flags
+            Every active feature flag.
         """
-        flags, _ = await self.list(limit=1000)
-        return list(flags)
+        flags: list[FeatureFlag] = []
+        skip = 0
+
+        while True:
+            page, total = await self.list(skip=skip, limit=MAX_PAGE_SIZE)
+            if not page:
+                break
+            flags.extend(page)
+            skip += len(page)
+            if len(flags) >= total:
+                break
+
+        return flags

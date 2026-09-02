@@ -51,6 +51,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Make `FeatureFlagRepository.list_active` return every flag, it asked for `limit=1000` which `BaseRepository.list` clamps to a hundred, so it returned the first hundred and presented them as all of them
 - Remove the unregistered `TenantContextMiddleware` duplicate from `app/core/tenant.py`, the middleware that actually runs is the one in `main.py`
 - Fail open when `Redis` is unavailable to the rate limiter, it had no error handling at all while running on every authenticated request, so a `Redis` blip surfaced as a `500` across the whole API, and revocation already fails open for the same reason
 - Rotate refresh tokens atomically, the blacklist was checked and then written as two separate steps with the whole token mint in between, so two requests carrying the same refresh token both passed the check and both walked away with a fresh pair, and the reuse the blacklist exists to catch went unnoticed
