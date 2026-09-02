@@ -1,11 +1,22 @@
 """Outbox pattern for reliable event publishing.
 
-Ensures events are published exactly-once by writing them to the database
-in the same transaction as business operations. A background process
-publishes pending events to the message broker (RabbitMQ/Redis).
+Events are written to the database in the same transaction as the business
+operation that produced them, and a background dispatcher publishes pending
+events to the message broker. This removes the dual-write problem, where a
+database write succeeds and the matching publish does not.
 
-This prevents the dual-write problem where a database write succeeds
-but the event publish fails.
+Delivery is **at-least-once**, not exactly-once. The dispatcher publishes to
+the broker first and only then records that it did, so a worker that dies
+between the two leaves the event `pending` and publishes it again on the next
+tick. That ordering is deliberate: the other way round would mark an event
+published that never reached the broker, and a lost event is worse than a
+repeated one. Consumers must therefore be idempotent.
+
+The dispatcher commits once per batch rather than once per event, because the
+rows are claimed with `SELECT ... FOR UPDATE SKIP LOCKED` and committing
+mid-batch would release that claim on the events not yet handled. A crash part
+way through a batch therefore republishes the whole batch, not just the one
+event in flight.
 """
 
 from __future__ import annotations
@@ -78,7 +89,8 @@ class Outbox:
     """Outbox publisher for transactional event publishing.
 
     Events are written to the outbox table within the current transaction.
-    They are dispatched asynchronously by the outbox_processor task.
+    They are dispatched asynchronously by the outbox_processor task, at least
+    once each, so consumers must be idempotent. See the module docstring.
 
     Usage::
 
