@@ -10,8 +10,6 @@ from __future__ import annotations
 from contextvars import ContextVar
 from uuid import UUID
 
-from starlette.responses import Response
-
 # Context variable to store current tenant ID.
 _current_tenant_id: ContextVar[UUID | None] = ContextVar(
     "current_tenant_id", default=None
@@ -149,32 +147,3 @@ class SystemContext:
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         """Exit the system-access context, restoring previous state."""
         _system_access.reset(self.token)
-
-
-class TenantContextMiddleware:
-    """Middleware to extract and set tenant context from requests.
-
-    Extracts tenant ID from JWT token or API key and sets the
-    tenant context for the duration of the request.
-    """
-
-    async def __call__(self, request, call_next) -> Response:
-        """Process request with tenant context.
-
-        Extracts tenant ID from authentication credentials
-        and sets it in the context for downstream handlers.
-        """
-        from app.core.logging import get_logger
-
-        logger = get_logger("middleware.tenant")
-
-        # Extract tenant ID from request (set by auth middleware).
-        tenant_id = getattr(request.state, "tenant_id", None)
-
-        with tenant_context(tenant_id):
-            logger.debug(
-                "tenant_context_set", tenant_id=str(tenant_id) if tenant_id else None
-            )
-            response = await call_next(request)
-
-        return response  # type: ignore[no-any-return]
