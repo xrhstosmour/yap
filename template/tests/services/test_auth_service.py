@@ -207,7 +207,12 @@ class TestAuthService:
     async def test_refresh_tokens_blacklists_old_refresh_token(
         self, session: AsyncSession
     ) -> None:
-        """Refreshing tokens should blacklist used refresh token jti."""
+        """Refreshing tokens should claim the used refresh token jti.
+
+        The claim replaced a plain blacklist write. It has to happen
+        exactly once, and it has to carry the token's own identifier and
+        expiry so the entry expires with the token.
+        """
         auth_service = _auth_service(session)
         user = await auth_service.register(
             RegisterRequest(
@@ -218,15 +223,15 @@ class TestAuthService:
         tokens = auth_service.create_tokens(user)
 
         with patch(
-            "app.services.auth_service.blacklist_token",
-            AsyncMock(),
-        ) as mock_blacklist_token:
+            "app.services.auth_service.claim_token_for_rotation",
+            AsyncMock(return_value=True),
+        ) as mock_claim:
             refreshed_tokens = await auth_service.refresh_tokens(tokens.refresh_token)
 
         assert refreshed_tokens.access_token
         assert refreshed_tokens.refresh_token
         assert refreshed_tokens.refresh_token != tokens.refresh_token
-        mock_blacklist_token.assert_awaited_once_with(ANY, ANY)
+        mock_claim.assert_awaited_once_with(ANY, ANY)
 
     @pytest.mark.asyncio
     async def test_refresh_tokens_rejects_blacklisted_refresh_token(
@@ -984,3 +989,116 @@ class TestTokenCooldownIsNotAnEnumerationOracle:
             AsyncMock(side_effect=TokenRateLimitError("cooldown")),
         ):
             await auth_service.send_magic_link(user.email)
+
+
+class TestRefreshRotationIsAtomic:
+    """Only one caller may exchange a given refresh token.
+
+    Rotation checked the blacklist and wrote to it as two separate steps
+    with the whole token mint in between. Two requests carrying the same
+    refresh token both read "not blacklisted" and both walked away with a
+    fresh pair, so a stolen token replayed alongside the real one worked
+    and the blacklist caught nothing.
+    """
+
+    @pytest.mark.asyncio
+    async def test_concurrent_refreshes_yield_one_winner(
+        self, session: AsyncSession
+    ) -> None:
+        """Two simultaneous refreshes of one token: one succeeds, one fails.
+
+        Args:
+            session: Async database session fixture.
+        """
+        import asyncio
+
+        auth_service = _auth_service(session)
+        user = await auth_service.register(
+            RegisterRequest(
+                email="refresh-race@example.com",
+                password="password123",
+            )
+        )
+        tokens = auth_service.create_tokens(user)
+
+        claimed: set[str] = set()
+
+        async def _claim(token_identifier: str, expires_at: object) -> bool:
+            # Stand in for Redis SET NX, including a suspension point at
+            # exactly the spot the old two-step version was vulnerable.
+            already = token_identifier in claimed
+            await asyncio.sleep(0)
+            if already:
+                return False
+            claimed.add(token_identifier)
+            return True
+
+        with patch(
+            "app.services.auth_service.claim_token_for_rotation",
+            AsyncMock(side_effect=_claim),
+        ):
+            results = await asyncio.gather(
+                auth_service.refresh_tokens(tokens.refresh_token),
+                auth_service.refresh_tokens(tokens.refresh_token),
+                return_exceptions=True,
+            )
+
+        succeeded = [r for r in results if not isinstance(r, BaseException)]
+        rejected = [r for r in results if isinstance(r, AuthenticationError)]
+
+        assert len(succeeded) == 1, results
+        assert len(rejected) == 1, results
+
+    @pytest.mark.asyncio
+    async def test_a_lost_claim_is_rejected(self, session: AsyncSession) -> None:
+        """Losing the claim must not still return a token pair.
+
+        Args:
+            session: Async database session fixture.
+        """
+        auth_service = _auth_service(session)
+        user = await auth_service.register(
+            RegisterRequest(
+                email="refresh-lost-claim@example.com",
+                password="password123",
+            )
+        )
+        tokens = auth_service.create_tokens(user)
+
+        with patch(
+            "app.services.auth_service.claim_token_for_rotation",
+            AsyncMock(return_value=False),
+        ):
+            with pytest.raises(AuthenticationError):
+                await auth_service.refresh_tokens(tokens.refresh_token)
+
+    @pytest.mark.asyncio
+    async def test_a_rejected_refresh_does_not_burn_the_token(
+        self, session: AsyncSession
+    ) -> None:
+        """Validation runs before the claim, so a failure leaves it usable.
+
+        Args:
+            session: Async database session fixture.
+        """
+        auth_service = _auth_service(session)
+        user = await auth_service.register(
+            RegisterRequest(
+                email="refresh-not-burned@example.com",
+                password="password123",
+            )
+        )
+        tokens = auth_service.create_tokens(user)
+
+        with system_context():
+            await auth_service.user_repository.update(user.id, {"is_active": False})
+
+        with patch(
+            "app.services.auth_service.claim_token_for_rotation",
+            AsyncMock(return_value=True),
+        ) as mock_claim:
+            # `refresh_tokens` converts `UserInactiveError` on its way out.
+            with pytest.raises(AuthenticationError):
+                await auth_service.refresh_tokens(tokens.refresh_token)
+
+        mock_claim.assert_not_awaited()

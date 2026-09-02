@@ -211,6 +211,46 @@ async def blacklist_token(token_identifier: str, expires_at: datetime) -> None:
         return
 
 
+async def claim_token_for_rotation(token_identifier: str, expires_at: datetime) -> bool:
+    """Blacklist a token and report whether this caller was the one to do it.
+
+    `SET NX` is atomic, so exactly one caller can win for a given `jti`.
+    Checking the blacklist and then writing to it as two steps leaves a
+    window where two concurrent refreshes both read "not blacklisted" and
+    both mint a fresh token pair, which is the reuse the blacklist exists
+    to catch.
+
+    Fails open on Redis errors, matching `is_token_blacklisted`: a
+    transient outage must not lock every user out, and `token_version`
+    remains the hard revocation guarantee.
+
+    Args:
+        token_identifier: JWT ``jti`` claim value.
+        expires_at: UTC expiration time from token ``exp``.
+
+    Returns:
+        True if this call claimed the token, False if it was already used.
+    """
+    from app.core.cache import get_redis
+
+    now = datetime.now(UTC)
+    remaining_seconds = int((expires_at - now).total_seconds())
+    if remaining_seconds <= 0:
+        return False
+
+    try:
+        redis = await get_redis()
+        key = f"{_JWT_BLACKLIST_PREFIX}:{token_identifier}"
+        return bool(await redis.set(key, "1", ex=remaining_seconds, nx=True))
+    except (RedisConnectionError, RedisTimeoutError) as error:
+        logger.warning(
+            "token_rotation_claim_failed",
+            token_identifier=token_identifier,
+            error=str(error),
+        )
+        return True
+
+
 async def is_token_blacklisted(token_identifier: str) -> bool:
     """Check whether a JWT token identifier is blacklisted.
 
