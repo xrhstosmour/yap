@@ -40,7 +40,11 @@
 - **Compound Indexes**: Performance-optimized compound indexes on `audit_logs`, `api_keys`, and `outbox_events`
 - **Redis**: Caching, rate limiting, Celery result backend
 - **Celery**: Background task processing with RabbitMQ (AMQPS/TLS) broker
-- **RedBeat**: Redis-backed Celery beat scheduler
+{%- if include_redbeat %}
+- **RedBeat**: Redis-backed Celery beat scheduler, safe to run more than one beat instance
+{%- else %}
+- **Celery beat**: Periodic tasks on Celery's default persistent scheduler, one beat instance
+{%- endif %}
 
 ### Search
 
@@ -140,8 +144,57 @@ uv run alembic downgrade -1
 uv run celery -A app.celery_app worker --loglevel=info
 
 # Start celery beat/scheduler.
+{%- if include_redbeat %}
+uv run celery -A app.celery_app beat -S redbeat.RedBeatScheduler --loglevel=info
+{%- else %}
 uv run celery -A app.celery_app beat --loglevel=info
+{%- endif %}
 ```
+
+## Periodic Tasks
+
+The schedule lives in `app/celery_app.py` under `beat_schedule`. Beat reads it
+at startup and enqueues each entry when it comes due, a worker then runs it.
+Beat only schedules, it never executes, so both processes have to be running.
+
+{% if include_redbeat -%}
+This project uses **RedBeat**. The schedule is stored in Redis and beat takes a
+Redis lock on startup, so several beat instances can run at once and only the
+lock holder fires each tick. That is what makes a rolling deploy or a
+`replicas: 2` beat deployment safe.
+
+Beat must be started with the scheduler flag. Without `-S
+redbeat.RedBeatScheduler` you get Celery's default scheduler, RedBeat's
+startup hook then looks for a `lock_key` that scheduler does not have, and the
+resulting `AttributeError` is swallowed, so you silently lose the lock while
+believing you have it:
+
+```bash
+celery -A app.celery_app beat -S redbeat.RedBeatScheduler -l info
+```
+
+Entries can be added or changed at runtime through `redbeat.RedBeatSchedulerEntry`
+without restarting beat.
+{%- else -%}
+This project uses Celery's default `PersistentScheduler`. It reads
+`beat_schedule` from code at startup and keeps last-run times in a local file,
+`/var/lib/celery/celerybeat-schedule` in the container, on a named volume so a
+restart does not re-fire everything.
+
+**Run exactly one beat process.** The default scheduler has no cross-process
+coordination, so two of them fire every entry twice. The Compose service is a
+single container with a fixed name for that reason, do not scale it.
+
+Switch to **RedBeat** when you need more than one, for example beat on
+Kubernetes with `replicas > 1`, or a rolling deploy where the old and new beat
+overlap. RedBeat holds a Redis lock so only one instance fires, and keeps the
+schedule in Redis so it can be changed without a restart. To turn it on,
+re-run `scripts/synchronize.sh` and answer yes to `include_redbeat`. That adds
+the `celery-redbeat` dependency, points beat at `redbeat.RedBeatScheduler` and
+sets `redbeat_redis_url`. It is deliberately not installed otherwise, importing
+it registers a `beat_init` hook that expects the RedBeat scheduler and logs an
+`AttributeError` on every start under the default one.
+{%- endif %}
 
 ## API Documentation
 

@@ -21,7 +21,9 @@ dependencies = [
     "structlog>=25.0.0",
     "redis>=5.2.0",
     "celery>=5.4.0",
+{%- if include_redbeat %}
     "celery-redbeat>=2.3.0",
+{%- endif %}
     "email-validator>=2.2.0",
     "phonenumbers>=8.13.0",
     "httpx>=0.28.0",
