@@ -10,8 +10,14 @@ logger = get_logger("tasks.outbox")
 def process_outbox(self) -> dict:
     """Process pending outbox events and publish them to the broker.
 
-    Polls the outbox_events table for pending events, publishes each
-    to RabbitMQ/Celery, and marks them as published.
+    Polls the outbox_events table for pending events, publishes each to
+    RabbitMQ/Celery, and marks them as published.
+
+    Each event reaches the broker before the row recording that it did is
+    committed, so delivery is at-least-once and consumers must be idempotent.
+    The batch commits once at the end, which means a crash part way through
+    republishes every event in the batch. See `app.models.outbox` for why the
+    ordering and the commit granularity are what they are.
 
     Returns:
         Result dictionary with processed/failed counts
