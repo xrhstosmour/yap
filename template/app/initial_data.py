@@ -6,6 +6,7 @@ import os
 
 from psycopg import sql as psycopg_sql
 from sqlalchemy import create_engine
+from sqlalchemy.engine import make_url
 from sqlmodel import select
 from sqlmodel import text
 
@@ -113,8 +114,12 @@ def _setup_metabase(password: str) -> None:
         RuntimeError: If the role does not exist once provisioning has run.
         Exception: Any database error other than the object already existing.
     """
-    base_url = str(settings.DATABASE_URI)
-    admin_url = base_url.rsplit("/", 1)[0] + "/postgres"
+    # Swap only the database name and keep everything else. Slicing at the
+    # last "/" dropped the query string, so a deployment with
+    # `POSTGRESQL_SSL_MODE` set connected here in plaintext, and one with a
+    # `sslrootcert` path did not even switch database, because the last "/"
+    # was inside that path.
+    admin_url = make_url(str(settings.DATABASE_URI)).set(database="postgres")
     engine = create_engine(admin_url, isolation_level="AUTOCOMMIT")
 
     with engine.connect() as conn:

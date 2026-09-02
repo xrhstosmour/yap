@@ -51,6 +51,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Keep the connection parameters when `initial_data` reconnects to the `postgres` database for Metabase provisioning, it derived that URL by slicing at the last `/`, which dropped the whole query string, so a deployment with `POSTGRESQL_SSL_MODE` set connected in plaintext and one with a `sslrootcert` path never switched database at all
 - Drop the dead `create_type=False` keyword from the `userrole` migration, it belongs to `postgresql.ENUM` and the generic `sa.Enum` swallowed it without setting an attribute, a dialect option or a warning, so it read as a deliberate guard while doing nothing
 - Write secrets into `.env` literally instead of through a `sed` replacement, `sed` expands a bare `&` to the whole match and treats the delimiter as end of expression, so an externally supplied `SMTP_PASSWORD` of `p&ss|word` was stored as `pSMTP_PASSWORD=your-smtp-passwordss` with `sed` exiting 0
 - Exclude `migrations/versions` from `ruff` and `mypy` rather than the `alembic/versions` path the template stopped using, the stale pattern matched nothing so `ruff check .` reported 86 errors in `Alembic`-generated revisions nobody edits
