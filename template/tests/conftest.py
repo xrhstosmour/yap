@@ -194,11 +194,20 @@ def disable_token_blacklist_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _noop_blacklist(*_args: Any, **_kwargs: Any) -> None:  # noqa: ANN401
         return None
 
+    async def _claim_succeeds(*_args: Any, **_kwargs: Any) -> bool:  # noqa: ANN401
+        # Refresh rotation claims the old token atomically. Without a stub
+        # the real one reaches `get_redis()`, which raises outside the
+        # application lifespan.
+        return True
+
     monkeypatch.setattr("app.dependencies.is_token_blacklisted", _not_blacklisted)
     monkeypatch.setattr("app.core.security.blacklist_token", _noop_blacklist)
     monkeypatch.setattr("app.services.auth_service.blacklist_token", _noop_blacklist)
     monkeypatch.setattr(
         "app.services.auth_service.is_token_blacklisted", _not_blacklisted
+    )
+    monkeypatch.setattr(
+        "app.services.auth_service.claim_token_for_rotation", _claim_succeeds
     )
 
 
