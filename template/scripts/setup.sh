@@ -129,6 +129,74 @@ chmod 600 .env
 "${SED_INPLACE[@]}" "s/MINIO_ROOT_PASSWORD=.*/MINIO_ROOT_PASSWORD=minioadmin/" .env.example
 "${SED_INPLACE[@]}" "s/SENTRY_DSN=.*/SENTRY_DSN=https:\/\/public:secret@sentry.com\/1/" .env.example
 
+# Write KEY=VALUE into an environment file, treating VALUE as literal text.
+#
+# `sed` interprets its replacement: a bare `&` expands to the whole match and
+# the delimiter character ends the expression early, so a secret supplied from
+# the environment containing either was silently corrupted. `p&ss|word` landed
+# in `.env` as `pSMTP_PASSWORD=your-smtp-passwordss`, with `sed` exiting 0.
+#
+# The value travels in the environment rather than in argv, so it never shows
+# up in `ps` output while this runs.
+set_environment_value() {
+    SET_KEY="$1" SET_VALUE="$2" SET_FILE="$3" python3 - <<'PY'
+import os
+
+key = os.environ["SET_KEY"]
+value = os.environ["SET_VALUE"]
+path = os.environ["SET_FILE"]
+prefix = f"{key}="
+
+with open(path) as handle:
+    lines = handle.readlines()
+
+for index, line in enumerate(lines):
+    if line.startswith(prefix):
+        lines[index] = f"{prefix}{value}\n"
+        break
+else:
+    if lines and not lines[-1].endswith("\n"):
+        lines[-1] += "\n"
+    lines.append(f"{prefix}{value}\n")
+
+with open(path, "w") as handle:
+    handle.writelines(lines)
+PY
+}
+
+# Replace the password inside a URL-valued key, again literally. The user, the
+# host and everything after them are kept exactly as they are.
+set_url_password() {
+    SET_KEY="$1" SET_VALUE="$2" SET_FILE="$3" python3 - <<'PY'
+import os
+
+key = os.environ["SET_KEY"]
+password = os.environ["SET_VALUE"]
+path = os.environ["SET_FILE"]
+prefix = f"{key}="
+
+with open(path) as handle:
+    lines = handle.readlines()
+
+for index, line in enumerate(lines):
+    if not line.startswith(prefix):
+        continue
+    url = line[len(prefix) :].rstrip("\n")
+    scheme, separator, rest = url.partition("://")
+    if not separator or "@" not in rest:
+        break
+    # The host never contains an `@`, an old password might, so split on the
+    # last one.
+    credentials, _, location = rest.rpartition("@")
+    user, _, _ = credentials.partition(":")
+    lines[index] = f"{prefix}{scheme}://{user}:{password}@{location}\n"
+    break
+
+with open(path, "w") as handle:
+    handle.writelines(lines)
+PY
+}
+
 # Replace KEY's value only when it is empty, a placeholder ("your-..."), or
 # matches the optional extra placeholder (e.g. a well-known service default).
 # A key a template sync introduced after this .env was first generated has no
@@ -144,11 +212,11 @@ backfill_secret() {
     current="$(sed -n "s/^${key}=//p" .env | head -1)"
     case "$current" in
         "" | your-*)
-            "${SED_INPLACE[@]}" "s|^${key}=.*|${key}=${value}|" .env
+            set_environment_value "$key" "$value" .env
             ;;
         *)
             if [ -n "$extra_placeholder" ] && [ "$current" = "$extra_placeholder" ]; then
-                "${SED_INPLACE[@]}" "s|^${key}=.*|${key}=${value}|" .env
+                set_environment_value "$key" "$value" .env
             fi
             ;;
     esac
@@ -177,10 +245,10 @@ backfill_secret MAILPIT_UI_AUTH "${MAILPIT_UI_AUTH}"
 # Derive the connection URLs and Metabase password from the current, possibly
 # just-backfilled, database and Redis passwords. Idempotent.
 CURRENT_POSTGRESQL_PASSWORD="$(sed -n "s/^POSTGRESQL_PASSWORD=//p" .env | head -1)"
-"${SED_INPLACE[@]}" "s|\(DATABASE_URL=postgres://[^:]*:\)[^@]*@|\1${CURRENT_POSTGRESQL_PASSWORD}@|" .env
-"${SED_INPLACE[@]}" "s/METABASE_DATABASE_PASSWORD=.*/METABASE_DATABASE_PASSWORD=${CURRENT_POSTGRESQL_PASSWORD}/" .env
+set_url_password DATABASE_URL "${CURRENT_POSTGRESQL_PASSWORD}" .env
+set_environment_value METABASE_DATABASE_PASSWORD "${CURRENT_POSTGRESQL_PASSWORD}" .env
 CURRENT_REDIS_PASSWORD="$(sed -n "s/^REDIS_PASSWORD=//p" .env | head -1)"
-"${SED_INPLACE[@]}" "s|REDIS_URL=redis://:.*@redis|REDIS_URL=redis://:${CURRENT_REDIS_PASSWORD}@redis|" .env
+set_url_password REDIS_URL "${CURRENT_REDIS_PASSWORD}" .env
 
 # Generate self-signed TLS certificates for RabbitMQ and Traefik if they are
 # missing. assemble.py creates them during synchronize.sh, but a fresh clone
@@ -197,7 +265,7 @@ fi
 # Replaces the placeholder SSL_CERTIFICATE_PATH with the absolute path from assemble.py.
 if [ -f containers/.certificates ]; then
     cert_path=$(cut -d= -f2- < containers/.certificates)
-    "${SED_INPLACE[@]}" "s|SSL_CERTIFICATE_PATH=.*|SSL_CERTIFICATE_PATH=${cert_path}|" .env
+    set_environment_value SSL_CERTIFICATE_PATH "${cert_path}" .env
     rm containers/.certificates
 fi
 
