@@ -18,6 +18,7 @@ from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import SYSTEM_TENANT_ID
+from app.core.encryption import encrypted_column_names
 from app.core.logging import get_logger
 from app.core.security import generate_password_hash
 from app.core.security import verify_password
@@ -41,6 +42,12 @@ logger = get_logger("service.user")
 # the export says so when it bites.
 _EXPORT_PAGE_SIZE = 100
 _ACTIVITY_EXPORT_LIMIT = 500
+
+# Fields whose new value must not be written raw into `AuditLog.changes`,
+# an unencrypted JSON column. Derived from `User`'s `EncryptedString`
+# columns rather than hand-maintained, so it can't drift from the model's
+# actual PII columns the way a literal set could.
+_PII_UPDATE_FIELDS = encrypted_column_names(User)
 
 
 class UserServiceError(Exception):
@@ -221,7 +228,13 @@ class UserService:
                 return None
             user = updated_user
 
-            # Log update.
+            # Log update. `changes` lands in `AuditLog.changes`, a plain
+            # unencrypted JSON column, so PII values (e.g. the new email)
+            # are redacted before logging rather than stored raw.
+            audit_changes = {
+                key: "[REDACTED]" if key in _PII_UPDATE_FIELDS else value
+                for key, value in update_data.items()
+            }
             await self.audit_repository.log_user_action_safe(
                 action=AuditAction.USER_UPDATE,
                 user_id=updated_by,
@@ -229,7 +242,7 @@ class UserService:
                 email=user.email,
                 resource_type="user",
                 resource_id=str(user_id),
-                changes=update_data,
+                changes=audit_changes,
             )
 
         return user
