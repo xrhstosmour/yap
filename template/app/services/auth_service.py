@@ -212,7 +212,7 @@ class AuthService:
         except Exception:
             logger.warning(
                 "email_task_dispatch_failed",
-                to_email=user.email,
+                user_id=str(user.id),
                 subject=subject,
             )
 
