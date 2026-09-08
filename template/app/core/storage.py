@@ -10,7 +10,9 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import io
+import warnings
 from typing import Any
+from urllib.parse import quote
 from uuid import UUID
 
 from app.core import SYSTEM_TENANT_ID
@@ -21,6 +23,27 @@ from app.core.tenant import get_current_tenant_id
 logger = get_logger("storage")
 
 _cached_s3_client: Any | None = None
+
+# Caps the decoded pixel count `PIL.Image.open` will accept, guarding
+# against a "decompression bomb": a small compressed file (a few KB) that
+# decodes to gigabytes of raw pixel data and exhausts memory. Sized
+# relative to the 25MB upload ceiling (`file_service.MAX_UPLOAD_SIZE`): at
+# 3 bytes/pixel for a decoded RGB frame, 50 megapixels caps decoded size
+# at roughly 150MB, generous headroom over the compressed upload without
+# leaving PIL's much higher default (~89 megapixels) in effect.
+MAX_IMAGE_PIXELS = 50_000_000
+
+# Mimetypes safe to render inline in a browser response. Anything not in
+# this set forces `Content-Disposition: attachment` in `get_download_url`,
+# an allowlist rather than an `image/*` prefix test because `image/svg+xml`
+# also starts with `"image/"` but can embed `<script>` that executes when
+# rendered inline, exactly what forcing an attachment is meant to prevent.
+# Kept to the types `file_service._MIME_SIGNATURES` can actually verify by
+# magic bytes, so nothing renders inline on the strength of an unverified
+# declared type.
+INLINE_SAFE_MIMETYPES = frozenset(
+    {"image/jpeg", "image/png", "image/gif", "image/webp"}
+)
 
 # boto3/botocore error codes head_bucket raises when the bucket is missing.
 _BUCKET_NOT_FOUND_CODES = {"404", "NoSuchBucket"}
@@ -84,20 +107,53 @@ def _build_thumbnail(content: bytes, mimetype: str) -> tuple[int, int, bytes]:
 
     Returns:
         Tuple of (width, height, thumbnail_bytes).
+
+    Raises:
+        PIL.Image.DecompressionBombError: If the image decodes to more than
+            twice `MAX_IMAGE_PIXELS`.
+        PIL.Image.DecompressionBombWarning: If the image decodes to more
+            than `MAX_IMAGE_PIXELS` but at most twice that. PIL only warns,
+            rather than raising `DecompressionBombError`, in that band, so
+            the warning is escalated to an exception here to make
+            `MAX_IMAGE_PIXELS` the real ceiling rather than double it.
     """
     import PIL.Image
 
-    img = PIL.Image.open(io.BytesIO(content))
-    width, height = img.size
+    # A module-global on PIL's side. Every caller wants the same cap, so
+    # there is nothing to scope per-call, set once rather than saved and
+    # restored around each call: a per-call save/restore would race under
+    # concurrent `asyncio.to_thread` calls, one call's `finally` could
+    # restore PIL's much higher default while another call is still
+    # relying on the guard being in effect.
+    PIL.Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", PIL.Image.DecompressionBombWarning)
+        img = PIL.Image.open(io.BytesIO(content))
+        width, height = img.size
 
-    # Generate thumbnail (800px max dimension).
-    thumb = img.copy()
-    thumb.thumbnail((800, 800), PIL.Image.LANCZOS)  # type: ignore[attr-defined]
-    thumb_buffer = io.BytesIO()
-    thumb_format = "JPEG" if mimetype == "image/jpeg" else "PNG"
-    thumb.save(thumb_buffer, format=thumb_format)
+        # Generate thumbnail (800px max dimension).
+        thumb = img.copy()
+        thumb.thumbnail((800, 800), PIL.Image.LANCZOS)  # type: ignore[attr-defined]
+        thumb_buffer = io.BytesIO()
+        thumb_format = "JPEG" if mimetype == "image/jpeg" else "PNG"
+        thumb.save(thumb_buffer, format=thumb_format)
 
     return width, height, thumb_buffer.getvalue()
+
+
+def _attachment_disposition(filename: str | None) -> str:
+    """Build a `Content-Disposition: attachment` value for `filename`.
+
+    Sets both a quoted ASCII `filename` fallback (stripped of characters
+    that could otherwise break out of the quoted string or inject a
+    header value) and an RFC 5987 `filename*` for clients that honor it,
+    which round-trips non-ASCII names correctly instead of mangling them.
+    """
+    if not filename:
+        return "attachment"
+    safe_ascii = filename.encode("ascii", "ignore").decode().replace('"', "")
+    encoded = quote(filename, safe="")
+    return f"attachment; filename=\"{safe_ascii}\"; filename*=UTF-8''{encoded}"
 
 
 def is_thumbnailable(mimetype: str) -> bool:
@@ -215,6 +271,8 @@ async def get_download_url(
     object_key: str,
     bucket: str | None = None,
     expires_in: int = 3600,
+    mimetype: str | None = None,
+    filename: str | None = None,
 ) -> str:
     """Generate a presigned download URL for an object.
 
@@ -222,6 +280,16 @@ async def get_download_url(
         object_key: The object key in the bucket.
         bucket: Storage bucket. Defaults to ``settings.STORAGE_BUCKET``.
         expires_in: URL expiry in seconds (default 1 hour).
+        mimetype: MIME type of the object. When given and not one of
+            ``INLINE_SAFE_MIMETYPES``, the URL forces
+            ``Content-Disposition: attachment`` so a browser downloads
+            rather than renders the response. An allowlist rather than an
+            ``image/*`` prefix test, since ``image/svg+xml`` also matches
+            that prefix but can embed ``<script>`` that executes when
+            rendered inline, the same class of risk as an uploaded
+            HTML/JS file served inline.
+        filename: Original filename to suggest in the attachment
+            disposition, when forcing one.
 
     Returns:
         Presigned URL string.
@@ -230,10 +298,13 @@ async def get_download_url(
 
     client = _s3_client()
     bucket = bucket or settings.STORAGE_BUCKET
+    parameters: dict[str, Any] = {"Bucket": bucket, "Key": object_key}
+    if mimetype is not None and mimetype not in INLINE_SAFE_MIMETYPES:
+        parameters["ResponseContentDisposition"] = _attachment_disposition(filename)
     url = await asyncio.to_thread(
         client.generate_presigned_url,
         "get_object",
-        Parameters={"Bucket": bucket, "Key": object_key},
+        Parameters=parameters,
         ExpiresIn=expires_in,
     )
     return cast(str, url)

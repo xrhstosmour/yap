@@ -211,7 +211,11 @@ async def create_user(
     service = UserService(session)
 
     try:
-        user = await service.create(data, created_by=current_user.id)
+        user = await service.create(
+            data,
+            created_by=current_user.id,
+            creator_tenant_id=current_user.tenant_id,
+        )
         return UserResponse.model_validate(user)
     except (ValueError, UserServiceError) as e:
         raise HTTPException(
