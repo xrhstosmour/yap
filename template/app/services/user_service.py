@@ -137,19 +137,43 @@ class UserService:
         self,
         data: UserCreate,
         created_by: UUID | None = None,
+        creator_tenant_id: UUID | None = None,
     ) -> User:
         """Create a new user.
 
         Args:
             data: User creation data
             created_by: UUID of user creating this account
+            creator_tenant_id: Tenant of the user making this request. A
+                caller outside the system tenant may only create users
+                inside their own tenant, a client-supplied `data.tenant_id`
+                pointing elsewhere is rejected rather than honored, which
+                would otherwise let a tenant-scoped superuser plant a user
+                (including another superuser) in a foreign tenant. `None`
+                is treated as "not a platform admin" (fail closed), not
+                coalesced to `SYSTEM_TENANT_ID`, since `User.tenant_id` is
+                nullable at the type level and silently promoting a caller
+                with no known tenant to platform-admin would be a
+                privilege escalation in its own right.
 
         Returns:
             Created User
+
+        Raises:
+            UserServiceError: If the email is already in use, or a
+                tenant-scoped caller requests a foreign `tenant_id`.
         """
         # Check email exists.
         if await self.user_repository.email_exists(data.email):
             raise UserServiceError("Email already in use")
+
+        caller_is_platform_admin = creator_tenant_id == SYSTEM_TENANT_ID
+        if (
+            data.tenant_id is not None
+            and not caller_is_platform_admin
+            and data.tenant_id != creator_tenant_id
+        ):
+            raise UserServiceError("Cannot create a user in another tenant")
 
         # Create user.
         role = UserRole(data.role) if data.role else UserRole.USER
@@ -158,7 +182,7 @@ class UserService:
             email=data.email,
             password_hash=password_hash,
             full_name=data.full_name,
-            tenant_id=data.tenant_id or SYSTEM_TENANT_ID,
+            tenant_id=data.tenant_id or creator_tenant_id or SYSTEM_TENANT_ID,
             role=role,
         )
 

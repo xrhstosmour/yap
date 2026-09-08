@@ -198,6 +198,47 @@ class TestUsersCreate:
         assert response.status_code == 400
         assert "already in use" in response.json()["detail"]
 
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_create_user_with_foreign_tenant_id_returns_400(
+        self, client: AsyncClient, session: AsyncSession
+    ) -> None:
+        """A tenant-scoped superuser cannot plant a user in another tenant.
+
+        Regression: `UserService.create()` used to take `data.tenant_id`
+        verbatim, letting any superuser create a user (including another
+        superuser) inside an arbitrary tenant.
+        """
+        from app.models.tenant import Tenant
+
+        auth_service = _auth_service(session)
+        own_tenant = Tenant(name="Own Co", slug="own-co-create-user")
+        foreign_tenant = Tenant(name="Foreign Co", slug="foreign-co-create-user")
+        session.add(own_tenant)
+        session.add(foreign_tenant)
+        await session.commit()
+
+        superuser = await auth_service.user_repository.create_user(
+            email=f"scoped-superuser-{uuid7()}@{{ project_slug }}.com",
+            password_hash=generate_password_hash("password123"),
+            tenant_id=own_tenant.id,
+            role=UserRole.SUPERUSER,
+        )
+        token = create_access_token(subject=superuser.id)
+
+        response = await client.post(
+            "/api/v1/users",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "email": f"planted-{uuid7()}@{{ project_slug }}.com",
+                "full_name": "Planted User",
+                "password": "password123",
+                "tenant_id": str(foreign_tenant.id),
+            },
+        )
+
+        assert response.status_code == 400
+        assert "another tenant" in response.json()["detail"].lower()
+
 
 class TestUsersUpdate:
     """Tests for PATCH /api/v1/users/{user_id}."""

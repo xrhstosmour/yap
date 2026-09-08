@@ -90,6 +90,7 @@ async def test_list_tenants_authenticated_non_admin(
 @pytest.mark.anyio
 @pytest.mark.usefixtures("override_get_async_session")
 async def test_crud_tenant_as_admin(client: AsyncClient, session) -> None:
+    from app.core import SYSTEM_TENANT_ID
     from app.services.auth_service import AuthService
 
     service = AuthService(session)
@@ -98,6 +99,7 @@ async def test_crud_tenant_as_admin(client: AsyncClient, session) -> None:
         hashed_password="hash",
         role=UserRole.SUPERUSER,
         is_active=True,
+        tenant_id=SYSTEM_TENANT_ID,
     )
     session.add(admin)
     await session.commit()
@@ -147,6 +149,7 @@ async def test_cannot_delete_system_tenant(client: AsyncClient, session) -> None
         hashed_password="hash",
         role=UserRole.SUPERUSER,
         is_active=True,
+        tenant_id=SYSTEM_TENANT_ID,
     )
     session.add(admin)
     await session.commit()
@@ -163,6 +166,7 @@ async def test_cannot_delete_system_tenant(client: AsyncClient, session) -> None
 @pytest.mark.anyio
 @pytest.mark.usefixtures("override_get_async_session")
 async def test_duplicate_slug_rejected(client: AsyncClient, session) -> None:
+    from app.core import SYSTEM_TENANT_ID
     from app.services.auth_service import AuthService
 
     service = AuthService(session)
@@ -171,6 +175,7 @@ async def test_duplicate_slug_rejected(client: AsyncClient, session) -> None:
         hashed_password="hash",
         role=UserRole.SUPERUSER,
         is_active=True,
+        tenant_id=SYSTEM_TENANT_ID,
     )
     session.add(admin)
     await session.commit()
@@ -221,8 +226,196 @@ async def test_unknown_sort_by_rejected(client: AsyncClient, session) -> None:
 
 @pytest.mark.anyio
 @pytest.mark.usefixtures("override_get_async_session")
+async def test_tenant_scoped_superuser_cannot_list_tenants(
+    client: AsyncClient, session
+) -> None:
+    """A superuser outside the system tenant is not a platform admin."""
+    from app.core import SYSTEM_TENANT_ID
+    from app.models.tenant import Tenant
+    from app.services.auth_service import AuthService
+
+    service = AuthService(session)
+    other_tenant = Tenant(name="Other Co", slug="other-co-list")
+    session.add(other_tenant)
+    await session.commit()
+    assert other_tenant.id != SYSTEM_TENANT_ID
+
+    admin = User(
+        email="scoped-admin-list@example.com",
+        hashed_password="hash",
+        role=UserRole.SUPERUSER,
+        is_active=True,
+        tenant_id=other_tenant.id,
+    )
+    session.add(admin)
+    await session.commit()
+    tokens = service.create_tokens(admin)
+
+    response = await client.get(
+        "/api/v1/tenants",
+        headers={"Authorization": f"Bearer {tokens.access_token}"},
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("override_get_async_session")
+async def test_tenant_scoped_superuser_cannot_create_tenant(
+    client: AsyncClient, session
+) -> None:
+    from app.core import SYSTEM_TENANT_ID
+    from app.models.tenant import Tenant
+    from app.services.auth_service import AuthService
+
+    service = AuthService(session)
+    other_tenant = Tenant(name="Other Co", slug="other-co-create")
+    session.add(other_tenant)
+    await session.commit()
+    assert other_tenant.id != SYSTEM_TENANT_ID
+
+    admin = User(
+        email="scoped-admin-create@example.com",
+        hashed_password="hash",
+        role=UserRole.SUPERUSER,
+        is_active=True,
+        tenant_id=other_tenant.id,
+    )
+    session.add(admin)
+    await session.commit()
+    tokens = service.create_tokens(admin)
+
+    response = await client.post(
+        "/api/v1/tenants",
+        json={"name": "New Co", "slug": "new-co"},
+        headers={"Authorization": f"Bearer {tokens.access_token}"},
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("override_get_async_session")
+async def test_tenant_scoped_superuser_cannot_delete_foreign_tenant(
+    client: AsyncClient, session
+) -> None:
+    from app.core import SYSTEM_TENANT_ID
+    from app.models.tenant import Tenant
+    from app.services.auth_service import AuthService
+
+    service = AuthService(session)
+    own_tenant = Tenant(name="Own Co", slug="own-co-delete")
+    foreign_tenant = Tenant(name="Foreign Co", slug="foreign-co-delete")
+    session.add(own_tenant)
+    session.add(foreign_tenant)
+    await session.commit()
+    assert own_tenant.id != SYSTEM_TENANT_ID
+
+    admin = User(
+        email="scoped-admin-delete@example.com",
+        hashed_password="hash",
+        role=UserRole.SUPERUSER,
+        is_active=True,
+        tenant_id=own_tenant.id,
+    )
+    session.add(admin)
+    await session.commit()
+    tokens = service.create_tokens(admin)
+
+    response = await client.delete(
+        f"/api/v1/tenants/{foreign_tenant.id}",
+        headers={"Authorization": f"Bearer {tokens.access_token}"},
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("override_get_async_session")
+async def test_tenant_scoped_superuser_gets_404_for_foreign_tenant_get(
+    client: AsyncClient, session
+) -> None:
+    """A cross-tenant GET reads as not found, not a 403 that discloses it."""
+    from app.core import SYSTEM_TENANT_ID
+    from app.models.tenant import Tenant
+    from app.services.auth_service import AuthService
+
+    service = AuthService(session)
+    own_tenant = Tenant(name="Own Co", slug="own-co-get")
+    foreign_tenant = Tenant(name="Foreign Co", slug="foreign-co-get")
+    session.add(own_tenant)
+    session.add(foreign_tenant)
+    await session.commit()
+    assert own_tenant.id != SYSTEM_TENANT_ID
+
+    admin = User(
+        email="scoped-admin-get@example.com",
+        hashed_password="hash",
+        role=UserRole.SUPERUSER,
+        is_active=True,
+        tenant_id=own_tenant.id,
+    )
+    session.add(admin)
+    await session.commit()
+    tokens = service.create_tokens(admin)
+
+    response = await client.get(
+        f"/api/v1/tenants/{foreign_tenant.id}",
+        headers={"Authorization": f"Bearer {tokens.access_token}"},
+    )
+    assert response.status_code == 404
+
+    response = await client.patch(
+        f"/api/v1/tenants/{foreign_tenant.id}",
+        json={"name": "Hijacked"},
+        headers={"Authorization": f"Bearer {tokens.access_token}"},
+    )
+    assert response.status_code == 404
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("override_get_async_session")
+async def test_tenant_scoped_superuser_can_manage_own_tenant(
+    client: AsyncClient, session
+) -> None:
+    from app.core import SYSTEM_TENANT_ID
+    from app.models.tenant import Tenant
+    from app.services.auth_service import AuthService
+
+    service = AuthService(session)
+    own_tenant = Tenant(name="Own Co", slug="own-co-manage")
+    session.add(own_tenant)
+    await session.commit()
+    assert own_tenant.id != SYSTEM_TENANT_ID
+
+    admin = User(
+        email="scoped-admin-manage@example.com",
+        hashed_password="hash",
+        role=UserRole.SUPERUSER,
+        is_active=True,
+        tenant_id=own_tenant.id,
+    )
+    session.add(admin)
+    await session.commit()
+    tokens = service.create_tokens(admin)
+
+    response = await client.get(
+        f"/api/v1/tenants/{own_tenant.id}",
+        headers={"Authorization": f"Bearer {tokens.access_token}"},
+    )
+    assert response.status_code == 200
+
+    response = await client.patch(
+        f"/api/v1/tenants/{own_tenant.id}",
+        json={"name": "Renamed Own Co"},
+        headers={"Authorization": f"Bearer {tokens.access_token}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["name"] == "Renamed Own Co"
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("override_get_async_session")
 async def test_known_sort_by_still_sorts(client: AsyncClient, session) -> None:
     """A sortable column still sorts."""
+    from app.core import SYSTEM_TENANT_ID
     from app.services.auth_service import AuthService
 
     service = AuthService(session)
@@ -231,6 +424,7 @@ async def test_known_sort_by_still_sorts(client: AsyncClient, session) -> None:
         hashed_password="hash",
         role=UserRole.SUPERUSER,
         is_active=True,
+        tenant_id=SYSTEM_TENANT_ID,
     )
     session.add(admin)
     await session.commit()
