@@ -54,6 +54,7 @@ from typing import Any
 from cryptography.fernet import Fernet
 from cryptography.fernet import MultiFernet
 from sqlalchemy import String
+from sqlalchemy import inspect
 from sqlalchemy.types import TypeDecorator
 
 
@@ -232,6 +233,29 @@ class EncryptedString(TypeDecorator[str]):
         if value is None:
             return None
         return crypto.decrypt(str(value))
+
+
+def encrypted_column_names(model: type[Any]) -> frozenset[str]:
+    """Return the attribute names of `model`'s `EncryptedString` columns.
+
+    Single source of truth for "which fields on this model are PII that
+    need re-encrypting or redacting before landing in an unencrypted
+    column elsewhere" (graveyard snapshots, audit log `changes`, etc.),
+    derived from the mapper instead of a hand-maintained list that can
+    drift from the model's actual column types.
+
+    Args:
+        model: A mapped SQLModel/SQLAlchemy model class.
+
+    Returns:
+        Attribute names whose column type is `EncryptedString`.
+    """
+    mapper = inspect(model)
+    return frozenset(
+        column.key
+        for column in mapper.column_attrs
+        if isinstance(column.columns[0].type, EncryptedString)
+    )
 
 
 def generate_key() -> str:
