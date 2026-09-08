@@ -437,6 +437,62 @@ class TestAuditLogRepository:
         assert count == 0
 
     @pytest.mark.anyio
+    async def test_cleanup_old_logs_sweeps_every_tenant_with_no_context(
+        self, session: AsyncSession
+    ) -> None:
+        """With no tenant context, cleanup_old_logs() sweeps every tenant.
+
+        This is the real call path: the Celery task that calls
+        cleanup_old_logs() runs with no tenant context of its own. That
+        used to be indistinguishable from a forgotten tenant_context(...),
+        both ran the update unfiltered; routing through
+        _apply_tenant_filter()/system_context() makes the cross-tenant
+        sweep an explicit, enforced opt-in instead of an ambient side
+        effect of `tenant_id` happening to be `None`.
+
+        Args:
+            session: Async database session fixture.
+
+        Returns:
+            None.
+        """
+        tenant_a = await self._create_tenant(session, slug="sweep-org-a")
+        tenant_b = await self._create_tenant(session, slug="sweep-org-b")
+        repo = AuditLogRepository(session)
+        user_id = uuid4()
+
+        old_date = datetime.now(UTC) - timedelta(days=400)
+        log_a = AuditLog(
+            action="old_action",
+            actor_id=str(user_id),
+            actor_type="user",
+            tenant_id=tenant_a.id,
+            status="success",
+            created_at=old_date,
+        )
+        log_b = AuditLog(
+            action="old_action",
+            actor_id=str(user_id),
+            actor_type="user",
+            tenant_id=tenant_b.id,
+            status="success",
+            created_at=old_date,
+        )
+        session.add_all([log_a, log_b])
+        await session.commit()
+
+        # No tenant_context(...) active, mirroring the Celery task's
+        # ambient state.
+        count = await repo.cleanup_old_logs(days=30)
+
+        assert count == 2
+
+        await session.refresh(log_a)
+        await session.refresh(log_b)
+        assert log_a.deleted_at is not None
+        assert log_b.deleted_at is not None
+
+    @pytest.mark.anyio
     async def test_get_recent_failures_excludes_other_tenants(
         self, session: AsyncSession
     ) -> None:
