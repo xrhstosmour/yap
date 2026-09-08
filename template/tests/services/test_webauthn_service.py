@@ -272,6 +272,48 @@ class TestCompleteRegistration:
         service.session.flush.assert_awaited_once()
 
     @pytest.mark.asyncio
+    async def test_requires_user_verification(
+        self,
+        service: WebAuthnService,
+    ) -> None:
+        """Registration must demand a verified authenticator (PIN/biometric),
+        not merely user presence (a touch/tap). A non-UV authenticator
+        satisfies far weaker "someone is present" than "this is the owner",
+        so accepting it silently downgrades the second authentication
+        factor to presence alone.
+        """
+        user = make_user()
+
+        mock_redis = AsyncMock()
+        mock_redis.getdel = AsyncMock(return_value="Y2hhbGxlbmdl")
+
+        fake_verification = MagicMock()
+        fake_verification.credential_id = b"cred-id-bytes"
+        fake_verification.credential_public_key = b"pub-key-bytes"
+        fake_verification.sign_count = 0
+
+        credential_payload = {
+            "id": "credential-id-b64",
+            "raw_id": "Y3JlZGVudGlhbC1pZC1iNjRz",
+            "response": {
+                "attestation_object": "o2NmbXRkbm9uZQ==",
+                "client_data_json": "eyJjaGFsbGVuZ2UiOiJZMiU=",
+            },
+            "type": "public-key",
+        }
+
+        with (
+            patch("app.services.webauthn_service.get_redis", return_value=mock_redis),
+            patch(
+                "app.services.webauthn_service.verify_registration_response",
+                return_value=fake_verification,
+            ) as mock_verify,
+        ):
+            await service.complete_registration(user, credential_payload)
+
+        assert mock_verify.call_args.kwargs["require_user_verification"] is True
+
+    @pytest.mark.asyncio
     async def test_raises_on_verification_failure(
         self,
         service: WebAuthnService,
@@ -422,6 +464,58 @@ class TestCompleteAuthentication:
         assert stored_cred.sign_count == 5
         assert stored_cred.last_used_at is not None
         service.session.flush.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_requires_user_verification(
+        self,
+        service: WebAuthnService,
+    ) -> None:
+        """Authentication must demand a verified authenticator, not merely
+        user presence. See the matching registration test for why."""
+        user = make_user()
+        stored_cred = MagicMock()
+        stored_cred.credential_id = (
+            "dGVzdC1jcmVkZW50aWFsLWlk"  # base64url "test-credential-id"
+        )
+        stored_cred.public_key = "cHViLWtleQ=="  # base64url "pub-key"
+        stored_cred.user_id = user.id
+        stored_cred.sign_count = 3
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none = MagicMock(return_value=stored_cred)
+        service.session.execute = AsyncMock(return_value=mock_result)
+
+        mock_redis = AsyncMock()
+        mock_redis.getdel = AsyncMock(return_value="YXV0aC1jaGFsbGVuZ2U=")
+
+        fake_verification = MagicMock()
+        fake_verification.new_sign_count = 5
+
+        service.user_repository.get = AsyncMock(return_value=user)
+
+        from webauthn.helpers import base64url_to_bytes
+
+        credential_payload = {
+            "id": "dGVzdC1jcmVkZW50aWFsLWlk",
+            "raw_id": base64url_to_bytes("dGVzdC1jcmVkZW50aWFsLWlk"),
+            "response": {
+                "client_data_json": "eyJjaGFsbGVuZ2UiOiJZMiU=",
+                "authenticator_data": "oA==",
+                "signature": "sig",
+            },
+            "type": "public-key",
+        }
+
+        with (
+            patch("app.services.webauthn_service.get_redis", return_value=mock_redis),
+            patch(
+                "app.services.webauthn_service.verify_authentication_response",
+                return_value=fake_verification,
+            ) as mock_verify,
+        ):
+            await service.complete_authentication(credential_payload)
+
+        assert mock_verify.call_args.kwargs["require_user_verification"] is True
 
     @pytest.mark.asyncio
     async def test_raises_when_challenge_expired(
