@@ -31,19 +31,44 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # GIN trigram index on tenants.name (required for trigram ILIKE / %).
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS ix_tenants_name_trgm "
-        "ON tenants USING gin (name gin_trgm_ops)"
-    )
+    # tenants is a large, actively-queried table, so each index is built
+    # `CONCURRENTLY` to avoid holding the write-blocking lock a plain
+    # `CREATE INDEX` takes for the build's full duration. `CONCURRENTLY`
+    # cannot run inside a transaction block, and `env.py` wraps every
+    # migration in one, so each build runs in its own autocommit block,
+    # which also means this migration no longer rolls back as a single
+    # unit, an interrupted run leaves whatever ran so far committed, safe
+    # to resume by re-running `upgrade head`.
+    #
+    # `IF NOT EXISTS` alone is not a safe retry: a build interrupted by a
+    # crash or deploy timeout leaves an `INVALID` index under that name,
+    # and `IF NOT EXISTS` only checks the name, not validity, so a retry
+    # would silently skip rebuilding it. Dropping any same-named index
+    # first (a no-op if the prior build succeeded, since then this
+    # migration wouldn't be re-run) makes the create always build a
+    # fresh, valid index.
+    with op.get_context().autocommit_block():
+        op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_tenants_name_trgm")
+    with op.get_context().autocommit_block():
+        # GIN trigram index on tenants.name (required for trigram ILIKE / %).
+        op.execute(
+            "CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_tenants_name_trgm "
+            "ON tenants USING gin (name gin_trgm_ops)"
+        )
 
-    # GIN trigram index on tenants.slug (required for trigram ILIKE / %).
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS ix_tenants_slug_trgm "
-        "ON tenants USING gin (slug gin_trgm_ops)"
-    )
+    with op.get_context().autocommit_block():
+        op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_tenants_slug_trgm")
+    with op.get_context().autocommit_block():
+        # GIN trigram index on tenants.slug (required for trigram ILIKE / %).
+        op.execute(
+            "CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_tenants_slug_trgm "
+            "ON tenants USING gin (slug gin_trgm_ops)"
+        )
 
 
 def downgrade() -> None:
-    op.execute("DROP INDEX IF EXISTS ix_tenants_slug_trgm")
-    op.execute("DROP INDEX IF EXISTS ix_tenants_name_trgm")
+    with op.get_context().autocommit_block():
+        op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_tenants_slug_trgm")
+
+    with op.get_context().autocommit_block():
+        op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_tenants_name_trgm")
