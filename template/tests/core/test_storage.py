@@ -182,6 +182,77 @@ class TestGetDownloadUrl:
         _, kwargs = mock_s3_client.generate_presigned_url.call_args
         assert kwargs.get("ExpiresIn") == 900
 
+    @pytest.mark.asyncio
+    async def test_non_image_forces_attachment_disposition(
+        self, mock_s3_client: MagicMock
+    ) -> None:
+        """A non-image mimetype must not render inline in a browser.
+
+        Otherwise an uploaded HTML/SVG file served back under its own
+        content type would execute in the viewer's origin.
+        """
+        await get_download_url(
+            object_key="test-key", mimetype="text/html", filename="page.html"
+        )
+
+        _, kwargs = mock_s3_client.generate_presigned_url.call_args
+        disposition = kwargs["Parameters"]["ResponseContentDisposition"]
+        assert disposition == (
+            "attachment; filename=\"page.html\"; filename*=UTF-8''page.html"
+        )
+
+    @pytest.mark.asyncio
+    async def test_svg_forces_attachment_disposition(
+        self, mock_s3_client: MagicMock
+    ) -> None:
+        """`image/svg+xml` must not render inline either.
+
+        Regression: the original check was `not mimetype.startswith(
+        "image/")`, and `image/svg+xml` matches that prefix despite SVG
+        being able to embed `<script>` that executes on inline render,
+        the exact class of vulnerability this is meant to prevent.
+        """
+        await get_download_url(
+            object_key="test-key", mimetype="image/svg+xml", filename="logo.svg"
+        )
+
+        _, kwargs = mock_s3_client.generate_presigned_url.call_args
+        assert "attachment" in kwargs["Parameters"]["ResponseContentDisposition"]
+
+    @pytest.mark.asyncio
+    async def test_image_mimetype_does_not_force_attachment(
+        self, mock_s3_client: MagicMock
+    ) -> None:
+        """Images on the inline-safe allowlist may still render inline."""
+        await get_download_url(object_key="test-key", mimetype="image/png")
+
+        _, kwargs = mock_s3_client.generate_presigned_url.call_args
+        assert "ResponseContentDisposition" not in kwargs["Parameters"]
+
+    @pytest.mark.asyncio
+    async def test_no_mimetype_does_not_force_attachment(
+        self, mock_s3_client: MagicMock
+    ) -> None:
+        """Without a mimetype (e.g. thumbnails), behavior is unchanged."""
+        await get_download_url(object_key="test-key")
+
+        _, kwargs = mock_s3_client.generate_presigned_url.call_args
+        assert "ResponseContentDisposition" not in kwargs["Parameters"]
+
+    @pytest.mark.asyncio
+    async def test_non_ascii_filename_is_encoded_not_mangled(
+        self, mock_s3_client: MagicMock
+    ) -> None:
+        """A non-ASCII filename must round-trip via `filename*`, not mangle
+        the quoted ASCII fallback."""
+        await get_download_url(
+            object_key="test-key", mimetype="text/plain", filename="résumé.txt"
+        )
+
+        _, kwargs = mock_s3_client.generate_presigned_url.call_args
+        disposition = kwargs["Parameters"]["ResponseContentDisposition"]
+        assert "filename*=UTF-8''r%C3%A9sum%C3%A9.txt" in disposition
+
 
 class TestS3Client:
     """Tests for _s3_client()."""
@@ -289,6 +360,79 @@ class TestBuildThumbnail:
             pytest.raises(OSError, match="cannot identify image"),
         ):
             _build_thumbnail(b"not-actually-an-image", "image/png")
+
+    def test_applies_max_image_pixels_guard(self) -> None:
+        """PIL's decode-bomb guard is set from `MAX_IMAGE_PIXELS`, not left
+        at PIL's own much higher default.
+
+        Set once rather than saved/restored per call: every caller wants
+        the same cap, and a per-call save/restore would race under
+        concurrent `asyncio.to_thread` calls.
+        """
+        import PIL.Image
+
+        from app.core.storage import MAX_IMAGE_PIXELS
+
+        observed: dict[str, int | None] = {}
+
+        def fake_open(_data: object) -> MagicMock:
+            observed["limit"] = PIL.Image.MAX_IMAGE_PIXELS
+            mock_img = MagicMock()
+            mock_img.size = (10, 10)
+            mock_img.copy.return_value = mock_img
+            return mock_img
+
+        with patch("PIL.Image.open", side_effect=fake_open):
+            _build_thumbnail(b"fake-image-data", "image/png")
+
+        assert observed["limit"] == MAX_IMAGE_PIXELS
+        assert PIL.Image.MAX_IMAGE_PIXELS == MAX_IMAGE_PIXELS
+
+    def test_decompression_bomb_raises_pil_error(self) -> None:
+        """A decompression bomb surfaces as `PIL.Image.DecompressionBombError`
+        so the caller (the thumbnail task) can handle it explicitly."""
+        import PIL.Image
+
+        with (
+            patch(
+                "PIL.Image.open",
+                side_effect=PIL.Image.DecompressionBombError("image too large"),
+            ),
+            pytest.raises(PIL.Image.DecompressionBombError),
+        ):
+            _build_thumbnail(b"huge-image-data", "image/png")
+
+    def test_decompression_bomb_warning_band_also_raises(self) -> None:
+        """An image between 1x and 2x `MAX_IMAGE_PIXELS` must also be
+        rejected, not silently decoded.
+
+        Regression: PIL only raises `DecompressionBombError` above 2x
+        `MAX_IMAGE_PIXELS`, between 1x and 2x it only emits
+        `DecompressionBombWarning` (via `warnings.warn`) and decodes
+        anyway, which would have let an image up to twice the intended
+        cap through. `_build_thumbnail` must escalate that warning to an
+        exception, not just handle a warning PIL never actually raises
+        this way in the test.
+        """
+        import warnings
+
+        import PIL.Image
+
+        def fake_open(_data: object) -> MagicMock:
+            warnings.warn(
+                PIL.Image.DecompressionBombWarning("image too large for cache limit"),
+                stacklevel=1,
+            )
+            mock_img = MagicMock()
+            mock_img.size = (10, 10)
+            mock_img.copy.return_value = mock_img
+            return mock_img
+
+        with (
+            patch("PIL.Image.open", side_effect=fake_open),
+            pytest.raises(PIL.Image.DecompressionBombWarning),
+        ):
+            _build_thumbnail(b"big-image-data", "image/png")
 
 
 class TestUploadObject:

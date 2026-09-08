@@ -279,14 +279,49 @@ class AuthService:
         if not user:
             # Verify against dummy hash to prevent timing attacks.
             await asyncio.to_thread(verify_password, password, DUMMY_PASSWORD_HASH)
+            # No account, and so no tenant, exists for this email: falls
+            # back to SYSTEM_TENANT_ID, the same well-known tenant used
+            # elsewhere in this service for actors without one yet (see
+            # verify_magic_link and google_login).
+            await self.audit_repository.log_user_action_safe(
+                action=AuditAction.LOGIN_FAILED,
+                user_id="unknown",
+                tenant_id=SYSTEM_TENANT_ID,
+                email=email,
+                status="failure",
+            )
+            # `log_user_action_safe` only writes inside a SAVEPOINT; the
+            # session-scoped commit that normally follows a route never
+            # runs here because this method raises immediately below,
+            # which rolls the whole transaction (savepoint included) back
+            # instead. Commit explicitly so the audit trail this is for
+            # actually survives the failed request.
+            await self.session.commit()
             raise InvalidCredentialsError("Invalid email or password")
 
         # Verify password.
         if not await asyncio.to_thread(verify_password, password, user.hashed_password):
+            await self.audit_repository.log_user_action_safe(
+                action=AuditAction.LOGIN_FAILED,
+                user_id=user.id,
+                tenant_id=user.tenant_id or SYSTEM_TENANT_ID,
+                email=user.email,
+                status="failure",
+            )
+            await self.session.commit()
             raise InvalidCredentialsError("Invalid email or password")
 
         # Check if active.
         if not user.is_active:
+            await self.audit_repository.log_user_action_safe(
+                action=AuditAction.LOGIN_FAILED,
+                user_id=user.id,
+                tenant_id=user.tenant_id or SYSTEM_TENANT_ID,
+                email=user.email,
+                status="failure",
+                error_message="inactive",
+            )
+            await self.session.commit()
             raise UserInactiveError("User account is inactive")
 
         # Log successful login.
