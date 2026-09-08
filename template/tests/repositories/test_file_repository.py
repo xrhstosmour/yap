@@ -312,10 +312,10 @@ class TestFileRepository:
         """Two colleagues uploading identical content must not share a row.
 
         A row carries a single ``uploaded_by``, so handing the second
-        uploader the first one's row gave them the first one's filename,
-        visibility and file ID, and a reference they could never release,
-        since ``get_owned()`` filters on ``uploaded_by`` and locked them
-        straight back out of it.
+        uploader the first one's row gave them the first one's filename
+        and file ID, and a reference they could never release, since
+        ``get_owned()`` filters on ``uploaded_by`` and locked them straight
+        back out of it.
 
         Args:
             session: Async database session fixture.
@@ -334,7 +334,6 @@ class TestFileRepository:
                     uploaded_by=first.id,
                     content_hash="shared-between-colleagues",
                     filename="first.txt",
-                    is_public=True,
                 )
             )
             record_second, created_second = await repo.create_or_increment(
@@ -342,7 +341,6 @@ class TestFileRepository:
                     uploaded_by=second.id,
                     content_hash="shared-between-colleagues",
                     filename="second.txt",
-                    is_public=False,
                 )
             )
 
@@ -350,9 +348,8 @@ class TestFileRepository:
             assert created_second is True
             assert record_first.id != record_second.id
             assert record_second.uploaded_by == second.id
-            # Neither their colleague's name for it nor their visibility.
+            # Not their colleague's name for it.
             assert record_second.filename == "second.txt"
-            assert record_second.is_public is False
 
             assert await repo.get_owned(record_second.id, second.id) is not None
 

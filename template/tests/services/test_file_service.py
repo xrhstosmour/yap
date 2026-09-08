@@ -13,6 +13,9 @@ from app.core import SYSTEM_TENANT_ID
 from app.core.settings import settings
 from app.models.file import File
 from app.services.file_service import FileService
+from app.services.file_service import FileTypeMismatchError
+
+PNG_MAGIC_BYTES = b"\x89PNG\r\n\x1a\n" + b"rest of a fake png"
 
 
 @pytest.fixture
@@ -205,7 +208,7 @@ class TestUpload:
         mock_file = MagicMock()
         mock_file.filename = "photo.png"
         mock_file.content_type = "image/png"
-        mock_file.read = AsyncMock(side_effect=[b"image bytes", b""])
+        mock_file.read = AsyncMock(side_effect=[PNG_MAGIC_BYTES, b""])
 
         service.file_repository.get_by_content_hash = AsyncMock(return_value=None)
         new_record = File(
@@ -265,6 +268,60 @@ class TestUpload:
             await service.upload(mock_file, user)
 
         mock_task.delay.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_rejects_content_that_does_not_match_declared_mimetype(
+        self, service: FileService
+    ) -> None:
+        """A declared `image/png` whose bytes are not a PNG must be rejected.
+
+        `Content-Type` is client-supplied and untrusted: without a magic-byte
+        check, an HTML/SVG payload declared as an image type would be
+        accepted and later served back under that image content type.
+        """
+        user = make_user()
+        mock_file = MagicMock()
+        mock_file.filename = "fake.png"
+        mock_file.content_type = "image/png"
+        mock_file.read = AsyncMock(side_effect=[b"<script>alert(1)</script>", b""])
+
+        with pytest.raises(FileTypeMismatchError):
+            await service.upload(mock_file, user)
+
+        service.file_repository.create_or_increment.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_allows_content_without_a_known_signature(
+        self, service: FileService
+    ) -> None:
+        """A type with no magic-byte signature (e.g. `text/plain`) passes
+        through unchecked, since it cannot be verified this way."""
+        user = make_user()
+        mock_file = MagicMock()
+        mock_file.filename = "notes.txt"
+        mock_file.content_type = "text/plain"
+        mock_file.read = AsyncMock(side_effect=[b"just some notes", b""])
+
+        service.file_repository.get_by_content_hash = AsyncMock(return_value=None)
+        new_record = File(
+            filename="notes.txt",
+            mimetype="text/plain",
+            size=15,
+            content_hash="dummy",
+            bucket="default",
+            object_key="uploads/abc123",
+            reference_count=1,
+            uploaded_by=user.id,
+        )
+        service.file_repository.create_or_increment = AsyncMock(
+            return_value=(new_record, True)
+        )
+
+        with patch("app.services.file_service.upload_file") as mock_upload:
+            mock_upload.return_value = ("uploads/abc123", "abc123")
+            record = await service.upload(mock_file, user)
+
+        assert record is new_record
 
 
 class TestDelete:

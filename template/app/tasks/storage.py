@@ -16,8 +16,13 @@ logger = get_logger("tasks.storage")
     bind=True,
     name="app.tasks.storage.generate_thumbnail",
     max_retries=3,
-    default_retry_delay=30,
     autoretry_for=(Exception,),
+    # `retry_backoff` computes the retry delay itself (`base * 2**retries`),
+    # `default_retry_delay` is never consulted once it's set, passed as the
+    # base delay in seconds rather than `True` (a factor of 1, backing off
+    # from ~1 second instead of ~30).
+    retry_backoff=30,
+    retry_jitter=True,
 )
 def generate_thumbnail_task(self, file_id: str) -> dict:
     """Generate and store a thumbnail for an uploaded image file.
@@ -54,10 +59,29 @@ def generate_thumbnail_task(self, file_id: str) -> dict:
                 if record is None:
                     return {"status": "skipped", "reason": "file_not_found"}
 
+                import PIL.Image
+
                 content = await download_object(record.object_key, bucket=record.bucket)
-                width, height, thumbnail_bytes = await asyncio.to_thread(
-                    _build_thumbnail, content, record.mimetype
-                )
+                try:
+                    width, height, thumbnail_bytes = await asyncio.to_thread(
+                        _build_thumbnail, content, record.mimetype
+                    )
+                except (
+                    PIL.Image.DecompressionBombError,
+                    PIL.Image.DecompressionBombWarning,
+                ):
+                    # `_build_thumbnail` escalates PIL's decompression-bomb
+                    # warning (raised for 1x-2x MAX_IMAGE_PIXELS) to an
+                    # exception too, so both it and the error PIL raises
+                    # above 2x land here. Deterministic for this file's
+                    # bytes, retrying would just fail the same way three
+                    # more times, caught here explicitly rather than
+                    # falling through to the generic `except Exception`
+                    # below, which would autoretry it.
+                    logger.warning(
+                        "thumbnail_decompression_bomb_rejected", file_id=file_id
+                    )
+                    return {"status": "rejected", "reason": "decompression_bomb"}
 
                 # Keyed off the record's own uploader and tenant, not the
                 # context: this runs inside `system_context()`, so the
@@ -90,5 +114,9 @@ def generate_thumbnail_task(self, file_id: str) -> dict:
     try:
         return asyncio.run(_run())
     except Exception as e:
+        # Retrying is handled declaratively by `autoretry_for` above; a
+        # manual `self.retry(exc=e)` here duplicated that mechanism and
+        # raced it. Logging is kept, then the exception is re-raised so
+        # Celery's own retry machinery takes over.
         logger.warning("thumbnail_generation_failed", file_id=file_id, error=str(e))
-        raise self.retry(exc=e) from e
+        raise
