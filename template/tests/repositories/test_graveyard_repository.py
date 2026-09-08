@@ -16,8 +16,10 @@ from app.core.tenant import system_context
 from app.core.tenant import tenant_context
 from app.models.graveyard import Graveyard
 from app.models.tenant import Tenant
+from app.models.user import User
 from app.repositories.base import TenantContextRequiredError
 from app.repositories.graveyard_repository import GraveyardRepository
+from app.repositories.user_repository import UserRepository
 
 
 class TestGraveyardRepository:
@@ -167,6 +169,85 @@ class TestGraveyardRepository:
         )
 
         assert entry.reason is None
+
+    @pytest.mark.anyio
+    async def test_soft_delete_encrypts_pii_in_graveyard_snapshot(
+        self, session: AsyncSession
+    ) -> None:
+        """Soft-deleting a user must not leak plaintext PII into the graveyard.
+
+        `User.email`/`User.phone` are `EncryptedString` columns, so
+        `getattr()` on the loaded model returns decrypted plain text.
+        `BaseRepository._bury()` must re-encrypt those values before
+        writing the graveyard's plain `JSON` snapshot, or a soft delete
+        would bypass the encryption applied to the live `users` table.
+        """
+        user_repo = UserRepository(session)
+        with system_context():
+            user = User(
+                email="alice@example.com",
+                hashed_password="hash",
+                phone="+15551234567",
+            )
+            session.add(user)
+            await session.commit()
+            await session.refresh(user)
+            record_id = user.id
+
+            await user_repo.delete(record_id)
+
+            result = await session.execute(
+                select(Graveyard).where(Graveyard.record_id == record_id)
+            )
+            entry = result.scalar_one()
+
+            assert entry.data["email"] != "alice@example.com"
+            assert entry.data["phone"] != "+15551234567"
+            assert "alice@example.com" not in str(entry.data)
+            assert "+15551234567" not in str(entry.data)
+            assert str(entry.data["email"]).startswith("enc:")
+            assert str(entry.data["phone"]).startswith("enc:")
+
+            recovered = await GraveyardRepository(session).recover(record_id)
+
+        assert recovered is not None
+        assert recovered["email"] == "alice@example.com"
+        assert recovered["phone"] == "+15551234567"
+
+    @pytest.mark.anyio
+    async def test_recover_does_not_decrypt_a_plaintext_value_starting_with_enc_prefix(
+        self, session: AsyncSession
+    ) -> None:
+        """A plaintext field that happens to start with `"enc:"` must not
+        crash recovery.
+
+        Regression: decrypting was originally decided by pattern-sniffing
+        every string value for the `"enc:"` prefix `EncryptedString`
+        writes, rather than by an explicit record of which keys `_bury()`
+        actually encrypted. A user-controlled, never-encrypted field (e.g.
+        `full_name`) set to a value starting with `"enc:"` would then hit
+        `crypto.decrypt()` on non-Fernet data and raise, permanently
+        blocking recovery of that record.
+        """
+        with system_context():
+            user = User(
+                email="bob@example.com",
+                hashed_password="hash",
+                full_name="enc:not-actually-encrypted",
+            )
+            session.add(user)
+            await session.commit()
+            await session.refresh(user)
+            record_id = user.id
+
+            await UserRepository(session).delete(record_id)
+
+            recovered = await GraveyardRepository(session).recover(record_id)
+
+        assert recovered is not None
+        assert recovered["full_name"] == "enc:not-actually-encrypted"
+        assert recovered["email"] == "bob@example.com"
+        assert "__encrypted_keys__" not in recovered
 
     @pytest.mark.anyio
     async def test_recover_returns_data_within_same_tenant(
