@@ -38,7 +38,6 @@ async def upload_file(
     file: UploadFile,
     current_user: CurrentUser,
     session: SessionDependency,
-    is_public: bool = False,
     resource_type: str | None = None,
     resource_id: str | None = None,
 ) -> FileUploadResponse:
@@ -53,7 +52,6 @@ async def upload_file(
         record = await service.upload(
             file=file,
             user=current_user,
-            is_public=is_public,
             resource_type=resource_type,
             resource_id=resource_id,
         )
@@ -67,7 +65,6 @@ async def upload_file(
         filename=record.filename,
         mimetype=record.mimetype,
         size=record.size,
-        is_public=record.is_public,
     )
 
 
@@ -126,7 +123,6 @@ async def get_file_metadata(
         mimetype=record.mimetype,
         size=record.size,
         content_hash=record.content_hash,
-        is_public=record.is_public,
         image_width=record.image_width,
         image_height=record.image_height,
         resource_type=record.resource_type,

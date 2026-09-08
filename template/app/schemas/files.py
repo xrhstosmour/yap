@@ -17,14 +17,12 @@ class FileUploadResponse(BaseSchema):
         filename: Original filename.
         mimetype: MIME type.
         size: File size in bytes.
-        is_public: Whether the file is publicly accessible.
     """
 
     id: UUID = Field(description="File UUID")
     filename: str = Field(description="Original filename")
     mimetype: str = Field(description="MIME type")
     size: int = Field(description="File size in bytes")
-    is_public: bool = Field(description="Whether the file is publicly accessible")
 
 
 class FileUrlResponse(BaseSchema):
@@ -50,7 +48,6 @@ class FileMetadataResponse(BaseSchema):
         mimetype: MIME type.
         size: File size in bytes.
         content_hash: SHA-256 hash of the file content.
-        is_public: Whether the file is publicly accessible.
         image_width: Image width in pixels (if image).
         image_height: Image height in pixels (if image).
         resource_type: Optional resource type this file is attached to.
@@ -64,7 +61,6 @@ class FileMetadataResponse(BaseSchema):
     mimetype: str = Field(description="MIME type")
     size: int = Field(description="File size in bytes")
     content_hash: str = Field(description="SHA-256 content hash")
-    is_public: bool = Field(description="Whether the file is publicly accessible")
     image_width: int | None = Field(default=None, description="Image width in pixels")
     image_height: int | None = Field(default=None, description="Image height in pixels")
     resource_type: str | None = Field(

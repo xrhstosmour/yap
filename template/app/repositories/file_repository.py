@@ -116,7 +116,6 @@ class FileRepository(BaseRepository[File]):
                 "thumbnail_object_key",
                 "image_width",
                 "image_height",
-                "is_public",
                 "resource_type",
                 "resource_id",
                 "created_at",
