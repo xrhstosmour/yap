@@ -23,6 +23,33 @@ logger = get_logger("service.file")
 
 MAX_UPLOAD_SIZE = 25 * 1024 * 1024  # 25MB
 
+# Magic-byte signatures for content types we can verify without a new
+# dependency. A declared `Content-Type` is client-supplied and untrusted
+# (see `upload()`), so for every type listed here the actual bytes must
+# start with one of its signatures or the upload is rejected. Types not
+# listed (`text/plain`, `application/json`, ...) have no reliable magic
+# bytes and are passed through unchecked.
+_MIME_SIGNATURES: dict[str, tuple[bytes, ...]] = {
+    "image/jpeg": (b"\xff\xd8\xff",),
+    "image/png": (b"\x89PNG\r\n\x1a\n",),
+    "image/gif": (b"GIF87a", b"GIF89a"),
+    "application/pdf": (b"%PDF-",),
+}
+
+
+def _mimetype_matches_content(mimetype: str, content: bytes) -> bool:
+    """Whether `content`'s magic bytes are consistent with `mimetype`.
+
+    Returns True (no mismatch) for any type without a known signature,
+    since those cannot be verified this way.
+    """
+    if mimetype == "image/webp":
+        return content[:4] == b"RIFF" and content[8:12] == b"WEBP"
+    signatures = _MIME_SIGNATURES.get(mimetype)
+    if signatures is None:
+        return True
+    return any(content.startswith(signature) for signature in signatures)
+
 
 class FileServiceError(Exception):
     """Base exception for file service operations."""
@@ -33,6 +60,16 @@ class FileTooLargeError(FileServiceError):
 
     Separate from the base error so the route can answer 413 rather than
     letting an oversized upload read as a server fault.
+    """
+
+
+class FileTypeMismatchError(FileServiceError):
+    """Raised when the declared `Content-Type` doesn't match the file's bytes.
+
+    A client-supplied `Content-Type` was trusted verbatim, so a caller
+    could upload an HTML/SVG payload declared as `image/png` and have it
+    served back under an image content type, letting it render inline
+    instead of downloading as an attachment.
     """
 
 
@@ -92,6 +129,11 @@ class FileService:
                 )
         content = bytes(buffer)
         content_hash = hash_sha256.hexdigest()
+
+        if not _mimetype_matches_content(mimetype, content):
+            raise FileTypeMismatchError(
+                f"File content does not match declared type '{mimetype}'."
+            )
 
         # Fast-path dedup check to skip the storage upload for the common
         # case. Scoped to this uploader, not just the tenant: a colleague's
@@ -185,6 +227,8 @@ class FileService:
         return await get_download_url(
             object_key=record.object_key,
             bucket=record.bucket,
+            mimetype=record.mimetype,
+            filename=record.filename,
         )
 
     async def get_thumbnail_url(self, record: File) -> str | None:

@@ -22,6 +22,7 @@ from app.schemas.files import FileUrlResponse
 from app.services.file_service import FileService
 from app.services.file_service import FileServiceError
 from app.services.file_service import FileTooLargeError
+from app.services.file_service import FileTypeMismatchError
 
 router = APIRouter(prefix="/files", tags=["Files"])
 logger = get_logger("api.files")
@@ -60,6 +61,11 @@ async def upload_file(
     except FileTooLargeError as e:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=str(e),
+        ) from e
+    except FileTypeMismatchError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         ) from e
     return FileUploadResponse(
