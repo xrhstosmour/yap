@@ -22,6 +22,11 @@ down_revision: Union[str, None] = "7089da61aec9"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
+# Keyset page size. `env.py` wraps the whole migration in one transaction, so
+# this cannot shrink lock duration, but it bounds the row-processing loop to
+# one page in memory at a time instead of `fetchall()`-ing the entire table.
+_BATCH_SIZE = 1000
+
 
 def upgrade() -> None:
     from app.core.encryption import crypto
@@ -59,20 +64,34 @@ def upgrade() -> None:
         sa.column("email_hash", sa.String()),
         sa.column("phone_hash", sa.String()),
     )
-    rows = bind.execute(
-        sa.select(users_table.c.id, users_table.c.email, users_table.c.phone)
-    ).fetchall()
-    for row in rows:
-        values: dict[str, str] = {
-            "email": crypto.encrypt(row.email),
-            "email_hash": crypto.hash_for_search(row.email),
-        }
-        if row.phone:
-            values["phone"] = crypto.encrypt(row.phone)
-            values["phone_hash"] = crypto.hash_for_search(row.phone)
-        bind.execute(
-            users_table.update().where(users_table.c.id == row.id).values(**values)
+    last_id = None
+    while True:
+        query = (
+            sa.select(users_table.c.id, users_table.c.email, users_table.c.phone)
+            .order_by(users_table.c.id)
+            .limit(_BATCH_SIZE)
         )
+        if last_id is not None:
+            query = query.where(users_table.c.id > last_id)
+        rows = bind.execute(query).fetchall()
+        if not rows:
+            break
+
+        for row in rows:
+            values: dict[str, str] = {
+                "email": crypto.encrypt(row.email),
+                "email_hash": crypto.hash_for_search(row.email),
+            }
+            if row.phone:
+                values["phone"] = crypto.encrypt(row.phone)
+                values["phone_hash"] = crypto.hash_for_search(row.phone)
+            bind.execute(
+                users_table.update().where(users_table.c.id == row.id).values(**values)
+            )
+
+        last_id = rows[-1].id
+        if len(rows) < _BATCH_SIZE:
+            break
 
     # 4. Drop the plaintext-era unique index. Fernet ciphertext is
     #    randomised per encryption call, so it can never be compared or
@@ -103,16 +122,30 @@ def downgrade() -> None:
         sa.column("email", sa.String()),
         sa.column("phone", sa.String()),
     )
-    rows = bind.execute(
-        sa.select(users_table.c.id, users_table.c.email, users_table.c.phone)
-    ).fetchall()
-    for row in rows:
-        values: dict[str, str] = {"email": crypto.decrypt(row.email)}
-        if row.phone:
-            values["phone"] = crypto.decrypt(row.phone)
-        bind.execute(
-            users_table.update().where(users_table.c.id == row.id).values(**values)
+    last_id = None
+    while True:
+        query = (
+            sa.select(users_table.c.id, users_table.c.email, users_table.c.phone)
+            .order_by(users_table.c.id)
+            .limit(_BATCH_SIZE)
         )
+        if last_id is not None:
+            query = query.where(users_table.c.id > last_id)
+        rows = bind.execute(query).fetchall()
+        if not rows:
+            break
+
+        for row in rows:
+            values: dict[str, str] = {"email": crypto.decrypt(row.email)}
+            if row.phone:
+                values["phone"] = crypto.decrypt(row.phone)
+            bind.execute(
+                users_table.update().where(users_table.c.id == row.id).values(**values)
+            )
+
+        last_id = rows[-1].id
+        if len(rows) < _BATCH_SIZE:
+            break
 
     op.alter_column(
         "users",
