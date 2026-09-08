@@ -48,6 +48,10 @@ class OAuthAccountRepository(BaseRepository[OAuthAccount]):
         Returns:
             OAuthAccount with its user loaded via selectin, or None.
         """
+        # The eager load of `.user` here comes from `OAuthAccount.user` being
+        # declared `lazy="selectin"` in the model, not from this query. If
+        # that relationship strategy ever changes, callers relying on `.user`
+        # being pre-loaded will break.
         query = select(OAuthAccount).where(
             and_(
                 OAuthAccount.provider == provider,  # type: ignore[arg-type]
