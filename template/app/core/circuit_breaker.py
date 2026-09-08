@@ -6,6 +6,7 @@ to prevent cascading failures when external services are unavailable.
 
 from __future__ import annotations
 
+import asyncio
 import functools
 import inspect
 import threading
@@ -48,7 +49,16 @@ class CircuitBreakerService:
     """Manages circuit breakers for external services."""
 
     _breakers: dict[str, CircuitBreaker] = {}
+    # Guards `_breakers` double-checked-locking creation. Kept as a
+    # threading.Lock rather than asyncio.Lock: `get_breaker()` is called
+    # synchronously at decoration time (module import), outside of any
+    # running event loop, for both the sync and async decorator paths, so
+    # it cannot `await` an asyncio.Lock.
     _lock = threading.Lock()
+    # Per-breaker asyncio.Lock guarding async_wrapper's state reads and
+    # transitions (see async_wrapper below). Populated alongside the
+    # breaker itself under `_lock`, so lookup never races its creation.
+    _async_locks: dict[str, asyncio.Lock] = {}
 
     @classmethod
     def get_breaker(
@@ -75,7 +85,16 @@ class CircuitBreakerService:
                         reset_timeout=reset_timeout,
                         listeners=[_CircuitBreakerLogger(name)],
                     )
+                    cls._async_locks[name] = asyncio.Lock()
         return cls._breakers[name]
+
+    @classmethod
+    def get_async_lock(cls, name: str) -> asyncio.Lock:
+        """Return the asyncio.Lock guarding async state transitions for *name*.
+
+        Only valid for a name already registered via `get_breaker()`.
+        """
+        return cls._async_locks[name]
 
     @classmethod
     def get_state(cls, name: str) -> CircuitState:
@@ -137,6 +156,7 @@ def circuit_breaker(name: str, **kwargs: int) -> Callable[[F], F]:
 
     def decorator(func: F) -> F:
         if inspect.iscoroutinefunction(func):
+            lock = CircuitBreakerService.get_async_lock(name)
 
             @functools.wraps(func)
             async def async_wrapper(  # noqa: ANN401
@@ -153,31 +173,56 @@ def circuit_breaker(name: str, **kwargs: int) -> Callable[[F], F]:
                 # This mirrors the *synchronous* `CircuitBreakerState.call()`
                 # implementation by hand, since `func` must be awaited rather
                 # than called directly.
-                state = breaker.state
-                if isinstance(state, pybreaker.CircuitOpenState):
-                    # `CircuitOpenState.before_call` would otherwise call the
-                    # breaker's synchronous `call()` once its timeout
-                    # elapses, which can't run an async `func` correctly.
-                    # Replicate its open -> half-open transition without
-                    # going through that call-through.
-                    timeout = timedelta(seconds=breaker.reset_timeout)
-                    opened_at = breaker._state_storage.opened_at  # noqa: SLF001
-                    if opened_at and datetime.now(UTC) < opened_at + timeout:
-                        raise pybreaker.CircuitBreakerError(
-                            "Timeout not elapsed yet, circuit breaker still open"
-                        )
-                    breaker.half_open()
+                #
+                # `pybreaker.CircuitBreaker.call()` holds `breaker._lock` (a
+                # threading.RLock) for the entire call, state read through
+                # `_handle_error`/`_handle_success`. Concurrent coroutines
+                # racing through this block unlocked could both observe
+                # OPEN, both transition to HALF_OPEN, or interleave their
+                # `_handle_error`/`_handle_success` counter updates. The
+                # `asyncio.Lock` below guards the same critical section, but
+                # is released across the `await func(...)` call itself so
+                # unrelated (or even concurrent trial) calls guarded by this
+                # breaker aren't fully serialized for the duration of the
+                # protected operation, only the bookkeeping around it.
+                async with lock:
                     state = breaker.state
-                else:
-                    state.before_call(func, *args, **kwargs)
-                for listener in breaker.listeners:
-                    listener.before_call(breaker, func, *args, **kwargs)
+                    if isinstance(state, pybreaker.CircuitOpenState):
+                        # `CircuitOpenState.before_call` would otherwise call
+                        # the breaker's synchronous `call()` once its timeout
+                        # elapses, which can't run an async `func` correctly.
+                        # Replicate its open -> half-open transition without
+                        # going through that call-through.
+                        timeout = timedelta(seconds=breaker.reset_timeout)
+                        opened_at = breaker._state_storage.opened_at  # noqa: SLF001
+                        if opened_at and datetime.now(UTC) < opened_at + timeout:
+                            raise pybreaker.CircuitBreakerError(
+                                "Timeout not elapsed yet, circuit breaker still open"
+                            )
+                        breaker.half_open()
+                        state = breaker.state
+                    else:
+                        state.before_call(func, *args, **kwargs)
+                    for listener in breaker.listeners:
+                        listener.before_call(breaker, func, *args, **kwargs)
+
                 try:
                     result = await func(*args, **kwargs)
                 except Exception as e:
-                    state._handle_error(e)  # noqa: SLF001
+                    async with lock:
+                        # Re-read `breaker.state` rather than reusing the
+                        # `state` captured before the `await` above: another
+                        # coroutine could have transitioned the breaker
+                        # (e.g. a concurrent success closing it) while this
+                        # one was awaiting `func`, and handling the error
+                        # against that now-stale object would apply this
+                        # outcome to a state the breaker has already moved
+                        # past, the same staleness the lock above exists to
+                        # prevent for the open/half-open transition.
+                        breaker.state._handle_error(e)  # noqa: SLF001
                 else:
-                    state._handle_success()  # noqa: SLF001
+                    async with lock:
+                        breaker.state._handle_success()  # noqa: SLF001
                     return result
 
             return cast(F, async_wrapper)

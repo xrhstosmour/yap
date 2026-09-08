@@ -84,7 +84,6 @@ class FileService:
         self,
         file: UploadFile,
         user: User,
-        is_public: bool = False,
         resource_type: str | None = None,
         resource_id: str | None = None,
     ) -> File:
@@ -97,7 +96,6 @@ class FileService:
         Args:
             file: The uploaded file from the request.
             user: The authenticated user uploading the file.
-            is_public: Whether the file is publicly accessible.
             resource_type: Optional resource type to associate.
             resource_id: Optional resource ID to associate.
 
@@ -172,7 +170,6 @@ class FileService:
                 "thumbnail_object_key": None,
                 "image_width": None,
                 "image_height": None,
-                "is_public": is_public,
                 "reference_count": 1,
                 "uploaded_by": user.id,
                 "resource_type": resource_type,

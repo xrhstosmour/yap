@@ -58,9 +58,10 @@ def mock_service(monkeypatch: pytest.MonkeyPatch) -> IdempotencyService:
     """
     svc = IdempotencyService()
     svc.get = AsyncMock(return_value=None)
-    svc.try_lock = AsyncMock(return_value=True)
+    svc.try_lock = AsyncMock(return_value="test-token")
     svc.set = AsyncMock()
     svc.release_lock = AsyncMock()
+    svc.extend_lock = AsyncMock()
     monkeypatch.setattr("app.api.idempotency.idempotency_service", svc)
     return svc
 
@@ -152,7 +153,7 @@ class TestIdempotencyMiddleware:
         mock_service: IdempotencyService,
     ) -> None:
         """Second concurrent caller receives 409 Conflict."""
-        mock_service.try_lock = AsyncMock(return_value=False)
+        mock_service.try_lock = AsyncMock(return_value=None)
 
         resp = app_with_middleware.post(
             "/echo",
@@ -231,6 +232,56 @@ class TestIdempotencyMiddleware:
         )
         assert resp.status_code == 500
         mock_service.set.assert_not_awaited()
+
+
+class TestIdempotencyLockHeartbeat:
+    """The lock TTL must survive a request slower than LOCK_TTL_SECONDS."""
+
+    def test_extends_lock_while_handler_is_in_flight(
+        self,
+        mock_service: IdempotencyService,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A slow handler should trigger at least one lock TTL refresh.
+
+        Regression test for the fixed-60-second lock: a handler running
+        longer than LOCK_TTL_SECONDS used to have its lock expire mid
+        request, letting a retry with the same key slip past try_lock()
+        and run the same side effect again while the first was still in
+        progress.
+        """
+        import asyncio
+
+        from fastapi import FastAPI
+
+        # Fast enough that a couple of ticks land during the sleep below,
+        # without making the test itself slow.
+        monkeypatch.setattr("app.api.idempotency.LOCK_HEARTBEAT_INTERVAL_SECONDS", 0.02)
+
+        app = FastAPI()
+        app.add_middleware(IdempotencyMiddleware)
+
+        @app.post("/slow")
+        async def slow(payload: dict) -> dict:
+            await asyncio.sleep(0.1)
+            return payload
+
+        client = TestClient(app)
+        resp = client.post(
+            "/slow",
+            json={"x": 1},
+            headers={"X-Idempotency-Key": "test-key-heartbeat"},
+        )
+
+        assert resp.status_code == 200
+        assert mock_service.extend_lock.await_count >= 1
+        mock_service.extend_lock.assert_awaited_with(
+            "anon:testclient:POST:/slow:test-key-heartbeat", "test-token"
+        )
+        # The heartbeat task must not outlive the request.
+        mock_service.release_lock.assert_awaited_once_with(
+            "anon:testclient:POST:/slow:test-key-heartbeat", "test-token"
+        )
 
 
 class TestClientErrorsAreNotCached:
@@ -377,7 +428,7 @@ class TestIdempotencyServiceWithMock:
 
     @pytest.mark.anyio
     async def test_try_lock_acquires_with_ttl(self) -> None:
-        """try_lock returns True and sets lock with TTL when available."""
+        """try_lock returns an ownership token and sets the lock with TTL."""
         svc = IdempotencyService()
 
         mock_redis = AsyncMock()
@@ -388,14 +439,15 @@ class TestIdempotencyServiceWithMock:
         ):
             result = await svc.try_lock("test-key")
 
-        assert result is True
+        assert isinstance(result, str)
+        assert result
         mock_redis.set.assert_awaited_once_with(
-            "idempotency:lock:test-key", "1", nx=True, ex=60
+            "idempotency:lock:test-key", result, nx=True, ex=60
         )
 
     @pytest.mark.anyio
     async def test_try_lock_fails_on_conflict(self) -> None:
-        """try_lock returns a falsy value when lock is already held."""
+        """try_lock returns None when the lock is already held."""
         svc = IdempotencyService()
 
         mock_redis = AsyncMock()
@@ -407,22 +459,109 @@ class TestIdempotencyServiceWithMock:
         ):
             result = await svc.try_lock("test-key")
 
-        assert not result
+        assert result is None
 
     @pytest.mark.anyio
-    async def test_release_lock_deletes_lock_key(self) -> None:
-        """release_lock deletes the lock key from Redis."""
+    async def test_release_lock_deletes_lock_key_when_token_matches(self) -> None:
+        """release_lock deletes the lock key when the token matches the owner."""
         svc = IdempotencyService()
 
         mock_redis = AsyncMock()
-        mock_redis.delete = AsyncMock()
+        mock_redis.eval = AsyncMock(return_value=1)
 
         with patch(
             "app.core.idempotency.get_redis", AsyncMock(return_value=mock_redis)
         ):
-            await svc.release_lock("test-key")
+            await svc.release_lock("test-key", "owner-token")
 
-        mock_redis.delete.assert_awaited_once_with("idempotency:lock:test-key")
+        args, _ = mock_redis.eval.call_args
+        assert args[1:] == (1, "idempotency:lock:test-key", "owner-token")
+
+    @pytest.mark.anyio
+    async def test_release_lock_does_not_delete_a_lock_owned_by_another_token(
+        self,
+    ) -> None:
+        """release_lock must not delete a lock a different token now owns.
+
+        Regression: an unconditional `DEL` would remove whatever lock
+        currently occupies the key, including one a retry acquired after
+        this caller's own lock already expired, releasing a request that
+        isn't this one's to release. This is exercised at the Lua-script
+        level via a real Redis-compatible fake below, not just asserting
+        the call arguments, since the safety property lives in the
+        script's compare-then-delete atomicity.
+        """
+        svc = IdempotencyService()
+        lock_key = "idempotency:lock:test-key"
+
+        class _FakeRedis:
+            def __init__(self, value: str) -> None:
+                self.store: dict[str, str] = {lock_key: value}
+
+            async def eval(
+                self, script: str, numkeys: int, key: str, *args: str
+            ) -> int:
+                assert numkeys == 1
+                assert key == lock_key
+                if self.store.get(key) == args[0]:
+                    del self.store[key]
+                    return 1
+                return 0
+
+        fake_redis = _FakeRedis(value="other-token")
+
+        with patch(
+            "app.core.idempotency.get_redis", AsyncMock(return_value=fake_redis)
+        ):
+            await svc.release_lock("test-key", "stale-token")
+
+        assert fake_redis.store.get(lock_key) == "other-token"
+
+    @pytest.mark.anyio
+    async def test_extend_lock_refreshes_ttl_when_token_matches(self) -> None:
+        """extend_lock refreshes the lock key's TTL when the token matches.
+
+        Backs the middleware's heartbeat: a request still in flight past
+        LOCK_TTL_SECONDS must not have its lock silently expire, which
+        would let a retry with the same idempotency key slip past
+        try_lock() and run the same side effect concurrently.
+        """
+        from app.core.idempotency import LOCK_TTL_SECONDS
+
+        svc = IdempotencyService()
+
+        mock_redis = AsyncMock()
+        mock_redis.eval = AsyncMock(return_value=1)
+
+        with patch(
+            "app.core.idempotency.get_redis", AsyncMock(return_value=mock_redis)
+        ):
+            await svc.extend_lock("test-key", "owner-token")
+
+        args, _ = mock_redis.eval.call_args
+        assert args[1:] == (
+            1,
+            "idempotency:lock:test-key",
+            "owner-token",
+            str(LOCK_TTL_SECONDS),
+        )
+
+    @pytest.mark.anyio
+    async def test_extend_lock_swallows_redis_errors(self) -> None:
+        """A failed heartbeat refresh must not raise into the caller.
+
+        The next heartbeat tick still has LOCK_TTL_SECONDS of headroom to
+        recover in, so one failure is logged, not propagated.
+        """
+        svc = IdempotencyService()
+
+        mock_redis = AsyncMock()
+        mock_redis.eval = AsyncMock(side_effect=ConnectionError("redis down"))
+
+        with patch(
+            "app.core.idempotency.get_redis", AsyncMock(return_value=mock_redis)
+        ):
+            await svc.extend_lock("test-key", "owner-token")  # Should not raise.
 
     @pytest.mark.anyio
     async def test_set_stores_serialized_response_with_ttl(self) -> None:
@@ -453,30 +592,30 @@ class TestIdempotencyServiceWithMock:
 
         mock_redis = AsyncMock()
         mock_redis.set = AsyncMock(return_value=True)
-        mock_redis.delete = AsyncMock()
+        mock_redis.eval = AsyncMock(return_value=1)
 
         cm_entered = False
 
         @asynccontextmanager
         async def idempotency_lock(key: str):
             nonlocal cm_entered
-            acquired = await svc.try_lock(key)
-            assert acquired is True
+            token = await svc.try_lock(key)
+            assert token is not None
             cm_entered = True
             try:
                 yield
             finally:
-                await svc.release_lock(key)
+                await svc.release_lock(key, token)
 
         with patch(
             "app.core.idempotency.get_redis", AsyncMock(return_value=mock_redis)
         ):
             async with idempotency_lock("test-key"):
                 assert cm_entered is True
-                mock_redis.delete.assert_not_awaited()
+                mock_redis.eval.assert_not_awaited()
 
         # After context exit, release_lock should have been called.
-        mock_redis.delete.assert_awaited_once_with("idempotency:lock:test-key")
+        mock_redis.eval.assert_awaited_once()
 
     @pytest.mark.anyio
     async def test_get_returns_none_for_expired_key(self) -> None:
