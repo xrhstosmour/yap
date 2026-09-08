@@ -24,6 +24,45 @@ if TYPE_CHECKING:
 _jinja2_env: jinja2.Environment | None = None
 
 
+def _mask_email(email_addr: str) -> str:
+    """Mask an email address for logging, keeping it non-identifying.
+
+    Drops the local part entirely, a one-character prefix (e.g.
+    "a***@example.com" for "a@example.com") still reproduces a short
+    local part verbatim, so it keeps only the domain for debugging.
+
+    Args:
+        email_addr: Email address to mask.
+
+    Returns:
+        Masked form, e.g. "***@example.com".
+    """
+    _, _, domain = email_addr.partition("@")
+    return f"***@{domain}" if domain else "***"
+
+
+def _sanitize_error(error: Exception, email_addr: str) -> str:
+    """Strip a plaintext email address out of an exception's message.
+
+    SMTP failures (`SMTPRecipientsRefused`, etc.) commonly embed the
+    recipient address verbatim in their message, so logging `str(error)`
+    unmodified next to a masked `recipient` field would still leak the
+    plaintext address through the error text.
+
+    Args:
+        error: The exception to render.
+        email_addr: The plaintext address to scrub from the message.
+
+    Returns:
+        The exception's message with any occurrence of `email_addr`
+        replaced by its masked form.
+    """
+    message = str(error)
+    if email_addr:
+        message = message.replace(email_addr, _mask_email(email_addr))
+    return message
+
+
 def _get_jinja2_env() -> jinja2.Environment:
     """Return a cached Jinja2 environment, creating it on first call."""
     global _jinja2_env
@@ -187,8 +226,8 @@ async def send_batch_emails(
         except Exception as e:
             logger.error(
                 "batch_email_failed",
-                recipient=email_addr,
-                error=str(e),
+                recipient=_mask_email(str(email_addr)),
+                error=_sanitize_error(e, str(email_addr)),
             )
             return False
 
