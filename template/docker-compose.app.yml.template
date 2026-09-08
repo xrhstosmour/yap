@@ -66,13 +66,35 @@ services:
         condition: "service_healthy"
       rabbitmq:
         condition: "service_healthy"
+    # No limit meant one runaway request handler, worker, or leak could
+    # starve every other container on the host. Overridable per deployment
+    # since the right ceiling depends on the host and expected load.
+    deploy:
+      resources:
+        limits:
+          cpus: "${APP_CPU_LIMIT:-1.0}"
+          memory: "${APP_MEMORY_LIMIT:-512M}"
 
   celery-worker:
     build:
       context: "."
     container_name: "{{ project_slug }}-celery-worker"
     restart: "unless-stopped"
-    command: ["celery", "-A", "app.celery_app", "worker", "--loglevel=info"]
+    # Celery's prefork pool defaults to one child process per visible CPU,
+    # and a Docker `cpus` quota does not change what `os.cpu_count()`
+    # reports, so on a bigger host this would spawn far more workers (each
+    # importing FastAPI/SQLAlchemy/boto3/Celery) than the `memory` limit
+    # below can hold, OOM-killing the container and losing in-flight tasks.
+    # Pinning concurrency keeps the two limits consistent with each other.
+    command:
+      [
+        "celery",
+        "-A",
+        "app.celery_app",
+        "worker",
+        "--loglevel=info",
+        "--concurrency=${CELERY_CONCURRENCY:-2}",
+      ]
     env_file:
       - ".env"
     environment:
@@ -88,6 +110,11 @@ services:
         condition: "service_healthy"
       rabbitmq:
         condition: "service_healthy"
+    deploy:
+      resources:
+        limits:
+          cpus: "${CELERY_WORKER_CPU_LIMIT:-1.0}"
+          memory: "${CELERY_WORKER_MEMORY_LIMIT:-512M}"
 
   celery-beat:
     build:
@@ -122,3 +149,10 @@ services:
         condition: "service_healthy"
       rabbitmq:
         condition: "service_healthy"
+    # Lighter than app/celery-worker: beat only schedules tasks, it never
+    # executes them.
+    deploy:
+      resources:
+        limits:
+          cpus: "${CELERY_BEAT_CPU_LIMIT:-0.25}"
+          memory: "${CELERY_BEAT_MEMORY_LIMIT:-256M}"
