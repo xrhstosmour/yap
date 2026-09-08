@@ -80,6 +80,18 @@ GLITCHTIP_SECRET_KEY="${GLITCHTIP_SECRET_KEY:-$(python3 -c "import secrets; prin
 REDIS_COMMANDER_PASSWORD="${REDIS_COMMANDER_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(12))")}"
 METABASE_READ_ONLY_PASSWORD="${METABASE_READ_ONLY_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")}"
 STORAGE_SECRET_KEY="${STORAGE_SECRET_KEY:-$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")}"
+# MINIO_ROOT_USER is a real admin credential, not a display name, the
+# well-known "minioadmin" default halves what an attacker has to guess
+# once the password is randomized. Generated and backfilled the same way
+# as MINIO_ROOT_PASSWORD, not left fixed.
+#
+# Upgrade hazard on an EXISTING deployment: MinIO treats the root user as
+# env-driven, so rotating this on a project whose MinIO volume already
+# holds data can orphan any service account or policy created under the
+# old "minioadmin" root. Confirm the app's storage client credential
+# (STORAGE_ACCESS_KEY/STORAGE_SECRET_KEY) still authenticates before
+# rolling this out to a running deployment, not just a fresh one.
+MINIO_ROOT_USER="${MINIO_ROOT_USER:-$(python3 -c "import secrets; print(secrets.token_urlsafe(12))")}"
 MINIO_ROOT_PASSWORD="${MINIO_ROOT_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")}"
 # .env.example always carries the project's real POSTGRESQL_USER (== project_slug,
 # baked in by Copier at render time), even before .env exists on a fresh clone.
@@ -236,6 +248,7 @@ backfill_secret GLITCHTIP_SECRET_KEY "${GLITCHTIP_SECRET_KEY}"
 backfill_secret REDIS_COMMANDER_PASSWORD "${REDIS_COMMANDER_PASSWORD}"
 backfill_secret METABASE_READ_ONLY_PASSWORD "${METABASE_READ_ONLY_PASSWORD}"
 backfill_secret STORAGE_SECRET_KEY "${STORAGE_SECRET_KEY}"
+backfill_secret MINIO_ROOT_USER "${MINIO_ROOT_USER}" "minioadmin"
 backfill_secret MINIO_ROOT_PASSWORD "${MINIO_ROOT_PASSWORD}" "minioadmin"
 backfill_secret MINIO_DEFAULT_BUCKET "${MINIO_DEFAULT_BUCKET}"
 backfill_secret GOOGLE_CLIENT_SECRET "${GOOGLE_CLIENT_SECRET}"
