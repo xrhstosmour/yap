@@ -29,6 +29,8 @@ from sqlmodel import func
 from sqlmodel import select
 
 from app.core import SYSTEM_TENANT_ID
+from app.core.encryption import crypto
+from app.core.encryption import encrypted_column_names
 from app.core.logging import get_logger
 from app.core.pagination import MAX_PAGE_SIZE
 from app.core.tenant import get_current_tenant_id
@@ -379,10 +381,27 @@ class BaseRepository[T: SQLModel]:
         from app.repositories.graveyard_repository import GraveyardRepository
 
         mapper = cast(Mapper[Any], inspect(database_object).mapper)  # type: ignore[union-attr]
-        data = {
-            column.key: _jsonable(getattr(database_object, column.key))
-            for column in mapper.column_attrs
-        }
+        encrypted_keys = encrypted_column_names(type(database_object))
+        data: dict[str, Any] = {}
+        for column in mapper.column_attrs:
+            value = getattr(database_object, column.key)
+            if column.key in encrypted_keys:
+                # `getattr` already returns the decrypted plain text
+                # (EncryptedString decrypts on Python-level access), so
+                # re-encrypt before it lands in the graveyard's plain
+                # JSON snapshot, keeping PII columns encrypted at rest
+                # even after a soft delete.
+                data[column.key] = (
+                    crypto.encrypt(str(value)) if value is not None else None
+                )
+            else:
+                data[column.key] = _jsonable(value)
+
+        # Recorded alongside the snapshot so `GraveyardRepository.recover()`
+        # knows exactly which keys to decrypt, rather than guessing from
+        # ciphertext shape, which would misfire on a legitimately plaintext
+        # value that happens to start with the same "enc:" prefix.
+        data["__encrypted_keys__"] = sorted(encrypted_keys)
 
         tenant_id = getattr(database_object, "tenant_id", None)
         if tenant_id is None:

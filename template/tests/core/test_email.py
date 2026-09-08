@@ -270,3 +270,61 @@ class TestSendBatchEmails:
         assert result["sent"] == 2
         assert result["failed"] == 0
         assert mock_send.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_failure_logs_masked_recipient_not_plaintext_email(self) -> None:
+        """A per-recipient failure must not log the plaintext email address."""
+        settings = _make_mock_settings()
+
+        with (
+            patch(
+                "app.core.email.send_email",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("smtp down"),
+            ),
+            patch("app.core.email.logger") as mock_logger,
+        ):
+            result = await send_batch_emails(
+                recipients=[{"email": "alice@example.com", "name": "Alice"}],
+                subject="Hello {name}",
+                body="Hi {name}",
+                settings=settings,
+            )
+
+        assert result["failed"] == 1
+        mock_logger.error.assert_called_once()
+        _, kwargs = mock_logger.error.call_args
+        assert kwargs["recipient"] != "alice@example.com"
+        assert "alice@example.com" not in kwargs["recipient"]
+
+    @pytest.mark.asyncio
+    async def test_failure_scrubs_plaintext_email_from_error_message(self) -> None:
+        """The masked `recipient` field must not be undone by the `error` field.
+
+        Regression: SMTP failures (`SMTPRecipientsRefused`, etc.) commonly
+        embed the recipient address verbatim in their message, so logging
+        `str(exc)` unmodified would still leak the plaintext address next
+        to the masked `recipient` value.
+        """
+        settings = _make_mock_settings()
+
+        with (
+            patch(
+                "app.core.email.send_email",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError(
+                    "recipient refused: {'alice@example.com': (550, b'no such user')}"
+                ),
+            ),
+            patch("app.core.email.logger") as mock_logger,
+        ):
+            result = await send_batch_emails(
+                recipients=[{"email": "alice@example.com", "name": "Alice"}],
+                subject="Hello {name}",
+                body="Hi {name}",
+                settings=settings,
+            )
+
+        assert result["failed"] == 1
+        _, kwargs = mock_logger.error.call_args
+        assert "alice@example.com" not in kwargs["error"]

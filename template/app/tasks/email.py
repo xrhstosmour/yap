@@ -17,8 +17,16 @@ logger = get_logger("tasks.email")
     bind=True,
     name="app.tasks.email.send_email",
     max_retries=3,
-    default_retry_delay=60,
     autoretry_for=(Exception,),
+    # `retry_backoff` takes over computing the retry delay entirely, using
+    # its value as the base to exponentiate from (`base * 2**retries`),
+    # `default_retry_delay` is never consulted once it's set. Passed as
+    # the desired base delay in seconds, not `True`: `True` is read as a
+    # factor of 1, backing off from ~1 second instead of ~60, so a run of
+    # failures burns all 3 retries in single-digit seconds instead of the
+    # intended few minutes.
+    retry_backoff=60,
+    retry_jitter=True,
 )
 def send_email_task(
     self,
@@ -59,16 +67,22 @@ def send_email_task(
         }
 
     except Exception as e:
+        # Retrying is handled declaratively by `autoretry_for` above; a
+        # manual `self.retry(exc=e)` here duplicated that mechanism and
+        # raced it. Logging is kept, then the exception is re-raised so
+        # Celery's own retry machinery takes over.
         logger.error("email_task_failed", error=str(e))
-        raise self.retry(exc=e) from e
+        raise
 
 
 @celery_app.task(
     bind=True,
     name="app.tasks.email.send_batch_emails",
     max_retries=2,
-    default_retry_delay=120,
     autoretry_for=(Exception,),
+    # See send_email_task: `retry_backoff` needs the base delay, not `True`.
+    retry_backoff=120,
+    retry_jitter=True,
 )
 def send_batch_emails_task(
     self,
@@ -109,16 +123,19 @@ def send_batch_emails_task(
         return result
 
     except Exception as e:
+        # See send_email_task: retry is handled by `autoretry_for` alone.
         logger.error("batch_email_task_failed", error=str(e))
-        raise self.retry(exc=e) from e
+        raise
 
 
 @celery_app.task(
     bind=True,
     name="app.tasks.email.send_template_email",
     max_retries=3,
-    default_retry_delay=60,
     autoretry_for=(Exception,),
+    # See send_email_task: `retry_backoff` needs the base delay, not `True`.
+    retry_backoff=60,
+    retry_jitter=True,
 )
 def send_template_email_task(
     self,
@@ -158,8 +175,9 @@ def send_template_email_task(
         return {"status": "sent", "to_email": to_email, "template": template_name}
 
     except Exception as e:
+        # See send_email_task: retry is handled by `autoretry_for` alone.
         logger.error("template_email_failed", error=str(e))
-        raise self.retry(exc=e) from e
+        raise
 
 
 @celery_app.task(

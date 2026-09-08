@@ -337,6 +337,104 @@ async def test_circuit_breaker_async_decorator_half_open_after_timeout() -> None
 
 
 @pytest.mark.asyncio
+async def test_circuit_breaker_async_decorator_concurrent_failures_consistent_count() -> (
+    None
+):
+    """Concurrent async failures must not corrupt the breaker's fail counter.
+
+    Without locking `async_wrapper`'s state read through
+    `_handle_error`/`_handle_success`, concurrent coroutines could each
+    capture a stale `state` object across the `await func(...)` yield
+    point, and lose or duplicate bookkeeping when they later call
+    `_handle_error` on it. `fail_max` is set high enough that the breaker
+    never opens mid-run, so every one of the concurrent calls is expected
+    to actually fail and be counted exactly once.
+    """
+    fail_max = 50
+    concurrency = 20
+
+    @circuit_breaker("test_async_concurrent", fail_max=fail_max, reset_timeout=60)
+    async def flaky() -> None:
+        # Yields control back to the event loop mid-call, so other
+        # concurrently-gathered coroutines interleave their own state
+        # reads/transitions here, the same way real concurrent I/O would.
+        await asyncio.sleep(0)
+        raise ValueError("failure")
+
+    results = await asyncio.gather(
+        *[flaky() for _ in range(concurrency)], return_exceptions=True
+    )
+
+    assert all(isinstance(result, ValueError) for result in results)
+    breaker = CircuitBreakerService._breakers["test_async_concurrent"]
+    assert breaker.fail_counter == concurrency
+    assert (
+        CircuitBreakerService.get_state("test_async_concurrent") == CircuitState.CLOSED
+    )
+
+
+@pytest.mark.asyncio
+async def test_circuit_breaker_half_open_failure_does_not_undo_a_more_recent_close() -> (
+    None
+):
+    """A trial call's failure must not reopen a breaker another call already
+    legitimately closed in the meantime.
+
+    Regression: `CircuitHalfOpenState.on_failure()` unconditionally
+    reopens the breaker, the correct behavior for a real failed trial
+    call. But if the failing call captured its `state` before `await
+    func(...)` and a second, concurrent call's success already closed
+    the breaker while the first was still in flight, handling that
+    failure against the stale half-open `state` object reopens a breaker
+    that a more recent, legitimate close already reset, instead of
+    recording the failure against its actual current (closed) state.
+    """
+    name = "test_async_half_open_race"
+    fail_max = 5
+
+    @circuit_breaker(name, fail_max=fail_max, reset_timeout=60)
+    async def succeeds(started: asyncio.Event, may_finish: asyncio.Event) -> str:
+        started.set()
+        await may_finish.wait()
+        return "ok"
+
+    @circuit_breaker(name, fail_max=fail_max, reset_timeout=60)
+    async def fails(started: asyncio.Event, may_fail: asyncio.Event) -> None:
+        started.set()
+        await may_fail.wait()
+        raise ValueError("trial call failed")
+
+    # Force the breaker into HALF_OPEN so both calls below read that same
+    # state, rather than going through a real OPEN -> timeout -> HALF_OPEN
+    # cycle, which this test isn't exercising.
+    breaker = CircuitBreakerService.get_breaker(name, fail_max=fail_max)
+    breaker.half_open()
+
+    success_started = asyncio.Event()
+    success_may_finish = asyncio.Event()
+    success_task = asyncio.create_task(succeeds(success_started, success_may_finish))
+    await success_started.wait()
+
+    failure_started = asyncio.Event()
+    failure_may_fail = asyncio.Event()
+    failure_task = asyncio.create_task(fails(failure_started, failure_may_fail))
+    await failure_started.wait()
+
+    # Both calls have now read HALF_OPEN and are parked inside `func()`.
+    # Resolve the success first, legitimately closing the breaker.
+    success_may_finish.set()
+    assert await success_task == "ok"
+    assert CircuitBreakerService.get_state(name) == CircuitState.CLOSED
+
+    # Only now does the trial call fail. A single failure with fail_max=5
+    # must not reopen an already-closed breaker.
+    failure_may_fail.set()
+    with pytest.raises(ValueError):
+        await failure_task
+    assert CircuitBreakerService.get_state(name) == CircuitState.CLOSED
+
+
+@pytest.mark.asyncio
 async def test_circuit_breaker_async_decorator_preserves_metadata() -> None:
     """Async decorated function preserves __name__ and __doc__."""
 

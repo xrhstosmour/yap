@@ -13,8 +13,11 @@ from uuid import uuid7
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import select
 
 from app.core.tenant import system_context
+from app.models.audit_log import AuditAction
+from app.models.audit_log import AuditLog
 from app.models.user import User
 from app.models.user import UserRole
 from app.schemas.user import UserCreate
@@ -154,6 +157,40 @@ class TestUserServiceUpdate:
 
         assert updated is not None
         assert updated.full_name == "Updated Name"
+
+    @pytest.mark.asyncio
+    async def test_update_email_redacts_audit_log_changes(
+        self, session: AsyncSession
+    ) -> None:
+        """An admin email update must not leak the new address into the audit log.
+
+        `AuditLog.changes` is a plain, unencrypted JSON column, unlike
+        `AuditLog.actor_email`, so the new email value is redacted before
+        being logged.
+        """
+        user_create = UserCreate(
+            email="original@example.com",
+            password="password123",
+        )
+
+        user_service = _user_service(session)
+        with system_context():
+            created = await user_service.create(user_create)
+
+            update_data = UserUpdate(email="new@example.com")
+            await user_service.update(created.id, update_data, updated_by=uuid7())
+
+            result = await session.execute(
+                select(AuditLog).where(
+                    AuditLog.action == AuditAction.USER_UPDATE,
+                    AuditLog.resource_id == str(created.id),
+                )
+            )
+            entry = result.scalar_one()
+
+        assert "new@example.com" not in str(entry.changes)
+        assert entry.changes is not None
+        assert entry.changes["email"] != "new@example.com"
 
     @pytest.mark.asyncio
     async def test_update_user_not_found(self, session: AsyncSession) -> None:

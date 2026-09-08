@@ -33,7 +33,7 @@ class File(BaseModel, table=True):
     ``uploaded_by`` is a single FK: a second uploader referencing an
     already-shared row would either never see it (``get_owned`` filters on
     ``uploaded_by``) or silently inherit the first uploader's filename,
-    visibility, resource association and file ID.
+    resource association and file ID.
 
     A row with no ``tenant_id`` (``NULL``) still dedupes against other
     ``NULL``-tenant rows from the same uploader with the same content: the
@@ -104,11 +104,6 @@ class File(BaseModel, table=True):
     image_height: int | None = Field(
         default=None,
         nullable=True,
-    )
-
-    is_public: bool = Field(
-        default=False,
-        nullable=False,
     )
 
     reference_count: int = Field(
