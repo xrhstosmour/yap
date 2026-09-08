@@ -303,15 +303,23 @@ class AuditLogRepository(BaseRepository[AuditLog]):
     async def cleanup_old_logs(self, days: int = 365) -> int:
         """Archive soft-delete old audit logs.
 
+        A system-wide sweep by design: it runs from a Celery task with no
+        tenant context of its own, so it deliberately archives every
+        tenant's expired rows. Routed through `_apply_tenant_filter()`
+        under `system_context()`, the same opt-in gate every other
+        intentional cross-tenant sweep uses, instead of hand-building its
+        own conditional tenant filter. If a caller does happen to run this
+        with an active tenant context, the sweep stays scoped to that
+        tenant, exactly as before.
+
         Args:
             days: Delete logs older than this
 
         Returns:
             Number of logs archived
         """
-        from app.core.tenant import get_current_tenant_id
+        from app.core.tenant import system_context
 
-        tenant_id = get_current_tenant_id()
         cutoff = datetime.now(UTC) - timedelta(days=days)
 
         query = (
@@ -325,8 +333,8 @@ class AuditLogRepository(BaseRepository[AuditLog]):
             .values(deleted_at=datetime.now(UTC))
         )
 
-        if tenant_id:
-            query = query.where(AuditLog.tenant_id == tenant_id)  # type: ignore[arg-type]
+        with system_context():
+            query = self._apply_tenant_filter(query)
 
         result = cast(CursorResult[Any], await self.session.execute(query))
         count = result.rowcount or 0
