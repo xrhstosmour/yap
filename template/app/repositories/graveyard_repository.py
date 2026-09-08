@@ -13,6 +13,7 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
+from app.core.encryption import crypto
 from app.core.logging import get_logger
 from app.core.tenant import get_current_tenant_id
 from app.core.tenant import is_system_access
@@ -21,6 +22,35 @@ from app.models.graveyard import Graveyard
 from app.repositories.base import TenantContextRequiredError
 
 logger = get_logger("repository.graveyard")
+
+
+def _decrypt_snapshot(data: dict[str, Any]) -> dict[str, Any]:
+    """Decrypt `EncryptedString`-encrypted values in a graveyard snapshot.
+
+    `BaseRepository._bury()` re-encrypts `EncryptedString`-typed columns
+    (e.g. `User.email`, `User.phone`) before writing the snapshot, since
+    the JSON `data` column itself is not encrypted, and records exactly
+    which keys it encrypted in the sibling `__encrypted_keys__` list.
+    Decrypting only those keys, rather than pattern-sniffing every string
+    for an `"enc:"` prefix, avoids crashing on a legitimately plaintext
+    value (e.g. a user-supplied `full_name`) that happens to start with
+    the same prefix.
+
+    Args:
+        data: Raw graveyard snapshot as stored.
+
+    Returns:
+        A copy of `data`, minus the `__encrypted_keys__` marker, with the
+        recorded keys decrypted.
+    """
+    encrypted_keys = set(data.get("__encrypted_keys__") or ())
+    return {
+        key: crypto.decrypt(value)
+        if key in encrypted_keys and value is not None
+        else value
+        for key, value in data.items()
+        if key != "__encrypted_keys__"
+    }
 
 
 class GraveyardRepository:
@@ -139,4 +169,4 @@ class GraveyardRepository:
             raise TenantContextRequiredError(message)
         result = await self.session.execute(query)
         entry = result.scalar_one_or_none()
-        return entry.data if entry else None
+        return _decrypt_snapshot(entry.data) if entry else None

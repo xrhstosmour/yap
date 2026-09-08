@@ -22,6 +22,11 @@ down_revision: Union[str, None] = "20260812084509553"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
+# Keyset page size. `env.py` wraps the whole migration in one transaction, so
+# this cannot shrink lock duration, but it bounds the row-processing loop to
+# one page in memory at a time instead of `fetchall()`-ing the entire table.
+_BATCH_SIZE = 1000
+
 
 def upgrade() -> None:
     from app.core.encryption import crypto
@@ -45,17 +50,30 @@ def upgrade() -> None:
         sa.column("id", sa.Uuid()),
         sa.column("actor_email", sa.String()),
     )
-    rows = bind.execute(
-        sa.select(audit_logs_table.c.id, audit_logs_table.c.actor_email).where(
-            audit_logs_table.c.actor_email.is_not(None)
+    last_id = None
+    while True:
+        query = (
+            sa.select(audit_logs_table.c.id, audit_logs_table.c.actor_email)
+            .where(audit_logs_table.c.actor_email.is_not(None))
+            .order_by(audit_logs_table.c.id)
+            .limit(_BATCH_SIZE)
         )
-    ).fetchall()
-    for row in rows:
-        bind.execute(
-            audit_logs_table.update()
-            .where(audit_logs_table.c.id == row.id)
-            .values(actor_email=crypto.encrypt(row.actor_email))
-        )
+        if last_id is not None:
+            query = query.where(audit_logs_table.c.id > last_id)
+        rows = bind.execute(query).fetchall()
+        if not rows:
+            break
+
+        for row in rows:
+            bind.execute(
+                audit_logs_table.update()
+                .where(audit_logs_table.c.id == row.id)
+                .values(actor_email=crypto.encrypt(row.actor_email))
+            )
+
+        last_id = rows[-1].id
+        if len(rows) < _BATCH_SIZE:
+            break
 
 
 def downgrade() -> None:
@@ -70,17 +88,30 @@ def downgrade() -> None:
         sa.column("id", sa.Uuid()),
         sa.column("actor_email", sa.String()),
     )
-    rows = bind.execute(
-        sa.select(audit_logs_table.c.id, audit_logs_table.c.actor_email).where(
-            audit_logs_table.c.actor_email.is_not(None)
+    last_id = None
+    while True:
+        query = (
+            sa.select(audit_logs_table.c.id, audit_logs_table.c.actor_email)
+            .where(audit_logs_table.c.actor_email.is_not(None))
+            .order_by(audit_logs_table.c.id)
+            .limit(_BATCH_SIZE)
         )
-    ).fetchall()
-    for row in rows:
-        bind.execute(
-            audit_logs_table.update()
-            .where(audit_logs_table.c.id == row.id)
-            .values(actor_email=crypto.decrypt(row.actor_email))
-        )
+        if last_id is not None:
+            query = query.where(audit_logs_table.c.id > last_id)
+        rows = bind.execute(query).fetchall()
+        if not rows:
+            break
+
+        for row in rows:
+            bind.execute(
+                audit_logs_table.update()
+                .where(audit_logs_table.c.id == row.id)
+                .values(actor_email=crypto.decrypt(row.actor_email))
+            )
+
+        last_id = rows[-1].id
+        if len(rows) < _BATCH_SIZE:
+            break
 
     op.alter_column(
         "audit_logs",
