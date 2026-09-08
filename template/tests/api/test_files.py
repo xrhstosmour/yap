@@ -104,6 +104,38 @@ class TestFileUpload:
         assert response.status_code == 413
         assert "too large" in response.json()["detail"].lower()
 
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_upload_with_mismatched_content_returns_400(
+        self,
+        client: AsyncClient,
+        session: AsyncSession,
+    ) -> None:
+        """A declared `image/png` whose bytes are not a PNG is a 400.
+
+        Regression: `Content-Type` was trusted verbatim, so an HTML/SVG
+        payload declared as an image type was accepted and later served
+        back under that image content type.
+        """
+        auth_service = AuthService(cast(AsyncSession, session))
+        user = await auth_service.register(
+            RegisterRequest(
+                email="file-mime-mismatch@testapp.com", password="password123"
+            )
+        )
+        token = create_access_token(subject=user.id)
+
+        files = {
+            "file": ("fake.png", b"<script>alert(1)</script>", "image/png"),
+        }
+        response = await client.post(
+            "/api/v1/files/upload",
+            files=files,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 400
+        assert "does not match" in response.json()["detail"].lower()
+
 
 class TestFileNotFoundReturnsCleanly:
     """Regression tests: a missing or unowned file_id must return 404,

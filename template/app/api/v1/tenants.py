@@ -11,11 +11,13 @@ from fastapi import HTTPException
 from fastapi import status
 from fastapi.requests import Request
 
+from app.core import SYSTEM_TENANT_ID
 from app.core.logging import get_logger
 from app.core.pagination import PAGINATION_HEADERS_SPEC
 from app.core.pagination import PaginatedResponse
 from app.dependencies import SessionDependency
 from app.dependencies import SuperuserUser
+from app.models.user import User
 from app.repositories.audit_repository import AuditLogRepository
 from app.schemas.tenant import TenantCreate
 from app.schemas.tenant import TenantListParameters
@@ -37,6 +39,40 @@ def get_tenant_service(session: SessionDependency) -> TenantService:
 TenantServiceDependency = Annotated[TenantService, Depends(get_tenant_service)]
 
 
+def _require_platform_admin(current_user: User) -> None:
+    """Restrict platform-wide tenant operations to the system tenant.
+
+    A `SUPERUSER` is scoped to their own tenant. Only a superuser whose
+    own `tenant_id` is exactly the well-known `SYSTEM_TENANT_ID` acts as a
+    platform admin, since `Tenant` has no `tenant_id` column of its own
+    to filter these routes by. Deliberately does not coalesce a `None`
+    `tenant_id` to `SYSTEM_TENANT_ID`: `User.tenant_id` is nullable at the
+    type level, and a `None` here should read as "not a platform admin",
+    not be silently promoted to the most-privileged tenant.
+    """
+    if current_user.tenant_id != SYSTEM_TENANT_ID:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions",
+        )
+
+
+def _can_access_tenant(current_user: User, tenant_id: UUID) -> bool:
+    """Whether `current_user` may read or modify a single tenant by ID.
+
+    A platform admin (system tenant) may access any tenant. A
+    tenant-scoped superuser may only access their own tenant. Mirrors
+    the `file_service.py` convention of treating an unowned resource as
+    absent (404) rather than disclosing its existence via 403. See
+    `_require_platform_admin` for why a `None` `tenant_id` is not
+    coalesced to `SYSTEM_TENANT_ID`.
+    """
+    return (
+        current_user.tenant_id == SYSTEM_TENANT_ID
+        or current_user.tenant_id == tenant_id
+    )
+
+
 @router.get(
     "",
     response_model=TenantListResponse,
@@ -50,6 +86,8 @@ async def list_tenants(
     service: TenantServiceDependency,
     request: Request,
 ) -> PaginatedResponse:
+    _require_platform_admin(current_user)
+
     tenants, total = await service.list_tenants(
         skip=parameters.skip,
         limit=parameters.limit,
@@ -93,7 +131,7 @@ async def get_tenant(
     service: TenantServiceDependency,
 ) -> TenantResponse:
     tenant = await service.get_by_id(tenant_id)
-    if not tenant:
+    if not tenant or not _can_access_tenant(current_user, tenant_id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found"
         )
@@ -112,6 +150,8 @@ async def create_tenant(
     current_user: SuperuserUser,
     service: TenantServiceDependency,
 ) -> TenantResponse:
+    _require_platform_admin(current_user)
+
     try:
         tenant = await service.create(data, created_by=current_user.id)
         return TenantResponse.model_validate(tenant)
@@ -133,6 +173,11 @@ async def update_tenant(
     current_user: SuperuserUser,
     service: TenantServiceDependency,
 ) -> TenantResponse:
+    if not _can_access_tenant(current_user, tenant_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found"
+        )
+
     try:
         tenant = await service.update(tenant_id, data, updated_by=current_user.id)
     except (ValueError, TenantServiceError, TenantSlugAlreadyExistsError) as e:
@@ -158,6 +203,8 @@ async def delete_tenant(
     current_user: SuperuserUser,
     service: TenantServiceDependency,
 ) -> None:
+    _require_platform_admin(current_user)
+
     try:
         deleted = await service.delete(tenant_id, deleted_by=current_user.id)
     except (ValueError, TenantServiceError, TenantSlugAlreadyExistsError) as e:

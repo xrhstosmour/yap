@@ -117,6 +117,74 @@ class TestGenerateThumbnailTask:
         assert result.successful()
         assert result.result == {"status": "skipped", "reason": "file_not_found"}
 
+    def test_rejects_decompression_bomb_without_retry(
+        self, mock_session_factory: AsyncMock
+    ) -> None:
+        """A decompression bomb is deterministic for these bytes, retrying
+        would just fail the same way three more times. It must be caught
+        and reported, not routed through the generic retry path."""
+        import PIL.Image
+
+        record = _make_file_record()
+        mock_repository = MagicMock()
+        mock_repository.get = AsyncMock(return_value=record)
+
+        with (
+            patch(
+                "app.repositories.file_repository.FileRepository",
+                return_value=mock_repository,
+            ),
+            patch(
+                "app.core.storage.download_object",
+                new=AsyncMock(return_value=b"original-bytes"),
+            ),
+            patch(
+                "app.core.storage._build_thumbnail",
+                side_effect=PIL.Image.DecompressionBombError("image too large"),
+            ),
+        ):
+            result = generate_thumbnail_task.apply(kwargs={"file_id": str(record.id)})
+
+        assert result.successful()
+        assert result.result == {
+            "status": "rejected",
+            "reason": "decompression_bomb",
+        }
+
+    def test_rejects_decompression_bomb_warning_without_retry(
+        self, mock_session_factory: AsyncMock
+    ) -> None:
+        """`_build_thumbnail` escalates PIL's 1x-2x `DecompressionBombWarning`
+        band to an exception too, this must land in the same rejected path
+        as `DecompressionBombError`, not the generic autoretry path."""
+        import PIL.Image
+
+        record = _make_file_record()
+        mock_repository = MagicMock()
+        mock_repository.get = AsyncMock(return_value=record)
+
+        with (
+            patch(
+                "app.repositories.file_repository.FileRepository",
+                return_value=mock_repository,
+            ),
+            patch(
+                "app.core.storage.download_object",
+                new=AsyncMock(return_value=b"original-bytes"),
+            ),
+            patch(
+                "app.core.storage._build_thumbnail",
+                side_effect=PIL.Image.DecompressionBombWarning("image too large"),
+            ),
+        ):
+            result = generate_thumbnail_task.apply(kwargs={"file_id": str(record.id)})
+
+        assert result.successful()
+        assert result.result == {
+            "status": "rejected",
+            "reason": "decompression_bomb",
+        }
+
     def test_retries_on_failure(self, mock_session_factory: AsyncMock) -> None:
         """Should retry when downloading or building the thumbnail fails."""
         record = _make_file_record()
