@@ -9,7 +9,9 @@ from __future__ import annotations
 from pydantic import EmailStr
 from pydantic import Field
 
+from app.core.security import MAX_PASSWORD_BYTES
 from app.schemas.base import BaseSchema
+from app.schemas.base import PasswordString
 
 
 class LoginRequest(BaseSchema):
@@ -23,7 +25,9 @@ class LoginRequest(BaseSchema):
     """
 
     email: EmailStr = Field(description="User email address")
-    password: str = Field(min_length=8, max_length=128, description="User password")
+    password: PasswordString = Field(
+        min_length=8, max_length=MAX_PASSWORD_BYTES, description="User password"
+    )
 
 
 class RegisterRequest(BaseSchema):
@@ -38,8 +42,10 @@ class RegisterRequest(BaseSchema):
     """
 
     email: EmailStr = Field(description="Email address (must be unique)")
-    password: str = Field(
-        min_length=8, max_length=128, description="Password (min 8 characters)"
+    password: PasswordString = Field(
+        min_length=8,
+        max_length=MAX_PASSWORD_BYTES,
+        description="Password (min 8 characters)",
     )
     full_name: str | None = Field(
         default=None, max_length=255, description="Display name"
@@ -100,10 +106,12 @@ class PasswordChangeRequest(BaseSchema):
         new_password: New password (min 8 characters)
     """
 
-    current_password: str = Field(
-        min_length=8, max_length=128, description="Current password"
+    current_password: PasswordString = Field(
+        min_length=8, max_length=MAX_PASSWORD_BYTES, description="Current password"
     )
-    new_password: str = Field(min_length=8, max_length=128, description="New password")
+    new_password: PasswordString = Field(
+        min_length=8, max_length=MAX_PASSWORD_BYTES, description="New password"
+    )
 
 
 class PasswordResetRequest(BaseSchema):
@@ -129,7 +137,9 @@ class PasswordResetConfirmRequest(BaseSchema):
     """
 
     token: str = Field(description="Reset token from email")
-    new_password: str = Field(min_length=8, max_length=128, description="New password")
+    new_password: PasswordString = Field(
+        min_length=8, max_length=MAX_PASSWORD_BYTES, description="New password"
+    )
 
 
 class GoogleAuthUrlResponse(BaseSchema):
