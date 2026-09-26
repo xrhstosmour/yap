@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import pytest
+
+from app.core.greeklish import GREEK_TO_GREEKLISH
+from app.core.greeklish import GREEKLISH_TO_GREEK
 from app.core.greeklish import greek_to_greeklish
 from app.core.greeklish import greeklish_to_greek
 
@@ -36,8 +40,8 @@ class TestGreeklishToGreek:
     def test_already_latin_stays_as_is_when_no_match(self) -> None:
         """Latin characters without Greeklish mappings pass through."""
         result = greeklish_to_greek("abc")
-        # "a" -> α, "b" -> β, "c" not in map, passes through.
-        assert result == "αβc"
+        # "a" -> α, "b" -> μπ, "c" is not in the map and passes through.
+        assert result == "αμπc"
 
     def test_multi_char_pattern_before_single(self) -> None:
         """Multi-character patterns like 'th' should match before single 't' then 'h'."""
@@ -78,3 +82,68 @@ class TestGreekToGreeklish:
         # A long Greek string with many possible expansions
         candidates = greek_to_greeklish("ανθρωπος", max_expansions=5)
         assert len(candidates) <= 5
+
+
+class TestGreeklishRoundTrip:
+    """The two maps describe one correspondence and must agree."""
+
+    @pytest.mark.parametrize(
+        ("greeklish", "greek"),
+        [
+            ("taverna", "ταβερνα"),
+            ("souvlaki", "σουβλακι"),
+            ("bifteki", "μπιφτεκι"),
+            ("mpifteki", "μπιφτεκι"),
+            ("ouzeri", "ουζερι"),
+            ("kafeteria", "καφετερια"),
+            ("tzatziki", "τζατζικι"),
+            ("ntolmades", "ντολμαδες"),
+            ("psarotaverna", "ψαροταβερνα"),
+            ("saganaki", "σαγανακι"),
+        ],
+    )
+    def test_common_words_transliterate_exactly(
+        self, greeklish: str, greek: str
+    ) -> None:
+        """Everyday words map to their accentless Greek spelling.
+
+        `v` and `b` were previously the failure: `v` was absent from the
+        map so "taverna" kept a Latin `v`, and `b` produced β rather than
+        μπ, so neither word could match anything stored in Greek.
+        """
+        assert greeklish_to_greek(greeklish) == greek
+
+    @pytest.mark.parametrize(
+        "greek", ["ταβερνα", "σουβλακι", "μπιφτεκι", "γυρος", "ουζερι", "φετα"]
+    )
+    def test_first_greeklish_candidate_maps_back(self, greek: str) -> None:
+        """The preferred Greeklish spelling transliterates back to the original."""
+        preferred = greek_to_greeklish(greek)[0]
+        assert greeklish_to_greek(preferred) == greek
+
+    def test_word_final_sigma_uses_terminal_form(self) -> None:
+        """A trailing sigma becomes ς, which is how Greek text is stored."""
+        assert greeklish_to_greek("gyros") == "γυρος"
+        assert greeklish_to_greek("gyros souvlaki") == "γυρος σουβλακι"
+
+    def test_medial_sigma_is_unchanged(self) -> None:
+        """Only a word-final sigma is rewritten."""
+        assert greeklish_to_greek("kosta") == "κοστα"
+
+    def test_every_greeklish_expansion_is_mappable_back(self) -> None:
+        """No expansion may exist that the reverse map cannot consume.
+
+        A spelling offered by one table and unknown to the other is the
+        defect this pair of maps keeps reintroducing.
+        """
+        known = set(GREEKLISH_TO_GREEK)
+        unmappable = {
+            expansion
+            for expansions in GREEK_TO_GREEKLISH.values()
+            for expansion in expansions
+            if expansion.isascii() and expansion not in known
+        }
+        # `af`/`av`/`ef`/`ev` are intentionally one-way, see the comment on
+        # `GREEKLISH_TO_GREEK`: mapping them back would rewrite ordinary
+        # letter pairs such as the "av" inside "taverna".
+        assert unmappable <= {"af", "av", "ef", "ev"}

@@ -74,7 +74,10 @@ class TestChooseMode:
         Returns:
             None.
         """
-        mode, _ = choose_mode("ab")
+        # "ai" normalises to the two-character αι. "ab" is no longer a valid
+        # case here: `b` maps to the digraph μπ, so it normalises to three
+        # characters and legitimately reaches the FTS threshold.
+        mode, _ = choose_mode("ai")
         assert mode == SearchMode.TRIGRAM
 
     def test_long_query_returns_fts(self) -> None:
