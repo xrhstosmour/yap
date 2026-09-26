@@ -156,7 +156,15 @@ def build_ilike_condition(column_expr, query_str: str) -> Any:  # noqa: ANN401
         SQLAlchemy expression equivalent to ``column_expr ILIKE %query_str%``.
         Escapes ``%``, ``_``, and ``\\`` in the query string with a ``\\``
         escape character.
+
+    Note:
+        The query is normalised the same way the PostgreSQL builders
+        normalise it. Without that, Greeklish input reached this path
+        untransliterated and the fallback engine searched for Latin text
+        against Greek columns, so the same query behaved differently
+        depending on the engine.
     """
+    query_str = normalise_query(query_str)
     escaped = query_str.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     pattern = f"%{escaped}%"
     return column_expr.ilike(pattern, escape="\\")
