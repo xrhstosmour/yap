@@ -13,6 +13,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from app.core.security import DUMMY_PASSWORD_HASH
+from app.core.security import MAX_PASSWORD_BYTES
 from app.core.security import TokenRateLimitError
 from app.core.security import _check_token_rate_limit
 from app.core.security import blacklist_token
@@ -732,3 +733,37 @@ class TestGoogleOAuthStateHasNoSharedCooldown:
         assert not any(
             "rate_limit" in str(call) for call in mock_redis.set.await_args_list
         )
+
+
+class TestPasswordByteLimit:
+    """Passwords are bounded by bcrypt's 72-byte ceiling, not a character count."""
+
+    def test_multibyte_password_within_byte_limit_hashes(self) -> None:
+        """A Greek password under the byte ceiling still hashes and verifies."""
+        password = "Κωδικός1"
+        assert len(password.encode()) <= MAX_PASSWORD_BYTES
+        hashed = generate_password_hash(password)
+        assert verify_password(password, hashed) is True
+
+    def test_multibyte_password_over_byte_limit_raises_value_error(self) -> None:
+        """A Greek password over 72 bytes is rejected before reaching bcrypt.
+
+        It is only 42 characters, so a character-based guard would let it
+        through and bcrypt would raise, surfacing as a 500.
+        """
+        password = "Κωδικός" * 6
+        assert len(password) < 128
+        assert len(password.encode()) > MAX_PASSWORD_BYTES
+        with pytest.raises(ValueError, match="bytes"):
+            generate_password_hash(password)
+
+    def test_verify_password_returns_false_for_over_long_candidate(self) -> None:
+        """Verification of an over-long candidate is False, never an exception."""
+        hashed = generate_password_hash("correct horse")
+        assert verify_password("Κωδικός" * 6, hashed) is False
+
+    def test_ascii_password_at_byte_limit_hashes(self) -> None:
+        """Exactly 72 ASCII bytes is accepted, the boundary is inclusive."""
+        password = "a" * MAX_PASSWORD_BYTES
+        hashed = generate_password_hash(password)
+        assert verify_password(password, hashed) is True
