@@ -53,10 +53,14 @@ def normalise_query(query_str: str) -> str:
     """Normalise a search query for best-match behaviour.
 
     Applies Greeklish-to-Greek transliteration so that typing
-    `"yiannis"` matches stored `"Γιάννης"` (via unaccent on the
+    `"taverna"` matches stored `"Ταβέρνα"` (via unaccent on the
     column side). The query itself is not unaccented, the column
     expression is, so diacritics in the query are preserved for
     exact-match scoring.
+
+    Transliteration is approximate on vowels, see `greeklish_to_greek`,
+    so the result is meant for trigram or full-text matching rather than
+    equality.
 
     Args:
         query_str: Raw user-provided search query.
@@ -87,7 +91,7 @@ def build_fts_condition(
     """Build a PostgreSQL full-text search filter expression.
 
     Applies `unaccent()` to the column so diacritics in stored text
-    do not block matches (`"Γιάννης"` matches `"yiannis"`). The
+    do not block matches (`"Ταβέρνα"` matches `"taverna"`). The
     query is also normalised via Greeklish-to-Greek transliteration.
 
     Args:
