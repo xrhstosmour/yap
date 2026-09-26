@@ -13,10 +13,12 @@ from pydantic import EmailStr
 from pydantic import Field
 
 from app.core.phone_number import PhoneNumberString
+from app.core.security import MAX_PASSWORD_BYTES
 from app.models.user import UserRole
 from app.schemas.base import BaseSchema
 from app.schemas.base import PaginatedResponse
 from app.schemas.base import PaginationParameters
+from app.schemas.base import PasswordString
 
 
 class UserBase(BaseSchema):
@@ -34,7 +36,9 @@ class UserBase(BaseSchema):
 class UserCreate(UserBase):
     """Schema for creating a new user."""
 
-    password: str = Field(min_length=8, max_length=128, description="Password")
+    password: PasswordString = Field(
+        min_length=8, max_length=MAX_PASSWORD_BYTES, description="Password"
+    )
     tenant_id: UUID | None = Field(
         default=None, description="Tenant ID (for superuser)"
     )
@@ -63,16 +67,16 @@ class UserUpdateMe(BaseSchema):
         max_length=16,
         description="Phone number in E.164 format",
     )
-    current_password: str | None = Field(
+    current_password: PasswordString | None = Field(
         default=None,
         min_length=8,
-        max_length=128,
+        max_length=MAX_PASSWORD_BYTES,
         description="Current password for verification",
     )
-    new_password: str | None = Field(
+    new_password: PasswordString | None = Field(
         default=None,
         min_length=8,
-        max_length=128,
+        max_length=MAX_PASSWORD_BYTES,
         description="New password (optional)",
     )
 
@@ -93,8 +97,6 @@ class UserResponse(UserBase):
 
 class UserListResponse(PaginatedResponse[UserResponse]):
     """Paginated list of users."""
-
-    pass
 
 
 class UserListParameters(PaginationParameters):

@@ -33,6 +33,10 @@ logger = get_logger("core.security")
 # Password hashing configuration.
 # Using bcrypt directly as it's well-audited and production-proven.
 
+# bcrypt refuses any secret longer than 72 bytes rather than silently
+# truncating it, so this is a hard ceiling, not a policy choice.
+MAX_PASSWORD_BYTES: int = 72
+
 
 def generate_password_hash(password: str) -> str:
     """Hash a password using bcrypt.
@@ -47,15 +51,27 @@ def generate_password_hash(password: str) -> str:
         Bcrypt hash string suitable for storage
 
     Raises:
-        ValueError: If password exceeds 128 characters (bcrypt truncates at 72 bytes)
+        ValueError: If the password exceeds `MAX_PASSWORD_BYTES` once encoded
+            as UTF-8.
 
     Note:
         bcrypt is intentionally slow (cost factor) to resist brute force attacks.
         The default cost factor takes ~250ms per hash on modern hardware.
+
+        The limit is counted in UTF-8 bytes, not characters, because that is
+        what bcrypt itself enforces. Any non-ASCII character costs more than
+        one byte, so a 42-character Greek password is already 84 bytes and
+        bcrypt raises on it. Checking `len(password)` instead let such a
+        password pass this guard and blow up inside `bcrypt.hashpw`, which
+        surfaced as a 500 rather than a validation error.
     """
-    if len(password) > 128:
-        raise ValueError("Password exceeds maximum length of 128 characters")
-    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+    encoded = password.encode()
+    if len(encoded) > MAX_PASSWORD_BYTES:
+        raise ValueError(
+            f"Password exceeds maximum length of {MAX_PASSWORD_BYTES} bytes "
+            "when encoded as UTF-8"
+        )
+    return bcrypt.hashpw(encoded, bcrypt.gensalt()).decode()
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -69,9 +85,20 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         hashed_password: Previously stored hash to compare against
 
     Returns:
-        True if password matches, False otherwise
+        True if password matches, False otherwise.
+
+    Note:
+        An over-long candidate returns False rather than raising. bcrypt
+        rejects anything over `MAX_PASSWORD_BYTES`, and since no stored hash
+        can have been produced from such a password it cannot be a match.
+        Letting the `ValueError` escape would turn a failed login into a 500
+        and, on the `DUMMY_PASSWORD_HASH` path, break the timing-attack
+        protection that path exists to provide.
     """
-    return bcrypt.checkpw(plain_password.encode(), hashed_password.encode())
+    encoded = plain_password.encode()
+    if len(encoded) > MAX_PASSWORD_BYTES:
+        return False
+    return bcrypt.checkpw(encoded, hashed_password.encode())
 
 
 # Dummy hash for timing attack prevention.
