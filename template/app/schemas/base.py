@@ -6,11 +6,38 @@ validation with pagination support.
 
 from __future__ import annotations
 
+from typing import Annotated
 from typing import TypeVar
 
+from pydantic import AfterValidator
 from pydantic import BaseModel
 from pydantic import ConfigDict
 from pydantic import Field
+
+from app.core.security import MAX_PASSWORD_BYTES
+
+
+def _within_bcrypt_byte_limit(value: str) -> str:
+    """Reject passwords bcrypt cannot hash.
+
+    bcrypt refuses any secret over `MAX_PASSWORD_BYTES` UTF-8 bytes. A
+    character-only `max_length` does not catch this: Greek, Cyrillic and
+    emoji characters each cost two to four bytes, so a 42-character Greek
+    password is 84 bytes and reaches bcrypt already over the limit. Caught
+    here it is a 422 naming the real constraint, rather than a 500 raised
+    from inside the hashing call.
+    """
+    if len(value.encode()) > MAX_PASSWORD_BYTES:
+        raise ValueError(
+            f"Password must be at most {MAX_PASSWORD_BYTES} bytes when "
+            "encoded as UTF-8. Accented and non-Latin characters use more "
+            "than one byte each."
+        )
+    return value
+
+
+PasswordString = Annotated[str, AfterValidator(_within_bcrypt_byte_limit)]
+"""Password field type enforcing bcrypt's byte ceiling alongside `Field` rules."""
 
 
 class BaseSchema(BaseModel):
