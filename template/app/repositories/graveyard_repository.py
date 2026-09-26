@@ -68,9 +68,9 @@ class GraveyardRepository:
         model_name: str,
         record_id: UUID,
         data: dict[str, Any],
+        tenant_id: UUID,
         deleted_by: str = "system",
         reason: str | None = None,
-        tenant_id: UUID | None = None,
     ) -> Graveyard:
         """Create a graveyard entry for a deleted record.
 
@@ -80,7 +80,9 @@ class GraveyardRepository:
             data: Full snapshot of the record at deletion time.
             deleted_by: Who performed the deletion.
             reason: Optional reason.
-            tenant_id: Tenant context.
+            tenant_id: Owning tenant. Required because `Graveyard.tenant_id`
+                is `nullable=False`. Callers whose record carries no tenant
+                pass `SYSTEM_TENANT_ID`.
 
         Returns:
             Created Graveyard entry.
