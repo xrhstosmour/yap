@@ -45,7 +45,11 @@ async def init() -> None:
 
         if not existing_user:
             password_hash = generate_password_hash(settings.FIRST_SUPERUSER_PASSWORD)
-            user = User(
+            # `email_hash` is intentionally absent: the `_sync_email_hash`
+            # listener in `app.models.user` derives it from `email` on
+            # assignment, so passing it here would be overwritten. mypy 2.3.1
+            # started reporting the omission as a missing argument.
+            user = User(  # type: ignore[call-arg]
                 email=settings.FIRST_SUPERUSER_EMAIL,
                 hashed_password=password_hash,
                 full_name=settings.FIRST_SUPERUSER_FULL_NAME,
