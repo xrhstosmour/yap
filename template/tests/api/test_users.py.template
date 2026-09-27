@@ -293,6 +293,32 @@ class TestUsersUpdate:
         assert "already in use" in response.json()["detail"]
 
 
+class TestUsersGetMe:
+    """Tests for GET /api/v1/users/me."""
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_get_me_reports_the_second_factor_state(
+        self, client: AsyncClient, session: AsyncSession
+    ) -> None:
+        """A settings screen has no other way to know which state to draw."""
+        auth_service = _auth_service(session)
+        current_user = await auth_service.register(
+            RegisterRequest(
+                email="second-factor-state@{{ project_slug }}.com",
+                password="password123",
+            )
+        )
+        token = create_access_token(subject=current_user.id)
+
+        response = await client.get(
+            "/api/v1/users/me",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["is_2fa_enabled"] is False
+
+
 class TestUsersUpdateMe:
     """Tests for PATCH /api/v1/users/me.
 
