@@ -56,6 +56,10 @@ class TestSettingsValidation:
 
         settings = Settings(
             _env_file=None,
+            # Pinned: the default `FRONTEND_HOST` is a loopback origin,
+            # which is only valid in `local`, and the field default for
+            # `ENVIRONMENT` is `production`.
+            ENVIRONMENT="local",
             POSTGRESQL_SERVER="localhost",
             POSTGRESQL_PORT=5432,
             POSTGRESQL_USER="testuser",
@@ -78,6 +82,10 @@ class TestSettingsValidation:
 
         settings = Settings(
             _env_file=None,
+            # Pinned: the default `FRONTEND_HOST` is a loopback origin,
+            # which is only valid in `local`, and the field default for
+            # `ENVIRONMENT` is `production`.
+            ENVIRONMENT="local",
             REDIS_HOST="localhost",
             REDIS_PORT=6379,
             REDIS_DATABASE=1,
