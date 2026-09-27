@@ -65,6 +65,43 @@ class TestBuildTrigramCondition:
         expr_str = str(expr)
         assert "0.42" in expr_str or ":similarity" in expr_str
 
+    def test_also_matches_the_best_word(self) -> None:
+        """Ensure a long value is reachable by one of its words.
+
+        Whole-string similarity alone misses a surname searched against a
+        column holding a full name, which is the common case.
+
+        Returns:
+            None.
+        """
+        expr = build_trigram_condition(column("full_name"), "ali")
+        assert "word_similarity" in str(expr)
+
+    def test_word_similarity_takes_the_query_first(self) -> None:
+        """Ensure the query sits on the left of word_similarity().
+
+        The function is not symmetric, and the reversed form asks a
+        question that is almost never true.
+
+        Returns:
+            None.
+        """
+        # Greek input, so the Greeklish transliteration normalisation
+        # leaves the term alone and the assertion reads plainly.
+        expr = build_trigram_condition(column("full_name"), "αλι")
+        compiled = str(expr.compile(compile_kwargs={"literal_binds": True}))
+        assert "word_similarity(unaccent('αλι'), unaccent(full_name))" in compiled
+
+    def test_word_threshold_appears_in_expression(self) -> None:
+        """Ensure the word threshold is configurable.
+
+        Returns:
+            None.
+        """
+        expr = build_trigram_condition(column("full_name"), "ali", word_threshold=0.75)
+        expr_str = str(expr)
+        assert "0.75" in expr_str or ":word_similarity" in expr_str
+
 
 class TestChooseMode:
     """Tests for choose_mode()."""
