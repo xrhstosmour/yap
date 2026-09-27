@@ -20,7 +20,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import SYSTEM_TENANT_ID
 from app.core.encryption import encrypted_column_names
 from app.core.logging import get_logger
-from app.core.normalization import normalize_name
 from app.core.security import generate_password_hash
 from app.core.security import verify_password
 from app.models.api_key import APIKey
@@ -34,6 +33,8 @@ from app.repositories.user_repository import UserRepository
 from app.schemas.user import UserCreate
 from app.schemas.user import UserUpdate
 from app.schemas.user import UserUpdateMe
+from app.services.username import UsernameTakenError
+from app.services.username import resolve_username_change
 
 logger = get_logger("service.user")
 
@@ -307,14 +308,16 @@ class UserService:
         if "avatar_file_id" in data.model_fields_set:
             update_data["avatar_file_id"] = data.avatar_file_id
         if data.username is not None:
-            # Checked here rather than left to the unique constraint, so a
-            # taken handle comes back as a clear error instead of an
-            # integrity failure surfacing as a 500.
-            holder = await self.user_repository.get_by_username(data.username)
-            if holder is not None and holder.id != user.id:
-                raise UserServiceError("That username is taken")
-            update_data["username"] = data.username.strip()
-            update_data["username_normalized"] = normalize_name(data.username)
+            try:
+                update_data.update(
+                    await resolve_username_change(
+                        self.user_repository,
+                        user.id,
+                        data.username,
+                    )
+                )
+            except UsernameTakenError as error:
+                raise UserServiceError(str(error)) from error
 
         email_changing = isinstance(data.email, str) and data.email != user.email
         password_changing = data.new_password is not None
