@@ -23,6 +23,7 @@ from app.services.auth_service import AuthService
 from app.services.auth_service import EmailAlreadyExistsError
 from app.services.auth_service import InvalidCredentialsError
 from app.services.auth_service import UserInactiveError
+from app.services.auth_service import UsernameAlreadyExistsError
 from app.services.auth_service import UserNotFoundError
 
 
@@ -269,6 +270,51 @@ class TestAuthService:
                 RegisterRequest(
                     email="duplicate@example.com",
                     password="password456",
+                )
+            )
+
+    @pytest.mark.asyncio
+    async def test_register_stores_the_handle_and_its_normalised_form(
+        self, session: AsyncSession
+    ) -> None:
+        """Registering with a handle should store both spellings of it."""
+        auth_service = _auth_service(session)
+
+        user = await auth_service.register(
+            RegisterRequest(
+                email="handle@example.com",
+                password="password123",
+                username="Thanásis",
+            )
+        )
+
+        assert user.username == "Thanásis"
+        assert user.username_normalized == "thanasis"
+
+    @pytest.mark.asyncio
+    async def test_register_existing_username_raises_error(
+        self, session: AsyncSession
+    ) -> None:
+        """A handle already held should raise UsernameAlreadyExistsError.
+
+        Compared on the normalised form, so a different spelling of the
+        same handle is still a conflict rather than a second account.
+        """
+        auth_service = _auth_service(session)
+        await auth_service.register(
+            RegisterRequest(
+                email="first-holder@example.com",
+                password="password123",
+                username="Thanásis",
+            )
+        )
+
+        with pytest.raises(UsernameAlreadyExistsError):
+            await auth_service.register(
+                RegisterRequest(
+                    email="second-holder@example.com",
+                    password="password123",
+                    username="thanasis",
                 )
             )
 

@@ -97,6 +97,49 @@ class TestUserRepository:
         assert found.email == "bob@example.com"
 
     @pytest.mark.anyio
+    async def test_get_by_username_folds_accents_and_case(
+        self, session: AsyncSession
+    ) -> None:
+        """get_by_username() should resolve any spelling of the handle.
+
+        The lookup is what keeps a handle from being claimed twice, so it
+        has to match the way a person would read it, not byte for byte.
+
+        Args:
+            session: Async database session fixture.
+
+        Returns:
+            None.
+        """
+        repo = UserRepository(session)
+        await repo.create_user(
+            email="handle@example.com",
+            password_hash="hash",
+            username="Thanásis",
+        )
+
+        found = await repo.get_by_username("thanasis")
+
+        assert found is not None
+        assert found.username == "Thanásis"
+
+    @pytest.mark.anyio
+    async def test_get_by_username_returns_none_for_unknown(
+        self, session: AsyncSession
+    ) -> None:
+        """get_by_username() should return None for a free handle.
+
+        Args:
+            session: Async database session fixture.
+
+        Returns:
+            None.
+        """
+        repo = UserRepository(session)
+
+        assert await repo.get_by_username("nobody") is None
+
+    @pytest.mark.anyio
     async def test_get_by_email_returns_none_for_unknown(
         self, session: AsyncSession
     ) -> None:
