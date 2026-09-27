@@ -1,4 +1,4 @@
-"""File model for blob storage (MinIO / S3-compatible).
+"""File model for blob storage (S3-compatible).
 
 Stores metadata for uploaded files. The actual binary data lives in
 the storage backend; this table tracks ownership, deduplication via
@@ -16,7 +16,7 @@ from app.models.base import BaseModel
 
 
 class File(BaseModel, table=True):
-    """Uploaded file stored in MinIO / S3-compatible blob storage.
+    """Uploaded file stored in S3-compatible blob storage.
 
     Each row represents one logical file. Deduplication is handled by
     ``content_hash`` (SHA-256): when one uploader stores the same content

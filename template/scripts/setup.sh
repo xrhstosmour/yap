@@ -80,23 +80,20 @@ GLITCHTIP_SECRET_KEY="${GLITCHTIP_SECRET_KEY:-$(python3 -c "import secrets; prin
 REDIS_COMMANDER_PASSWORD="${REDIS_COMMANDER_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(12))")}"
 METABASE_READ_ONLY_PASSWORD="${METABASE_READ_ONLY_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")}"
 STORAGE_SECRET_KEY="${STORAGE_SECRET_KEY:-$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")}"
-# MINIO_ROOT_USER is a real admin credential, not a display name, the
-# well-known "minioadmin" default halves what an attacker has to guess
-# once the password is randomized. Generated and backfilled the same way
-# as MINIO_ROOT_PASSWORD, not left fixed.
+# The access key is a real credential rather than a display name, so it
+# is generated rather than left at a well-known default: that would
+# halve what an attacker has to guess once the secret is randomized.
 #
-# Upgrade hazard on an EXISTING deployment: MinIO treats the root user as
-# env-driven, so rotating this on a project whose MinIO volume already
-# holds data can orphan any service account or policy created under the
-# old "minioadmin" root. Confirm the app's storage client credential
-# (STORAGE_ACCESS_KEY/STORAGE_SECRET_KEY) still authenticates before
-# rolling this out to a running deployment, not just a fresh one.
-MINIO_ROOT_USER="${MINIO_ROOT_USER:-$(python3 -c "import secrets; print(secrets.token_urlsafe(12))")}"
-MINIO_ROOT_PASSWORD="${MINIO_ROOT_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")}"
+# Upgrade hazard on an EXISTING deployment: the storage server reads
+# these from the environment, so rotating them against a volume that
+# already holds data leaves the objects in place but changes who can
+# reach them. Confirm the application still authenticates before rolling
+# this out to a running deployment, not just a fresh one.
+STORAGE_ACCESS_KEY="${STORAGE_ACCESS_KEY:-$(python3 -c "import secrets; print(secrets.token_urlsafe(12))")}"
 # .env.example always carries the project's real POSTGRESQL_USER (== project_slug,
 # baked in by Copier at render time), even before .env exists on a fresh clone.
 CURRENT_POSTGRESQL_USER="$(sed -n 's/^POSTGRESQL_USER=//p' .env.example 2>/dev/null | head -1 | tr -d '"')"
-MINIO_DEFAULT_BUCKET="${MINIO_DEFAULT_BUCKET:-${CURRENT_POSTGRESQL_USER:-app}-files}"
+STORAGE_DEFAULT_BUCKET="${STORAGE_DEFAULT_BUCKET:-${CURRENT_POSTGRESQL_USER:-app}-files}"
 GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET:-$(python3 -c "import secrets; print(secrets.token_urlsafe(24))")}"
 SMTP_PASSWORD="${SMTP_PASSWORD:-$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")}"
 # Mailpit's web UI captures every outgoing email, including password-reset and
@@ -138,7 +135,6 @@ chmod 600 .env
 "${SED_INPLACE[@]}" "s/METABASE_DATABASE_PASSWORD=.*/METABASE_DATABASE_PASSWORD=your-postgresql-password/" .env.example
 "${SED_INPLACE[@]}" "s|^DATABASE_URL=.*|DATABASE_URL=postgres://your-user:your-postgresql-password@postgresql:5432/glitchtip|" .env.example
 "${SED_INPLACE[@]}" "s|^REDIS_URL=.*|REDIS_URL=redis://:your-redis-password@redis:6379/0|" .env.example
-"${SED_INPLACE[@]}" "s/MINIO_ROOT_PASSWORD=.*/MINIO_ROOT_PASSWORD=minioadmin/" .env.example
 "${SED_INPLACE[@]}" "s/SENTRY_DSN=.*/SENTRY_DSN=https:\/\/public:secret@sentry.com\/1/" .env.example
 
 # Write KEY=VALUE into an environment file, treating VALUE as literal text.
@@ -248,9 +244,8 @@ backfill_secret GLITCHTIP_SECRET_KEY "${GLITCHTIP_SECRET_KEY}"
 backfill_secret REDIS_COMMANDER_PASSWORD "${REDIS_COMMANDER_PASSWORD}"
 backfill_secret METABASE_READ_ONLY_PASSWORD "${METABASE_READ_ONLY_PASSWORD}"
 backfill_secret STORAGE_SECRET_KEY "${STORAGE_SECRET_KEY}"
-backfill_secret MINIO_ROOT_USER "${MINIO_ROOT_USER}" "minioadmin"
-backfill_secret MINIO_ROOT_PASSWORD "${MINIO_ROOT_PASSWORD}" "minioadmin"
-backfill_secret MINIO_DEFAULT_BUCKET "${MINIO_DEFAULT_BUCKET}"
+backfill_secret STORAGE_ACCESS_KEY "${STORAGE_ACCESS_KEY}"
+backfill_secret STORAGE_DEFAULT_BUCKET "${STORAGE_DEFAULT_BUCKET}"
 backfill_secret GOOGLE_CLIENT_SECRET "${GOOGLE_CLIENT_SECRET}"
 backfill_secret SMTP_PASSWORD "${SMTP_PASSWORD}"
 backfill_secret MAILPIT_UI_AUTH "${MAILPIT_UI_AUTH}"

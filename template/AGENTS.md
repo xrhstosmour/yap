@@ -25,7 +25,8 @@ background tasks, and comprehensive security features.
 - Full-text search (`to_tsvector`/`plainto_tsquery`) + trigram similarity.
 - Greeklish transliteration and Greek language support.
 - `SearchMixin` for reusable multi-field search on any model.
-- MinIO/S3 object storage with SHA-256 dedup, thumbnails, presigned URLs.
+- S3-compatible object storage, `SeaweedFS` locally, with SHA-256 dedup,
+  thumbnails, presigned URLs.
 - PII fields (`email`, `phone` on `User`) encrypted at rest via `EncryptedString`
   (Fernet); deterministic HMAC search hashes (`email_hash`, `phone_hash`) support
   exact-match lookups without exposing ciphertext to search or indexes.

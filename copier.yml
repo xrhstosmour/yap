@@ -166,16 +166,16 @@ include_redbeat:
   help: "Use RedBeat scheduler for Celery workers beat?"
   default: false
 
-include_minio:
+include_object_storage:
   type: bool
-  help: "Include MinIO for file/object storage?"
+  help: "Include S3-compatible object storage for files?"
   default: false
 
 storage_region:
   type: str
   help: "S3 storage region (e.g. eu-central-1, eu-west-1, us-east-1):"
   default: "eu-central-1"
-  when: "include_minio"
+  when: "include_object_storage"
 
 nested:
   type: bool
@@ -244,8 +244,8 @@ _message_after_copy: |
   {%- if include_redis_commander %}
     Redis Commander:   http://localhost:8082
   {%- endif %}
-  {%- if include_minio %}
-    MinIO Console:     http://localhost:9001
+  {%- if include_object_storage %}
+    Object storage:    http://localhost:9001
   {%- endif %}
   {%- if include_traefik %}
     Traefik:           http://{{ traefik_host or 'localhost' }}:8080

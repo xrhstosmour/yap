@@ -1,10 +1,9 @@
-"""Tests that `setup.sh` no longer leaves `MINIO_ROOT_USER` fixed.
+"""Tests that `setup.sh` generates the object storage access key.
 
-`MINIO_ROOT_USER` used to stay hardcoded as `minioadmin` while
-`MINIO_ROOT_PASSWORD` was randomized, a real admin credential left at its
-well-known default halves what an attacker has to guess once the password
-alone is unpredictable. It must now be generated and backfilled the same
-way as `MINIO_ROOT_PASSWORD`.
+The access key is a real credential rather than a display name. Left at a
+well-known default it halves what an attacker has to guess once the
+secret alone is unpredictable, so it is generated and backfilled the same
+way as `STORAGE_SECRET_KEY`.
 """
 
 from __future__ import annotations
@@ -54,35 +53,30 @@ def _call(
     )
 
 
-class TestSetupGeneratesAMinioRootUser:
-    """`setup.sh` itself must generate and backfill the username."""
+class TestSetupGeneratesTheAccessKey:
+    """`setup.sh` itself must generate and backfill the access key."""
 
     def test_generation_line_exists(self) -> None:
         """A random value is generated when none is supplied, matching the
-        treatment already given to `MINIO_ROOT_PASSWORD`."""
+        treatment already given to `STORAGE_SECRET_KEY`."""
         text = SETUP.read_text()
         assert re.search(
-            r'MINIO_ROOT_USER="\$\{MINIO_ROOT_USER:-\$\(python3 -c "import secrets;',
+            r'STORAGE_ACCESS_KEY="\$\{STORAGE_ACCESS_KEY:-\$\(python3 -c "import secrets;',
             text,
         )
 
-    def test_backfill_call_exists_with_the_old_default_as_migration_target(
-        self,
-    ) -> None:
-        """Existing installs still on the old `minioadmin` default must be
-        migrated too, not just fresh ones."""
+    def test_backfill_call_exists(self) -> None:
+        """A generated value is no use unless it reaches `.env`."""
         text = SETUP.read_text()
-        assert (
-            'backfill_secret MINIO_ROOT_USER "${MINIO_ROOT_USER}" "minioadmin"' in text
-        )
+        assert 'backfill_secret STORAGE_ACCESS_KEY "${STORAGE_ACCESS_KEY}"' in text
 
-    def test_backfill_runs_before_the_password_backfill(self) -> None:
-        """Order isn't load-bearing today, but keeping the pair adjacent
-        keeps the two credentials from drifting apart in a future edit."""
+    def test_the_pair_is_backfilled_together(self) -> None:
+        """Order is not load-bearing today, but keeping the key and its
+        secret adjacent stops the two drifting apart in a future edit."""
         text = SETUP.read_text()
-        user_index = text.index("backfill_secret MINIO_ROOT_USER")
-        password_index = text.index("backfill_secret MINIO_ROOT_PASSWORD")
-        assert user_index < password_index
+        secret_index = text.index("backfill_secret STORAGE_SECRET_KEY")
+        key_index = text.index("backfill_secret STORAGE_ACCESS_KEY")
+        assert abs(key_index - secret_index) < 200
 
 
 class TestBackfillSecretMigratesTheOldDefault:
@@ -90,20 +84,20 @@ class TestBackfillSecretMigratesTheOldDefault:
 
     def test_the_known_default_is_replaced(self, harness: Path, tmp_path: Path) -> None:
         env_file = tmp_path / ".env"
-        env_file.write_text("MINIO_ROOT_USER=minioadmin\nOTHER=untouched\n")
+        env_file.write_text("STORAGE_ACCESS_KEY=the-old-default\nOTHER=untouched\n")
 
         result = _call(
             harness,
             env_file,
             "backfill_secret",
-            "MINIO_ROOT_USER",
-            "a-random-username",
-            "minioadmin",
+            "STORAGE_ACCESS_KEY",
+            "a-random-access-key",
+            "the-old-default",
         )
 
         assert result.returncode == 0, result.stderr
         assert env_file.read_text() == (
-            "MINIO_ROOT_USER=a-random-username\nOTHER=untouched\n"
+            "STORAGE_ACCESS_KEY=a-random-access-key\nOTHER=untouched\n"
         )
 
     def test_a_deliberately_chosen_username_is_left_alone(
@@ -112,19 +106,19 @@ class TestBackfillSecretMigratesTheOldDefault:
         """Only the known default and empty/placeholder values are migrated,
         a value someone already set on purpose must survive."""
         env_file = tmp_path / ".env"
-        env_file.write_text("MINIO_ROOT_USER=our-own-admin\n")
+        env_file.write_text("STORAGE_ACCESS_KEY=our-own-key\n")
 
         result = _call(
             harness,
             env_file,
             "backfill_secret",
-            "MINIO_ROOT_USER",
-            "a-random-username",
-            "minioadmin",
+            "STORAGE_ACCESS_KEY",
+            "a-random-access-key",
+            "the-old-default",
         )
 
         assert result.returncode == 0, result.stderr
-        assert env_file.read_text() == "MINIO_ROOT_USER=our-own-admin\n"
+        assert env_file.read_text() == "STORAGE_ACCESS_KEY=our-own-key\n"
 
     def test_a_missing_key_is_appended(self, harness: Path, tmp_path: Path) -> None:
         env_file = tmp_path / ".env"
@@ -134,10 +128,12 @@ class TestBackfillSecretMigratesTheOldDefault:
             harness,
             env_file,
             "backfill_secret",
-            "MINIO_ROOT_USER",
-            "a-random-username",
-            "minioadmin",
+            "STORAGE_ACCESS_KEY",
+            "a-random-access-key",
+            "the-old-default",
         )
 
         assert result.returncode == 0, result.stderr
-        assert env_file.read_text() == "OTHER=1\nMINIO_ROOT_USER=a-random-username\n"
+        assert (
+            env_file.read_text() == "OTHER=1\nSTORAGE_ACCESS_KEY=a-random-access-key\n"
+        )
