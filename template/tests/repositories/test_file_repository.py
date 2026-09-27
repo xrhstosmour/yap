@@ -160,6 +160,89 @@ class TestFileRepository:
         assert found is None
 
     @pytest.mark.anyio
+    async def test_get_many_returns_files_regardless_of_owner(
+        self, session: AsyncSession
+    ) -> None:
+        """get_many() should return files uploaded by anyone.
+
+        This is the behaviour that separates it from get_owned(), so it is
+        the behaviour worth pinning: a caller embedding someone else's file
+        in a response gets the row.
+
+        Args:
+            session: Async database session fixture.
+
+        Returns:
+            None.
+        """
+        tenant = await self._create_tenant(session)
+        owner = await self._create_user(session, "owner@example.com")
+        other = await self._create_user(session, "other@example.com")
+        repo = FileRepository(session)
+
+        with tenant_context(tenant.id):
+            mine = await repo.create(
+                self._file_data(uploaded_by=other.id, content_hash="get-many-mine")
+            )
+            theirs = await repo.create(
+                self._file_data(uploaded_by=owner.id, content_hash="get-many-theirs")
+            )
+
+            found = await repo.get_many([mine.id, theirs.id])
+
+        assert {record.id for record in found} == {mine.id, theirs.id}
+
+    @pytest.mark.anyio
+    async def test_get_many_skips_unknown_and_deleted_ids(
+        self, session: AsyncSession
+    ) -> None:
+        """get_many() should omit ids it cannot resolve rather than raise.
+
+        A caller reads the rows it gets back, so an id that no longer
+        resolves has to be absent rather than fatal: a file deleted between
+        writing a reference and rendering it is ordinary, not an error.
+
+        Args:
+            session: Async database session fixture.
+
+        Returns:
+            None.
+        """
+        tenant = await self._create_tenant(session)
+        user = await self._create_user(session)
+        repo = FileRepository(session)
+
+        with tenant_context(tenant.id):
+            live = await repo.create(
+                self._file_data(uploaded_by=user.id, content_hash="get-many-live")
+            )
+            retired = await repo.create(
+                self._file_data(uploaded_by=user.id, content_hash="get-many-retired")
+            )
+            await repo.delete(retired.id)
+
+            found = await repo.get_many([live.id, retired.id, uuid4()])
+
+        assert [record.id for record in found] == [live.id]
+
+    @pytest.mark.anyio
+    async def test_get_many_returns_empty_without_querying(
+        self, session: AsyncSession
+    ) -> None:
+        """get_many() should short-circuit on an empty sequence.
+
+        Args:
+            session: Async database session fixture.
+
+        Returns:
+            None.
+        """
+        repo = FileRepository(session)
+
+        # No tenant context needed: an empty batch never reaches a query.
+        assert await repo.get_many([]) == []
+
+    @pytest.mark.anyio
     async def test_get_by_content_hash(self, session: AsyncSession) -> None:
         """get_by_content_hash() should find a file by its content hash.
 
