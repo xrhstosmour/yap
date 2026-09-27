@@ -140,7 +140,7 @@ include_pgadmin4=$(has_extra "pgadmin4")
 include_mailpit=$(has_extra "mailpit")
 include_redis_commander=$(has_extra "redis_commander")
 include_flower=$(has_extra "flower")
-include_minio=$(has_extra "minio")
+include_object_storage=$(has_extra "seaweedfs")
 # Read from the compose command, not from pyproject.toml. `celery-redbeat` is
 # an unconditional dependency, so grepping pyproject matched every project and
 # flipped this to true on every sync, whatever the user had chosen. The
@@ -209,7 +209,7 @@ redis_commander_password: "${REDIS_COMMANDER_PASSWORD:-}"
 include_flower: $include_flower
 flower_password: "${FLOWER_PASSWORD:-}"
 include_redbeat: $include_redbeat
-include_minio: $include_minio
+include_object_storage: $include_object_storage
 storage_region: "${storage_region}"
 nested: $nested
 jwt_secret_key: "${SECRET_KEY:-}"
