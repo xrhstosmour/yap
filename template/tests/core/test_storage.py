@@ -9,6 +9,7 @@ from uuid import UUID
 
 import pytest
 from botocore.exceptions import ClientError
+from botocore.signers import generate_presigned_url as boto_generate_presigned_url
 
 from app.core import SYSTEM_TENANT_ID
 from app.core.storage import _build_thumbnail
@@ -40,8 +41,15 @@ def mock_s3_client() -> MagicMock:
         client.head_bucket = MagicMock()
         client.create_bucket = MagicMock()
         client.put_object = MagicMock()
+        # Specced against the real signer rather than a bare MagicMock,
+        # which accepts any keyword and so silently passed a call boto3
+        # itself rejects. `Parameters=` instead of `Params=` lived here
+        # undetected exactly that way. The function is attached to the
+        # client at runtime rather than declared on its class, so the
+        # spec comes from `botocore.signers`.
         client.generate_presigned_url = MagicMock(
-            return_value="https://presigned.url/test"
+            spec=boto_generate_presigned_url,
+            return_value="https://presigned.url/test",
         )
         mock.return_value = client
         yield client
@@ -196,7 +204,7 @@ class TestGetDownloadUrl:
         )
 
         _, kwargs = mock_s3_client.generate_presigned_url.call_args
-        disposition = kwargs["Parameters"]["ResponseContentDisposition"]
+        disposition = kwargs["Params"]["ResponseContentDisposition"]
         assert disposition == (
             "attachment; filename=\"page.html\"; filename*=UTF-8''page.html"
         )
@@ -217,7 +225,7 @@ class TestGetDownloadUrl:
         )
 
         _, kwargs = mock_s3_client.generate_presigned_url.call_args
-        assert "attachment" in kwargs["Parameters"]["ResponseContentDisposition"]
+        assert "attachment" in kwargs["Params"]["ResponseContentDisposition"]
 
     @pytest.mark.asyncio
     async def test_image_mimetype_does_not_force_attachment(
@@ -227,7 +235,7 @@ class TestGetDownloadUrl:
         await get_download_url(object_key="test-key", mimetype="image/png")
 
         _, kwargs = mock_s3_client.generate_presigned_url.call_args
-        assert "ResponseContentDisposition" not in kwargs["Parameters"]
+        assert "ResponseContentDisposition" not in kwargs["Params"]
 
     @pytest.mark.asyncio
     async def test_no_mimetype_does_not_force_attachment(
@@ -237,7 +245,7 @@ class TestGetDownloadUrl:
         await get_download_url(object_key="test-key")
 
         _, kwargs = mock_s3_client.generate_presigned_url.call_args
-        assert "ResponseContentDisposition" not in kwargs["Parameters"]
+        assert "ResponseContentDisposition" not in kwargs["Params"]
 
     @pytest.mark.asyncio
     async def test_non_ascii_filename_is_encoded_not_mangled(
@@ -250,7 +258,7 @@ class TestGetDownloadUrl:
         )
 
         _, kwargs = mock_s3_client.generate_presigned_url.call_args
-        disposition = kwargs["Parameters"]["ResponseContentDisposition"]
+        disposition = kwargs["Params"]["ResponseContentDisposition"]
         assert "filename*=UTF-8''r%C3%A9sum%C3%A9.txt" in disposition
 
 
