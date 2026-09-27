@@ -33,6 +33,7 @@ def service(mock_session: MagicMock) -> FileService:
     repo = AsyncMock()
     repo.get_by_content_hash = AsyncMock()
     repo.get_owned = AsyncMock()
+    repo.get_many = AsyncMock()
     repo.increment_reference_count = AsyncMock()
     repo.create_or_increment = AsyncMock()
     repo.decrement_reference_count = AsyncMock()
@@ -390,3 +391,108 @@ class TestDelete:
 
         mock_delete.assert_not_called()
         service.file_repository.delete.assert_not_awaited()
+
+
+class TestUrlsFor:
+    """Tests for urls_for()."""
+
+    @staticmethod
+    def _record(file_id: str, thumbnail: str | None) -> MagicMock:
+        """Build a stand-in file row with only the fields presigning reads.
+
+        Args:
+            file_id: UUID string for the row.
+            thumbnail: Thumbnail object key, or None when it has none.
+
+        Returns:
+            A mock file record.
+        """
+        record = MagicMock()
+        record.id = UUID(file_id)
+        record.bucket = "my-bucket"
+        record.object_key = f"uploads/{file_id}"
+        record.mimetype = "image/png"
+        record.filename = f"{file_id}.png"
+        record.thumbnail_object_key = thumbnail
+        return record
+
+    @pytest.mark.asyncio
+    async def test_resolves_files_it_does_not_own(self, service: FileService) -> None:
+        """Should presign a file without any ownership check.
+
+        This is the whole point of the method, so it is the first thing
+        pinned: nothing in the call names a user.
+        """
+        record = self._record("00000000-0000-0000-0000-0000000000aa", None)
+        service.file_repository.get_many = AsyncMock(return_value=[record])
+
+        with patch(
+            "app.services.file_service.get_download_url",
+            new=AsyncMock(return_value="https://example.test/signed"),
+        ):
+            urls = await service.urls_for([record.id])
+
+        assert urls[record.id].url == "https://example.test/signed"
+        assert urls[record.id].thumbnail_url is None
+
+    @pytest.mark.asyncio
+    async def test_includes_the_thumbnail_when_there_is_one(
+        self, service: FileService
+    ) -> None:
+        """Should carry the thumbnail URL for a file that has one."""
+        record = self._record(
+            "00000000-0000-0000-0000-0000000000bb", "thumbnails/bb.png"
+        )
+        service.file_repository.get_many = AsyncMock(return_value=[record])
+
+        with patch(
+            "app.services.file_service.get_download_url",
+            new=AsyncMock(side_effect=["https://example.test/full", "https://t/thumb"]),
+        ):
+            urls = await service.urls_for([record.id])
+
+        assert urls[record.id].url == "https://example.test/full"
+        assert urls[record.id].thumbnail_url == "https://t/thumb"
+
+    @pytest.mark.asyncio
+    async def test_loads_every_id_in_one_query(self, service: FileService) -> None:
+        """Should hit the repository once for the whole batch.
+
+        A query per file is the cost this method exists to avoid, so a
+        regression to one-at-a-time has to fail the suite.
+        """
+        records = [
+            self._record("00000000-0000-0000-0000-0000000000c1", None),
+            self._record("00000000-0000-0000-0000-0000000000c2", None),
+            self._record("00000000-0000-0000-0000-0000000000c3", None),
+        ]
+        service.file_repository.get_many = AsyncMock(return_value=records)
+
+        with patch(
+            "app.services.file_service.get_download_url",
+            new=AsyncMock(return_value="https://example.test/signed"),
+        ):
+            urls = await service.urls_for([record.id for record in records])
+
+        assert len(urls) == 3
+        service.file_repository.get_many.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_omits_ids_that_did_not_resolve(self, service: FileService) -> None:
+        """Should return no entry for a file that no longer exists.
+
+        The caller reads the mapping rather than assuming an entry per id,
+        so a reference to a deleted file renders as nothing instead of
+        breaking the whole response.
+        """
+        record = self._record("00000000-0000-0000-0000-0000000000dd", None)
+        missing = UUID("00000000-0000-0000-0000-0000000000ee")
+        service.file_repository.get_many = AsyncMock(return_value=[record])
+
+        with patch(
+            "app.services.file_service.get_download_url",
+            new=AsyncMock(return_value="https://example.test/signed"),
+        ):
+            urls = await service.urls_for([record.id, missing])
+
+        assert set(urls) == {record.id}

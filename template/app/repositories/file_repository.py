@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC
 from datetime import datetime
 from typing import Any
@@ -165,6 +166,35 @@ class FileRepository(BaseRepository[File]):
                 f"the upsert ({row_id})"
             )
         return record, created
+
+    async def get_many(self, file_ids: Sequence[UUID]) -> list[File]:
+        """Get several files by ID in one query, ignoring ownership.
+
+        Unlike ``get_owned``, this applies no ``uploaded_by`` filter, so it
+        must only be called where the caller has already decided that the
+        viewer may see these files. It exists so a response that embeds
+        many files does not issue one query per file.
+
+        Missing, soft-deleted and other-tenant ids are simply absent from
+        the result rather than raising, so the caller reads the returned
+        rows instead of assuming a row per id.
+
+        Args:
+            file_ids: The ids to load. An empty sequence returns ``[]``
+                without touching the database.
+
+        Returns:
+            The file records that exist, in no particular order.
+        """
+        if not file_ids:
+            return []
+        query = select(File).where(
+            File.id.in_(set(file_ids)),  # type: ignore[attr-defined]
+        )
+        query = self._apply_tenant_filter(query)
+        query = self._apply_soft_delete_filter(query)
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
 
     async def get_owned(self, file_id: UUID, user_id: UUID) -> File | None:
         """Get a file by ID ensuring the requesting user owns it."""

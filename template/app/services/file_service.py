@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import os
+from collections.abc import Sequence
+from typing import NamedTuple
 from uuid import UUID
 
 from fastapi import UploadFile
@@ -22,6 +24,14 @@ from app.repositories.file_repository import FileRepository
 logger = get_logger("service.file")
 
 MAX_UPLOAD_SIZE = 25 * 1024 * 1024  # 25MB
+
+
+class FileUrls(NamedTuple):
+    """Where one stored file can be read from, and its thumbnail if it has one."""
+
+    url: str
+    thumbnail_url: str | None
+
 
 # Magic-byte signatures for content types we can verify without a new
 # dependency. A declared `Content-Type` is client-supplied and untrusted
@@ -236,6 +246,43 @@ class FileService:
             object_key=record.thumbnail_object_key,
             bucket=record.bucket,
         )
+
+    async def urls_for(self, file_ids: Sequence[UUID]) -> dict[UUID, FileUrls]:
+        """Presign several files at once, WITHOUT checking ownership.
+
+        This is the one read path that deliberately skips the
+        ``uploaded_by`` check every other read applies. It exists for
+        responses that embed files someone else uploaded, a feed row
+        showing another person's photo and avatar being the motivating
+        case, where the endpoint has already decided what this viewer may
+        see and the file is part of that decision rather than a separate
+        one.
+
+        **The caller owns authorisation.** Handing a file id to this method
+        is asserting that the viewer is allowed to see it. Never pass an id
+        that arrived from the client unvalidated, and never reach for this
+        where ``get_owned_file`` would do.
+
+        Batching matters as much as the missing check: a page of twenty
+        rows carrying a few files each would otherwise cost one query and
+        one presign round trip per file.
+
+        Args:
+            file_ids: The files to presign. Duplicates and unknown ids are
+                harmless, and an empty sequence does no work.
+
+        Returns:
+            A mapping of file id to its URLs, holding an entry only for
+            the ids that resolved to a live file.
+        """
+        records = await self.file_repository.get_many(file_ids)
+        return {
+            record.id: FileUrls(
+                url=await self.get_download_url(record),
+                thumbnail_url=await self.get_thumbnail_url(record),
+            )
+            for record in records
+        }
 
     async def delete(self, file_id: UUID, user: User) -> None:
         """Soft-delete a file. Purges from storage when reference count reaches zero.
