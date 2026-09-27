@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import SYSTEM_TENANT_ID
 from app.core.encryption import encrypted_column_names
 from app.core.logging import get_logger
+from app.core.normalization import normalize_name
 from app.core.security import generate_password_hash
 from app.core.security import verify_password
 from app.models.api_key import APIKey
@@ -278,9 +279,10 @@ class UserService:
     ) -> User:
         """Update own profile.
 
-        Supports updating name, email, phone, and password with proper
-        verification. When email changes or a new password is set, the
-        current_password must be provided and verified.
+        Supports updating name, handle, bio, avatar, email, phone, and
+        password with proper verification. When email changes or a new
+        password is set, the current_password must be provided and
+        verified.
 
         Args:
             user: Current user
@@ -290,7 +292,8 @@ class UserService:
             Updated User
 
         Raises:
-            UserServiceError: On validation failure or email conflict.
+            UserServiceError: On validation failure, email conflict, or a
+                handle somebody else already holds.
         """
         update_data: dict[str, object] = {}
         if data.email is not None:
@@ -299,6 +302,19 @@ class UserService:
             update_data["full_name"] = data.full_name
         if "phone" in data.model_fields_set:
             update_data["phone"] = data.phone
+        if "bio" in data.model_fields_set:
+            update_data["bio"] = data.bio
+        if "avatar_file_id" in data.model_fields_set:
+            update_data["avatar_file_id"] = data.avatar_file_id
+        if data.username is not None:
+            # Checked here rather than left to the unique constraint, so a
+            # taken handle comes back as a clear error instead of an
+            # integrity failure surfacing as a 500.
+            holder = await self.user_repository.get_by_username(data.username)
+            if holder is not None and holder.id != user.id:
+                raise UserServiceError("That username is taken")
+            update_data["username"] = data.username.strip()
+            update_data["username_normalized"] = normalize_name(data.username)
 
         email_changing = isinstance(data.email, str) and data.email != user.email
         password_changing = data.new_password is not None

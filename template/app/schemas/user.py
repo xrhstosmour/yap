@@ -28,6 +28,18 @@ class UserBase(BaseSchema):
     full_name: str | None = Field(
         default=None, max_length=255, description="Display name"
     )
+    username: str | None = Field(
+        default=None,
+        min_length=3,
+        max_length=32,
+        description="Unique handle other people find this user by",
+    )
+    bio: str | None = Field(
+        default=None, max_length=500, description="Short self-description"
+    )
+    avatar_file_id: UUID | None = Field(
+        default=None, description="File holding this user's avatar"
+    )
     is_active: bool = Field(default=True, description="Whether user is active")
     role: str = Field(default="user", description="User role")
     is_verified: bool = Field(default=False, description="Whether email is verified")
@@ -60,6 +72,18 @@ class UserUpdateMe(BaseSchema):
 
     full_name: str | None = Field(
         default=None, max_length=255, description="Display name"
+    )
+    username: str | None = Field(
+        default=None,
+        min_length=3,
+        max_length=32,
+        description="Unique handle other people find you by",
+    )
+    bio: str | None = Field(
+        default=None, max_length=500, description="Short self-description"
+    )
+    avatar_file_id: UUID | None = Field(
+        default=None, description="File holding your avatar"
     )
     email: EmailStr | None = Field(default=None, description="Email address")
     phone: PhoneNumberString = Field(
