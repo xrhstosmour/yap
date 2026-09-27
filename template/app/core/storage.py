@@ -301,10 +301,12 @@ async def get_download_url(
     parameters: dict[str, Any] = {"Bucket": bucket, "Key": object_key}
     if mimetype is not None and mimetype not in INLINE_SAFE_MIMETYPES:
         parameters["ResponseContentDisposition"] = _attachment_disposition(filename)
+    # `Params`, not `Parameters`: boto3 rejects the latter outright, so
+    # every download URL raised `TypeError` rather than being signed.
     url = await asyncio.to_thread(
         client.generate_presigned_url,
         "get_object",
-        Parameters=parameters,
+        Params=parameters,
         ExpiresIn=expires_in,
     )
     return cast(str, url)
