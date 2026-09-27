@@ -20,6 +20,7 @@ from enum import StrEnum
 from typing import Any
 
 from sqlmodel import func
+from sqlmodel import or_
 from sqlmodel import text
 
 from app.core.greeklish import greeklish_to_greek
@@ -123,25 +124,55 @@ def build_fts_condition(
     )
 
 
-def build_trigram_condition(column_expr, query_str: str, threshold: float = 0.3) -> Any:  # noqa: ANN401
+def build_trigram_condition(
+    column_expr,  # noqa: ANN001
+    query_str: str,
+    threshold: float = 0.3,
+    word_threshold: float = 0.6,
+) -> Any:  # noqa: ANN401
     """Build a trigram similarity threshold expression.
 
     Applies `unaccent()` to both the column and the query so that
     diacritic differences do not block similarity matches.
 
+    Matches on either measure, because the two fail in opposite
+    directions. `similarity()` compares whole strings, so a long value
+    dilutes the score however well one word matches: searching a person's
+    surname against a column holding their full name and their town can
+    score under any useful threshold for a reason that has nothing to do
+    with spelling. `word_similarity()` compares the query against the
+    best-matching word instead, which is what a name search actually
+    means, but it is too permissive on its own for a single-word column,
+    where the whole-string measure is the honest one.
+
     Args:
         column_expr: SQLAlchemy column or SQL expression to search.
         query_str: User-provided search query.
-        threshold: Minimum similarity score in the range [0.0, 1.0].
+        threshold: Minimum whole-string similarity, in the range
+            [0.0, 1.0].
+        word_threshold: Minimum similarity against the best-matching word
+            in the column, in the range [0.0, 1.0]. Higher than
+            `threshold` because matching one word out of several is a
+            weaker signal than matching the whole value.
 
     Returns:
         SQLAlchemy expression equivalent to
-        `similarity(unaccent(column_expr), unaccent(query_str)) >= threshold`.
+        `similarity(unaccent(column_expr), unaccent(query_str)) >= threshold
+        OR word_similarity(unaccent(query_str), unaccent(column_expr))
+        >= word_threshold`.
+
+    Note:
+        `word_similarity()` is not symmetric: it reads "how well does the
+        left term match some word of the right". The query therefore goes
+        on the left. Swapping the arguments asks whether the whole stored
+        value matches a word of the query, which is almost never true.
     """
     query_str = normalise_query(query_str)
-    return (
-        func.similarity(func.unaccent(column_expr), func.unaccent(query_str))
-        >= threshold
+    unaccented_column = func.unaccent(column_expr)
+    unaccented_query = func.unaccent(query_str)
+    return or_(
+        func.similarity(unaccented_column, unaccented_query) >= threshold,
+        func.word_similarity(unaccented_query, unaccented_column) >= word_threshold,
     )
 
 
