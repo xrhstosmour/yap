@@ -57,6 +57,7 @@ from app.services.auth_service import AuthService
 from app.services.auth_service import EmailAlreadyExistsError
 from app.services.auth_service import InvalidCredentialsError
 from app.services.auth_service import UserInactiveError
+from app.services.auth_service import UsernameAlreadyExistsError
 from app.services.auth_service import UserNotFoundError
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -90,6 +91,11 @@ async def register(
     except EmailAlreadyExistsError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+    except UsernameAlreadyExistsError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
             detail=str(e),
         ) from e
 

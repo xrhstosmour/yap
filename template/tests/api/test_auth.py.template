@@ -239,6 +239,31 @@ class TestAuthRegister:
 
         assert response.status_code == 400
 
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_register_duplicate_username_returns_409(
+        self, client: AsyncClient, session
+    ) -> None:
+        """A handle somebody already holds should come back as a conflict."""
+        auth_service = _auth_service(session)
+        await auth_service.register(
+            RegisterRequest(
+                email="handle-holder@{{ project_slug }}.com",
+                password="password123",
+                username="thanasis",
+            )
+        )
+
+        response = await client.post(
+            "/api/v1/auth/register",
+            json={
+                "email": "handle-wanter@{{ project_slug }}.com",
+                "password": "password123",
+                "username": "thanasis",
+            },
+        )
+
+        assert response.status_code == 409
+
 
 class TestChangePassword:
     """Tests for POST /api/v1/auth/change-password."""
