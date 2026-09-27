@@ -17,6 +17,7 @@ from sqlmodel import select
 
 from app.core.encryption import crypto
 from app.core.logging import get_logger
+from app.core.normalization import normalize_name
 from app.models.user import User
 from app.models.user import UserRole
 from app.repositories.base import BaseRepository
@@ -65,6 +66,34 @@ class UserRepository(SearchMixin, BaseRepository[User]):
             )
         )
         result = await self.session.execute(query)
+        return result.scalar_one_or_none()
+
+    async def get_by_username(self, username: str) -> User | None:
+        """Get a user by their handle.
+
+        Compared on the normalised form rather than the stored one, so a
+        handle cannot be claimed twice in two spellings that differ only
+        in case or accents, and a search that folds accents resolves.
+
+        Deliberately not tenant filtered, for the same reason
+        `get_by_email` is not: the uniqueness constraint on `username` is
+        global, so the check that a handle is free has to be global too.
+        It also runs during registration, which is unauthenticated and
+        therefore has no tenant context to filter by.
+
+        Args:
+            username: The handle to look up, in any spelling.
+
+        Returns:
+            User instance or None if not found.
+        """
+        query = select(User).where(
+            and_(
+                User.username_normalized == normalize_name(username),
+                User.deleted_at.is_(None),  # type: ignore[union-attr]
+            )
+        )
+        result = await self.session.execute(query.limit(1))
         return result.scalar_one_or_none()
 
     async def email_exists(self, email: str) -> bool:
@@ -142,6 +171,7 @@ class UserRepository(SearchMixin, BaseRepository[User]):
         tenant_id: UUID | None = None,
         role: UserRole = UserRole.USER,
         is_verified: bool = False,
+        username: str | None = None,
     ) -> User:
         """Create a new user with password.
 
@@ -152,6 +182,7 @@ class UserRepository(SearchMixin, BaseRepository[User]):
             tenant_id: Optional tenant ID.
             role: User role for access control.
             is_verified: Whether email is pre-verified (e.g. OAuth accounts).
+            username: Optional handle, stored alongside its normalised form.
 
         Returns:
             Created User instance.
@@ -165,6 +196,8 @@ class UserRepository(SearchMixin, BaseRepository[User]):
                 "role": role,
                 "is_active": True,
                 "is_verified": is_verified,
+                "username": username.strip() if username else None,
+                "username_normalized": normalize_name(username) if username else None,
             }
         )
 
