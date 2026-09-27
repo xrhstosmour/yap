@@ -339,7 +339,7 @@ class Settings(BaseSettings):
     WEBAUTHN_RP_NAME: str = "{{ project_name }}"
     WEBAUTHN_CHALLENGE_TTL_SECONDS: int = 300
 
-    #     # File storage (MinIO / S3-compatible).
+    #     # File storage (S3-compatible).
     STORAGE_BACKEND: str = "file"
     STORAGE_ENDPOINT: str = ""
     STORAGE_ACCESS_KEY: str = ""
