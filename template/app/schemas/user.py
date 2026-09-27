@@ -110,6 +110,14 @@ class UserResponse(UserBase):
 
     id: UUID = Field(description="User ID")
     tenant_id: UUID | None = Field(description="Tenant ID")
+    # Read-only. A client cannot turn a second factor on by sending this,
+    # that goes through the enrollment endpoints, which require proving a
+    # code. It is here because a settings screen has no other way to know
+    # which state to draw, and because it must never reach the profile
+    # responses other people can read.
+    is_2fa_enabled: bool = Field(
+        default=False, description="Whether TOTP 2FA is active on this account"
+    )
     phone: PhoneNumberString = Field(
         default=None,
         max_length=16,
