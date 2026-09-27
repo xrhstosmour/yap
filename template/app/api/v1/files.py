@@ -1,7 +1,7 @@
 """File upload and management API routes.
 
 Provides endpoints for uploading, downloading, and managing files
-stored in MinIO / S3-compatible blob storage.
+stored in S3-compatible blob storage.
 """
 
 from __future__ import annotations
