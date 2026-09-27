@@ -13,18 +13,31 @@ from typing import Any
 
 import httpx
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 
 from app.models.device_token import DevicePlatform
 from app.services.push_service import PushNotification
 from app.services.push_service import PushService
 
-# A throwaway P-256 key. Generated for this file and used nowhere else,
-# so that signing is genuinely exercised rather than mocked out.
-_TEST_EC_KEY = """-----BEGIN PRIVATE KEY-----
-MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgevZzL1gdAFr88hb2
-OF/2NxApJCzGCEDdfSp6VQO30hyhRANCAAQRWz+jn65BtOMvdyHKcvjBeBSDZH2r
-1RTwjmYSi9R/zpBnuQ4EiMnCqfMPWiZqB4QdbAd0E7oH50VpuZ1P087G
------END PRIVATE KEY-----"""
+
+def _throwaway_ec_key() -> str:
+    """A fresh P-256 key, so signing is exercised rather than mocked.
+
+    Generated per run rather than pasted in as a literal. A committed PEM
+    is indistinguishable from a leaked one to everything that scans for
+    them, and being able to say a repository contains no private keys at
+    all is worth more than the microsecond this costs.
+    """
+    return (
+        ec.generate_private_key(ec.SECP256R1())
+        .private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+        .decode()
+    )
 
 
 @pytest.fixture
@@ -41,7 +54,9 @@ def _configure_apple(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(settings, "APNS_KEY_ID", "KEY123", raising=False)
     monkeypatch.setattr(settings, "APNS_TEAM_ID", "TEAM123", raising=False)
-    monkeypatch.setattr(settings, "APNS_PRIVATE_KEY", _TEST_EC_KEY, raising=False)
+    monkeypatch.setattr(
+        settings, "APNS_PRIVATE_KEY", _throwaway_ec_key(), raising=False
+    )
     monkeypatch.setattr(settings, "APNS_TOPIC", "com.example.app", raising=False)
     monkeypatch.setattr(settings, "APNS_USE_SANDBOX", False, raising=False)
 
