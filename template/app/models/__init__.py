@@ -9,6 +9,8 @@ from app.models.audit_log import AuditAction
 from app.models.audit_log import AuditLog
 from app.models.base import BaseModel
 from app.models.base import TenantBase
+from app.models.device_token import DevicePlatform
+from app.models.device_token import DeviceToken
 from app.models.feature_flag import FeatureFlag
 from app.models.file import File
 from app.models.graveyard import Graveyard
@@ -27,6 +29,8 @@ __all__ = [
     "AuditAction",
     "AuditLog",
     "BaseModel",
+    "DevicePlatform",
+    "DeviceToken",
     "FeatureFlag",
     "File",
     "Graveyard",
