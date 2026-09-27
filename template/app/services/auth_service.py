@@ -62,6 +62,12 @@ class EmailAlreadyExistsError(AuthenticationError):
     pass
 
 
+class UsernameAlreadyExistsError(AuthenticationError):
+    """The requested handle is taken."""
+
+    pass
+
+
 class UserNotFoundError(AuthenticationError):
     """User not found."""
 
@@ -232,12 +238,18 @@ class AuthService:
 
         Raises:
             EmailAlreadyExistsError: If email is taken
+            UsernameAlreadyExistsError: If the requested handle is taken
         """
         self._validate_password_strength(data.password)
 
         # Check if email exists.
         if await self.user_repository.email_exists(data.email):
             raise EmailAlreadyExistsError("Email already registered")
+
+        # Claim the handle before creating anything, so a taken one fails
+        # the request rather than leaving an account with no handle behind.
+        if data.username and await self.user_repository.get_by_username(data.username):
+            raise UsernameAlreadyExistsError("That username is taken")
 
         # Create user.
         password_hash = await asyncio.to_thread(generate_password_hash, data.password)
@@ -247,6 +259,7 @@ class AuthService:
             full_name=data.full_name,
             tenant_id=tenant_id,
             role=UserRole.USER,
+            username=data.username,
         )
 
         logger.info("user_registered", user_id=str(user.id))

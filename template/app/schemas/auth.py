@@ -39,6 +39,7 @@ class RegisterRequest(BaseSchema):
         email: Desired email address (must be unique)
         password: Desired password (min 8 characters)
         full_name: Optional display name
+        username: Optional unique handle
     """
 
     email: EmailStr = Field(description="Email address (must be unique)")
@@ -49,6 +50,12 @@ class RegisterRequest(BaseSchema):
     )
     full_name: str | None = Field(
         default=None, max_length=255, description="Display name"
+    )
+    username: str | None = Field(
+        default=None,
+        min_length=3,
+        max_length=32,
+        description="Handle other people find you by, must be unique",
     )
 
 

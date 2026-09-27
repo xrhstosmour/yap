@@ -14,6 +14,8 @@ from uuid import uuid4
 
 from pydantic import EmailStr
 from sqlalchemy import Enum as SAEnum
+from sqlalchemy import Index
+from sqlalchemy import UniqueConstraint
 from sqlalchemy import event
 from sqlalchemy.orm import relationship
 from sqlmodel import Field
@@ -56,6 +58,11 @@ class User(BaseModel, table=True):
             salted in instead, so repeated erasures don't collide on this
             unique column, see `_sync_email_hash`.
         full_name: User's display name. Left unencrypted, see note below.
+        username: Unique handle other people find and mention this user by.
+        username_normalized: Accent-folded lowercase form of `username`,
+            used for the uniqueness check and for fuzzy handle search.
+        bio: Short free-text description the user writes about themselves.
+        avatar_file_id: The file holding this user's avatar, if any.
         phone: Phone number in E.164 format. Encrypted at rest, same
             pattern as `email`. `phone_hash` enables exact-match lookups.
         phone_hash: Deterministic HMAC-SHA256 hash of `phone`, indexed.
@@ -91,6 +98,18 @@ class User(BaseModel, table=True):
 
     __tablename__ = "users"  # pyright: ignore[reportAssignmentType]
 
+    __table_args__ = (
+        UniqueConstraint("username", name="uq_users_username"),
+        # Handle search matches partial and misspelt input, so it needs
+        # trigrams rather than the plain index a unique constraint gives.
+        Index(
+            "ix_users_username_normalized_trigram",
+            "username_normalized",
+            postgresql_using="gin",
+            postgresql_ops={"username_normalized": "gin_trgm_ops"},
+        ),
+    )
+
     email: EmailStr = Field(
         nullable=False,
         max_length=255,
@@ -107,6 +126,38 @@ class User(BaseModel, table=True):
     full_name: str | None = Field(
         default=None,
         max_length=255,
+    )
+
+    # The handle other people search for and mention. Nullable because an
+    # OAuth sign up has no chance to pick one before the account exists,
+    # and demanding one at that moment would break the flow.
+    username: str | None = Field(
+        default=None,
+        nullable=True,
+        min_length=3,
+        max_length=32,
+    )
+
+    # Accent-folded and lowercased, so a handle cannot be claimed twice in
+    # two spellings and a search that drops accents still resolves.
+    # Written by the repository and the service, never by the client.
+    username_normalized: str | None = Field(
+        default=None,
+        nullable=True,
+        index=True,
+        max_length=32,
+    )
+
+    bio: str | None = Field(default=None, nullable=True, max_length=500)
+
+    # Deliberately not a foreign key. `files.uploaded_by` already points at
+    # `users`, so a constraint back the other way makes the two tables
+    # mutually dependent, which breaks schema creation ordering. An avatar
+    # is a soft reference anyway: if the file goes the avatar stops
+    # resolving, and deleting a file should never be blocked by a user row.
+    avatar_file_id: UUID | None = Field(
+        default=None,
+        nullable=True,
     )
 
     phone: str | None = Field(
