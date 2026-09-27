@@ -26,7 +26,7 @@
 
 ### File Storage
 
-- **Object Storage**: MinIO / S3-compatible blob storage for documents, images, and files
+- **Object Storage**: S3-compatible blob storage for documents, images, and files, `SeaweedFS` in the local stack
 - **Deduplication**: SHA-256 content hash dedup, identical files share storage via reference counting
 - **Image Processing**: Automatic thumbnail generation and dimension extraction via Pillow
 - **Presigned URLs**: Time-limited direct download URLs, file bytes never proxy through the API

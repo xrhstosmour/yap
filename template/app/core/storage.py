@@ -1,4 +1,4 @@
-"""Blob storage service for MinIO / S3-compatible object storage.
+"""Blob storage service for S3-compatible object storage.
 
 Provides upload, download, delete, and presigned URL generation.
 Image files get a thumbnail and dimensions generated asynchronously
@@ -49,7 +49,8 @@ INLINE_SAFE_MIMETYPES = frozenset(
 _BUCKET_NOT_FOUND_CODES = {"404", "NoSuchBucket"}
 
 # The only delete_object failures that mean "the object is already gone".
-# S3 and MinIO both answer a delete for a missing key with a success, so in
+# Every S3-compatible server answers a delete for a missing key with a
+# success, so in
 # practice these are belt and braces. Anything outside this set, AccessDenied
 # above all, means the delete did not happen.
 _OBJECT_NOT_FOUND_CODES = {"404", "NoSuchKey"}
@@ -72,7 +73,8 @@ def _s3_client() -> Any:  # noqa: ANN401
         kwargs: dict[str, Any] = {}
         if settings.STORAGE_ENDPOINT:
             kwargs["endpoint_url"] = settings.STORAGE_ENDPOINT
-            # MinIO uses path-style addressing by default.
+            # A self-hosted gateway is addressed by path rather than by
+            # virtual host, and signs with SigV4.
             kwargs["config"] = boto3.session.Config(signature_version="s3v4")
         _cached_s3_client = session.client("s3", **kwargs)
     return _cached_s3_client
@@ -244,7 +246,7 @@ async def upload_file(
 ) -> tuple[str, str]:
     """Upload file bytes to blob storage.
 
-    Computes the SHA-256 hash and uploads the original to MinIO/S3.
+    Computes the SHA-256 hash and uploads the original to object storage.
     Image thumbnails and dimensions are generated afterward by
     ``app.tasks.storage.generate_thumbnail_task``, not inline, so this
     call doesn't hold the request open for the resize.
