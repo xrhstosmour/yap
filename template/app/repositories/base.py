@@ -239,6 +239,22 @@ class BaseRepository[T: SQLModel]:
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
+    def _filter_condition(self, field: str, value: Any) -> Any:  # noqa: ANN401
+        """Build one filter condition, matching a set of values with `IN`.
+
+        A list, tuple or set means "any of these", which is what a caller
+        passing `{"id": [...]}` intends. Compared with `==` it becomes
+        `column = ARRAY[...]`, and Postgres rejects that outright with
+        `cannot cast type uuid[] to uuid` rather than returning nothing,
+        so the only way to filter by a set was to bypass this method.
+
+        A string is deliberately not treated as a set of characters.
+        """
+        column = cast(Any, getattr(self.model, field))
+        if isinstance(value, (list, tuple, set, frozenset)):
+            return column.in_(list(value))
+        return column == value
+
     async def list(
         self,
         skip: int = 0,
@@ -276,7 +292,7 @@ class BaseRepository[T: SQLModel]:
             for field, value in filters.items():
                 if hasattr(self.model, field):
                     if value is not None:
-                        filter_conditions.append(getattr(self.model, field) == value)
+                        filter_conditions.append(self._filter_condition(field, value))
             if filter_conditions:
                 query = query.where(and_(*filter_conditions))
 
