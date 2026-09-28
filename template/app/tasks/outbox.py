@@ -42,6 +42,13 @@ def process_outbox(self) -> dict:
                 for event in events:
                     try:
                         envelope = {
+                            # The outbox event's own id, carried so a
+                            # consumer can recognise a redelivery. Delivery
+                            # is at-least-once, so a consumer that writes
+                            # anything durable needs a key to be idempotent
+                            # against, and the payload rarely contains one.
+                            "event_id": str(event.id),
+                            "event_type": event.event_type,
                             "tenant_id": (
                                 str(event.tenant_id) if event.tenant_id else None
                             ),

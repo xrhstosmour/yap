@@ -57,6 +57,38 @@ def test_process_outbox_forwards_tenant_id_in_envelope() -> None:
     assert envelope["payload"] == {"user_id": "abc-123"}
 
 
+def test_process_outbox_identifies_the_event_in_the_envelope() -> None:
+    """A consumer has to be able to recognise a redelivery.
+
+    Delivery is at-least-once, so anything a consumer writes durably needs
+    a key to be idempotent against, and the payload rarely carries one.
+    """
+    event = _make_event()
+
+    mock_session = AsyncMock()
+    mock_outbox = AsyncMock()
+    mock_outbox.get_pending = AsyncMock(return_value=[event])
+
+    @asynccontextmanager
+    async def _factory() -> Any:
+        yield mock_session
+
+    with (
+        patch("app.database.celery_session_factory", _factory),
+        patch("app.models.outbox.Outbox", return_value=mock_outbox),
+        patch("app.tasks.outbox.celery_app.send_task") as mock_send_task,
+    ):
+        result = process_outbox.apply()
+
+    assert result.successful()
+    _, kwargs = mock_send_task.call_args
+    envelope = json.loads(kwargs["args"][0])
+    assert envelope["event_id"] == str(event.id)
+    # The type as well, so a consumer subscribed to several can tell them
+    # apart without inferring it from the payload's shape.
+    assert envelope["event_type"] == event.event_type
+
+
 def test_process_outbox_forwards_null_tenant_id() -> None:
     """A system-wide event (no tenant) should serialise tenant_id as null."""
     event = _make_event(tenant_id=None)
