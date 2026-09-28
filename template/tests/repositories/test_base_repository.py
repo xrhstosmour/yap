@@ -176,6 +176,55 @@ class TestBaseRepository:
         assert names == {"alpha", "beta", "gamma"}
 
     @pytest.mark.anyio
+    async def test_list_filters_by_a_set_of_values(self, session: AsyncSession) -> None:
+        """list() should match any of a list of values rather than all of them.
+
+        Compared with `==` the list becomes `column = ARRAY[...]`, which
+        Postgres rejects outright, so this is the difference between the
+        filter working and the query failing to run at all.
+
+        Args:
+            session: Async database session fixture.
+
+        Returns:
+            None.
+        """
+        tenant = await self._create_tenant(session)
+        repo: BaseRepository[TestModel] = BaseRepository(session, TestModel)
+
+        with tenant_context(tenant.id):
+            alpha = await repo.create({"name": "alpha"})
+            beta = await repo.create({"name": "beta"})
+            await repo.create({"name": "gamma"})
+
+            records, total = await repo.list(filters={"id": [alpha.id, beta.id]})
+
+        assert total == 2
+        assert {r.name for r in records} == {"alpha", "beta"}
+
+    @pytest.mark.anyio
+    async def test_list_filters_a_string_whole(self, session: AsyncSession) -> None:
+        """list() should not read a string as a set of its characters.
+
+        Args:
+            session: Async database session fixture.
+
+        Returns:
+            None.
+        """
+        tenant = await self._create_tenant(session)
+        repo: BaseRepository[TestModel] = BaseRepository(session, TestModel)
+
+        with tenant_context(tenant.id):
+            await repo.create({"name": "alpha"})
+            await repo.create({"name": "a"})
+
+            records, total = await repo.list(filters={"name": "alpha"})
+
+        assert total == 1
+        assert records[0].name == "alpha"
+
+    @pytest.mark.anyio
     async def test_list_with_pagination(self, session: AsyncSession) -> None:
         """list() should respect skip and limit parameters.
 

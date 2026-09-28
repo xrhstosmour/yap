@@ -51,6 +51,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Match any of a list of values in `BaseRepository.list(filters=...)` with `IN` instead of `==`, a list was compared as one value, which Postgres rejects outright with `cannot cast type uuid[] to uuid` rather than returning nothing, so filtering by a set of ids failed the query and every caller that needed one had to bypass the method
 - Gate `celery-redbeat` on `include_redbeat` instead of installing it in every project, importing it registers a `beat_init` handler that reads `scheduler.lock_key`, which only `RedBeatScheduler` has, so beat on the default scheduler logged a swallowed `AttributeError` on every start while advertising a distributed lock it never took
 - Document the outbox as at-least-once rather than exactly-once, the dispatcher publishes to the broker before committing the row that records it, so an interrupted worker republishes, and the batch commit means the replay unit is the whole batch, consumers have to be idempotent
 - Keep the connection parameters when `initial_data` reconnects to the `postgres` database for Metabase provisioning, it derived that URL by slicing at the last `/`, which dropped the whole query string, so a deployment with `POSTGRESQL_SSL_MODE` set connected in plaintext and one with a `sslrootcert` path never switched database at all
