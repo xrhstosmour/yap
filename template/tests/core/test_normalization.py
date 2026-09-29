@@ -6,6 +6,7 @@ import pytest
 
 from app.core.normalization import normalize_name
 from app.core.normalization import normalize_query
+from app.core.normalization import normalize_query_variants
 
 
 class TestNormalizeName:
@@ -90,3 +91,40 @@ class TestNormalizeQuery:
         together.
         """
         assert normalize_query("gyros").endswith("ς")
+
+
+class TestNormalizeQueryVariants:
+    """Latin input is ambiguous, so both readings are offered."""
+
+    def test_latin_input_keeps_itself_as_well_as_its_transliteration(self) -> None:
+        """The bug this exists for.
+
+        A venue named in Latin is stored in Latin by `normalize_name`, so
+        transliterating the query and throwing the original away makes it
+        unfindable: the stored value is Latin, the query is Greek, and
+        they never meet.
+        """
+        assert normalize_query_variants("malanos") == ("malanos", "μαλανος")
+
+    def test_the_transliteration_comes_second(self) -> None:
+        """Order is the order to try them in, exact reading first."""
+        variants = normalize_query_variants("taverna")
+        assert variants[0] == "taverna"
+        assert variants[1] == "ταβερνα"
+
+    def test_greek_input_yields_one_variant(self) -> None:
+        """There is nothing to transliterate."""
+        assert normalize_query_variants("μπιφτέκι") == ("μπιφτεκι",)
+
+    def test_empty_input_yields_nothing(self) -> None:
+        """So a caller builds no condition at all rather than an empty one."""
+        assert normalize_query_variants("") == ()
+
+    def test_a_term_that_transliterates_to_itself_is_not_repeated(self) -> None:
+        """Digits alone have nothing Greek to become.
+
+        Not every number: `8` transliterates to `θ`, which it looks like,
+        so "1821" genuinely has two readings and keeps both.
+        """
+        assert normalize_query_variants("1234") == ("1234",)
+        assert normalize_query_variants("1821") == ("1821", "1θ21")
