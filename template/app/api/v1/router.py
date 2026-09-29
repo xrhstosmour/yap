@@ -11,6 +11,9 @@ from app.api.v1.devices import router as devices_router
 from app.api.v1.feature_flags import router as feature_flags_router
 from app.api.v1.files import router as files_router
 from app.api.v1.health import router as health_router
+from app.api.v1.notification_preferences import (
+    router as notification_preferences_router,
+)
 from app.api.v1.tenants import router as tenants_router
 from app.api.v1.users import router as users_router
 from app.api.v1.websocket import router as websocket_router
@@ -22,6 +25,7 @@ router.include_router(users_router)
 router.include_router(api_keys_router)
 router.include_router(files_router)
 router.include_router(devices_router)
+router.include_router(notification_preferences_router)
 router.include_router(tenants_router)
 router.include_router(health_router)
 router.include_router(feature_flags_router)
