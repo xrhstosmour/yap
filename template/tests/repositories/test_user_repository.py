@@ -509,3 +509,14 @@ class TestSearchNarrowsByFilters:
 
             assert total == 1, [user.full_name for user in users]
             assert [user.full_name for user in users] == ["Inactive Smith"]
+
+            # Search builds its conditions the same way `list` does, so a
+            # set and a negation mean here what they mean there. They did
+            # not once: search compared with `==` and silently matched
+            # nothing when handed a set.
+            excluded, excluded_total = await repo.search(
+                "Smith", filters={"id__not": [inactive.id]}
+            )
+
+            assert excluded_total == 1
+            assert [user.full_name for user in excluded] == ["Active Smith"]
