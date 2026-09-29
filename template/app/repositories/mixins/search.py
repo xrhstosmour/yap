@@ -30,11 +30,12 @@ class SearchMixin:
     """
 
     def _apply_search_filters(self, query, filters: dict[str, Any] | None):  # noqa: ANN001, ANN202
-        """Apply equality filters to a search query.
+        """Apply filters to a search query.
 
-        Mirrors `BaseRepository.list`: only real model attributes are
-        considered, and a `None` value means "not filtering on this",
-        not "match NULL".
+        Built by `BaseRepository._filter_conditions` rather than here, so
+        a filter mapping means the same thing whichever method a caller
+        reached for. This built its own equality conditions once and
+        silently lost set matching when that was added to the base.
 
         Args:
             query: The select to narrow.
@@ -43,14 +44,7 @@ class SearchMixin:
         Returns:
             The query, narrowed if there was anything to narrow by.
         """
-        if not filters:
-            return query
-
-        conditions = [
-            getattr(self.model, field) == value
-            for field, value in filters.items()
-            if value is not None and hasattr(self.model, field)
-        ]
+        conditions = self._filter_conditions(filters)
         return query.where(and_(*conditions)) if conditions else query
 
     async def search_fts(

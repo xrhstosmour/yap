@@ -203,6 +203,54 @@ class TestBaseRepository:
         assert {r.name for r in records} == {"alpha", "beta"}
 
     @pytest.mark.anyio
+    async def test_list_excludes_a_set_of_values(self, session: AsyncSession) -> None:
+        """A `__not` suffix should invert the set match into `NOT IN`.
+
+        Excluding a handful of rows, for example accounts somebody has
+        blocked, otherwise means bypassing the filter mapping entirely.
+
+        Args:
+            session: Async database session fixture.
+
+        Returns:
+            None.
+        """
+        tenant = await self._create_tenant(session)
+        repo: BaseRepository[TestModel] = BaseRepository(session, TestModel)
+
+        with tenant_context(tenant.id):
+            alpha = await repo.create({"name": "alpha"})
+            beta = await repo.create({"name": "beta"})
+            await repo.create({"name": "gamma"})
+
+            records, total = await repo.list(filters={"id__not": [alpha.id, beta.id]})
+
+        assert total == 1
+        assert records[0].name == "gamma"
+
+    @pytest.mark.anyio
+    async def test_list_excludes_a_single_value(self, session: AsyncSession) -> None:
+        """The same suffix on a single value should give `!=`.
+
+        Args:
+            session: Async database session fixture.
+
+        Returns:
+            None.
+        """
+        tenant = await self._create_tenant(session)
+        repo: BaseRepository[TestModel] = BaseRepository(session, TestModel)
+
+        with tenant_context(tenant.id):
+            await repo.create({"name": "alpha"})
+            await repo.create({"name": "beta"})
+
+            records, total = await repo.list(filters={"name__not": "alpha"})
+
+        assert total == 1
+        assert records[0].name == "beta"
+
+    @pytest.mark.anyio
     async def test_list_filters_a_string_whole(self, session: AsyncSession) -> None:
         """list() should not read a string as a set of its characters.
 

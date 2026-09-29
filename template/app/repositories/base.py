@@ -239,6 +239,22 @@ class BaseRepository[T: SQLModel]:
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
+    #: Suffix on a filter key that inverts it, as in `{"id__not": [...]}`.
+    NEGATION_SUFFIX = "__not"
+
+    def _filter_field(self, field: str) -> tuple[str, bool]:
+        """Split a filter key into its column and whether it is inverted.
+
+        A key is a column name, optionally suffixed with
+        `NEGATION_SUFFIX`. Splitting happens before the attribute check,
+        because `hasattr` on the suffixed name is false and the filter
+        would otherwise be dropped in silence, which is the worst way for
+        a filter to fail.
+        """
+        if field.endswith(self.NEGATION_SUFFIX):
+            return field[: -len(self.NEGATION_SUFFIX)], True
+        return field, False
+
     def _filter_condition(self, field: str, value: Any) -> Any:  # noqa: ANN401
         """Build one filter condition, matching a set of values with `IN`.
 
@@ -249,11 +265,36 @@ class BaseRepository[T: SQLModel]:
         so the only way to filter by a set was to bypass this method.
 
         A string is deliberately not treated as a set of characters.
+
+        `{"id__not": ...}` inverts whichever of the two applies, giving
+        `NOT IN` for a set and `!=` for a single value. A caller that has
+        to exclude a handful of rows, for example accounts somebody
+        blocked, would otherwise have to bypass this method again.
         """
-        column = cast(Any, getattr(self.model, field))
+        name, is_negated = self._filter_field(field)
+        column = cast(Any, getattr(self.model, name))
         if isinstance(value, (list, tuple, set, frozenset)):
-            return column.in_(list(value))
-        return column == value
+            values = list(value)
+            return column.not_in(values) if is_negated else column.in_(values)
+        return column != value if is_negated else column == value
+
+    def _filter_conditions(self, filters: dict[str, Any] | None) -> list[Any]:
+        """Build every condition a filter mapping asks for.
+
+        One telling, used by `list` and by the search mixin. They drifted
+        apart once already: set matching was added here and search went on
+        comparing with `==`, so the same mapping meant different things
+        depending on which method a caller reached for.
+
+        A `None` value means "not filtering on this", never "match NULL".
+        """
+        if not filters:
+            return []
+        return [
+            self._filter_condition(field, value)
+            for field, value in filters.items()
+            if value is not None and hasattr(self.model, self._filter_field(field)[0])
+        ]
 
     async def list(
         self,
@@ -287,14 +328,9 @@ class BaseRepository[T: SQLModel]:
         query = self._apply_soft_delete_filter(query, include_deleted)
 
         # Apply additional filters.
-        filter_conditions = []
-        if filters:
-            for field, value in filters.items():
-                if hasattr(self.model, field):
-                    if value is not None:
-                        filter_conditions.append(self._filter_condition(field, value))
-            if filter_conditions:
-                query = query.where(and_(*filter_conditions))
+        filter_conditions = self._filter_conditions(filters)
+        if filter_conditions:
+            query = query.where(and_(*filter_conditions))
 
         # Apply sorting. Only mapped columns qualify: `hasattr` also matched
         # `metadata` and every model method, which `order_by` then rejected
