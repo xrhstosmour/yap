@@ -25,6 +25,33 @@ def _assemble() -> ModuleType:
     return module
 
 
+def _throwaway_repository(message: str) -> tuple[list[str], ...]:
+    """The commands that make a one-commit repository to inspect.
+
+    `commit.gpgsign` is turned off explicitly. A developer who signs every
+    commit has it on globally, and it applies inside `tmp_path` like
+    anywhere else, so without this these commits go through a signing
+    agent: they fail outright when the key is locked, and intermittently
+    under `pytest-xdist` when ten workers reach for it at once. Nothing
+    here is about signing, and the suite must not depend on a machine's
+    signing setup.
+
+    Args:
+        message: The commit subject, which the caller asserts nothing
+            about beyond it existing.
+
+    Returns:
+        The commands, in the order they must run.
+    """
+    return (
+        ["git", "init", "-q"],
+        ["git", "config", "user.email", "test@example.com"],
+        ["git", "config", "user.name", "test"],
+        ["git", "config", "commit.gpgsign", "false"],
+        ["git", "commit", "-q", "--allow-empty", "-m", message],
+    )
+
+
 class TestCacheIsPerUser:
     """A fixed path under `/tmp` is not somewhere to trust code from.
 
@@ -124,12 +151,7 @@ class TestCacheIsVerified:
         """
         stale = tmp_path / "containers"
         stale.mkdir()
-        for command in (
-            ["git", "init", "-q"],
-            ["git", "config", "user.email", "test@example.com"],
-            ["git", "config", "user.name", "test"],
-            ["git", "commit", "-q", "--allow-empty", "-m", "not the pinned commit"],
-        ):
+        for command in _throwaway_repository("not the pinned commit"):
             subprocess.run(command, cwd=stale, check=True)
 
         assert _assemble().cache_is_current(str(stale)) is False
@@ -145,12 +167,7 @@ class TestCacheIsVerified:
         """
         current = tmp_path / "containers"
         current.mkdir()
-        for command in (
-            ["git", "init", "-q"],
-            ["git", "config", "user.email", "test@example.com"],
-            ["git", "config", "user.name", "test"],
-            ["git", "commit", "-q", "--allow-empty", "-m", "the pinned commit"],
-        ):
+        for command in _throwaway_repository("the pinned commit"):
             subprocess.run(command, cwd=current, check=True)
 
         head = subprocess.run(
