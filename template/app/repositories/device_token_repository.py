@@ -19,6 +19,9 @@ from app.core.logging import get_logger
 from app.models.device_token import DevicePlatform
 from app.models.device_token import DeviceToken
 from app.repositories.base import BaseRepository
+from app.repositories.notification_preference_repository import (
+    NotificationPreferenceRepository,
+)
 
 logger = get_logger("repository.device_token")
 
@@ -110,21 +113,42 @@ class DeviceTokenRepository(BaseRepository[DeviceToken]):
         )
         return result.scalars().first()
 
-    async def for_users(self, user_ids: list[UUID]) -> list[DeviceToken]:
+    async def for_users(
+        self,
+        user_ids: list[UUID],
+        kind: str | None = None,
+    ) -> list[DeviceToken]:
         """Every live token belonging to any of these accounts.
 
         One query for the whole audience rather than one per recipient,
         which is what fanning a single event out to a few hundred
         followers would otherwise cost.
 
+        With a `kind`, accounts that have turned that kind off are
+        dropped here rather than before the work was queued. The
+        preference is read at send time on purpose: a send queued an hour
+        ago and a preference changed since must resolve in favour of the
+        preference, or turning notifications off leaves a backlog still
+        arriving.
+
         Args:
             user_ids: The accounts to collect tokens for.
+            kind: What is being sent, in the application's own
+                vocabulary. None sends to everybody, which is right for
+                anything the account cannot turn off.
 
         Returns:
             Their tokens, in no particular order. Empty if the list is.
         """
         if not user_ids:
             return []
+        if kind is not None:
+            muted = await NotificationPreferenceRepository(self.session).muted(
+                kind, user_ids
+            )
+            user_ids = [one for one in user_ids if one not in muted]
+            if not user_ids:
+                return []
         query = self._apply_tenant_filter(
             select(DeviceToken).where(
                 and_(
