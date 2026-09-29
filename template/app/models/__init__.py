@@ -14,6 +14,7 @@ from app.models.device_token import DeviceToken
 from app.models.feature_flag import FeatureFlag
 from app.models.file import File
 from app.models.graveyard import Graveyard
+from app.models.notification_preference import NotificationPreference
 from app.models.oauth_account import OAuthAccount
 from app.models.oauth_account import OAuthProvider
 from app.models.outbox import Outbox
@@ -34,6 +35,7 @@ __all__ = [
     "FeatureFlag",
     "File",
     "Graveyard",
+    "NotificationPreference",
     "OAuthAccount",
     "OAuthProvider",
     "Outbox",
