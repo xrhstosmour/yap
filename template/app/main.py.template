@@ -301,12 +301,7 @@ def create_app() -> FastAPI:
     async def not_signed_in_handler(
         request: Request, exception: NotSignedInError
     ) -> RedirectResponse:
-        """Send somebody without a session to the sign-in page.
-
-        A page, not the API's JSON error. Somebody whose two hours ran
-        out mid-task should land on a form they can fill in rather than
-        on a stack of braces.
-        """
+        """Send somebody without a session to the sign-in page."""
         return RedirectResponse("/admin/login", status_code=303)
 
     # Token rate limit handler.
@@ -345,14 +340,11 @@ def create_app() -> FastAPI:
     # Include API router.
     app.include_router(api_v1_router)
 
-    # The administration surface is mounted beside the API rather than
-    # deployed separately: it reads the same models through the same
-    # session, and a second service would be a second thing to deploy and
-    # keep patched for pages that are lists and forms.
+    # Mounted beside the API rather than deployed separately: it reads the
+    # same models through the same session.
     app.include_router(admin_router)
 
-    # Its one stylesheet, served from the same origin so its content
-    # security policy never needs to allow an inline block.
+    # Its one stylesheet, same origin so the policy needs no inline block.
     app.mount(
         "/admin/static",
         StaticFiles(directory=Path(__file__).parent / "admin" / "static"),
