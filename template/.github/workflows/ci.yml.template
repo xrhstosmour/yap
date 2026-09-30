@@ -128,6 +128,24 @@ jobs:
           REDIS_PASSWORD: testpass
           ENVIRONMENT: local
           POSTGRESQL_AUTHENTICATION_METHOD: password
+      # Catches a model whose column the migrations never actually
+      # created that way. `upgrade head` alone passes happily while
+      # the schema and the models disagree, and the disagreement
+      # only surfaces the next time somebody autogenerates.
+      - name: Check the schema matches the models
+        run: uv run alembic check
+        env:
+          POSTGRESQL_SERVER: localhost
+          POSTGRESQL_HOST: localhost
+          POSTGRESQL_PORT: 5432
+          POSTGRESQL_USER: app
+          POSTGRESQL_PASSWORD: testpass
+          POSTGRESQL_DATABASE: testdb
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+          REDIS_PASSWORD: testpass
+          ENVIRONMENT: local
+          POSTGRESQL_AUTHENTICATION_METHOD: password
       - run: uv run python -m app.initial_data
         env:
           POSTGRESQL_SERVER: localhost
