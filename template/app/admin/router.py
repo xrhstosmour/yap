@@ -1,8 +1,7 @@
 """The administration surface's pages.
 
-One module, because there are few pages and splitting them would mean
-reading three files to follow one request. It grows a module per subject
-when a subject has more than a list and a form.
+One module while there are few pages. It grows a module per subject when
+a subject has more than a list and a form.
 """
 
 from __future__ import annotations
@@ -51,8 +50,7 @@ async def sign_in_form(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "login.html", {"failure": None})
 
 
-# `response_model=None` because this answers either the form again or a
-# redirect, and FastAPI cannot build a response model from that union.
+# `response_model=None`: FastAPI cannot build one from this union.
 @router.post("/login", response_model=None)
 async def sign_in(
     request: Request,
@@ -62,13 +60,10 @@ async def sign_in(
 ) -> HTMLResponse | RedirectResponse:
     """Check the credentials and start a session.
 
-    Everything that can go wrong answers with the same sentence: wrong
-    password, no such account, not a superuser, deactivated. Telling
-    somebody which one it was turns this form into a way to find out who
-    has an account and who is privileged.
+    Every failure answers with the same sentence, or the form becomes a
+    way to find out who has an account and who is privileged.
 
-    No forgery token on this one. There is no session to forge yet, and a
-    request that signs somebody in as themselves is not an attack.
+    No forgery token: there is no session to forge yet.
     """
     try:
         user = await AuthService(session).authenticate(email, password)
@@ -123,19 +118,15 @@ async def list_users(
 ) -> HTMLResponse:
     """Accounts, newest first, or the ones matching a search.
 
-    Search is by name only. The email column is encrypted at rest with a
-    randomised ciphertext, so there is nothing for a partial match to
-    match against, and offering a box that silently never finds an email
-    would be worse than not offering one.
+    By name only: the email column is encrypted at rest with a randomised
+    ciphertext, so a partial match has nothing to match against.
     """
     repository = UserRepository(session)
     skip = (page - 1) * PAGE_SIZE
     typed = query.strip()
-    # Across every tenant, deliberately. A superuser here is the operator
-    # of the deployment rather than a member of one tenant, and a
-    # tenant-scoped administration surface could not act on the account
-    # that is causing a problem in a tenant the operator does not belong
-    # to, which is the case the surface exists for.
+    # Across every tenant: a superuser here is the operator of the
+    # deployment, not a member of one tenant, and the account causing a
+    # problem is usually in a tenant the operator does not belong to.
     with system_context():
         if typed:
             users, total = await repository.search(typed, skip=skip, limit=PAGE_SIZE)
@@ -171,21 +162,19 @@ async def set_user_activation(
 ) -> RedirectResponse:
     """Let an account in, or stop letting it in.
 
-    Deactivating rather than deleting: the account's own content, its
-    audit trail and anything pointing at it all survive, and the decision
-    can be taken back. Deletion is the account holder's to ask for, and
-    goes through the API that handles what has to be erased with it.
+    Deactivating rather than deleting, so the content, the audit trail
+    and the decision itself can all be taken back. Deletion is the
+    account holder's to ask for and goes through the API.
 
-    Refuses to act on the signed-in administrator. Locking yourself out
-    of the tool that unlocks accounts needs somebody with database access
-    to undo.
+    Refuses the signed-in administrator: locking yourself out of the tool
+    that unlocks accounts needs database access to undo.
     """
     if user_id == administrator.id:
         return RedirectResponse(
             router.url_path_for("list_users"),
             status_code=status.HTTP_303_SEE_OTHER,
         )
-    # Cross-tenant for the same reason the list is, see `list_users`.
+    # Cross-tenant, see `list_users`.
     with system_context():
         await UserRepository(session).update(user_id, {"is_active": is_active})
     await session.commit()

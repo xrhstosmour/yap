@@ -1,16 +1,12 @@
 """Signing in to the administration surface, and staying signed in.
 
-A cookie rather than the bearer token the rest of the API takes. A
-browser asked to load a page sends cookies and nothing else, so an
-administration surface either has a cookie or has a single-page
-application in front of it to hold the token, which is the thing this is
-meant not to be.
+A cookie rather than a bearer token, because a browser loading a page
+sends cookies and nothing else. It carries the same signed token the API
+issues, so one place still decides who somebody is.
 
-The cookie carries the same signed token the API issues, so there is one
-notion of who somebody is and one place that decides it. What differs is
-only how it travels, and travelling in a cookie is what makes cross-site
-request forgery possible, so every form here carries a token checked
-against a second cookie.
+Travelling in a cookie is what makes cross-site request forgery
+possible, so every form here carries a token checked against a second
+cookie.
 """
 
 from __future__ import annotations
@@ -54,7 +50,7 @@ def _is_secure() -> bool:
     """Whether cookies may only travel over TLS.
 
     Off locally, where there is no certificate and a secure cookie would
-    simply never be sent, making the surface impossible to use.
+    never be sent at all.
     """
     return settings.ENVIRONMENT != "local"
 
@@ -67,10 +63,8 @@ def open_session(response: Response, user: User) -> None:
         max_age=int(SESSION_LIFETIME.total_seconds()),
         httponly=True,
         secure=_is_secure(),
-        # Strict rather than Lax. Nothing outside this surface ever links
-        # into it, so there is no navigation this breaks, and Lax would
-        # still send the cookie on a top-level GET somebody was tricked
-        # into making.
+        # Strict, not Lax: nothing links into this surface, so there is
+        # no navigation it breaks, and Lax still sends on a top-level GET.
         samesite="strict",
         path="/admin",
     )
@@ -78,8 +72,8 @@ def open_session(response: Response, user: User) -> None:
         CSRF_COOKIE,
         secrets.token_urlsafe(32),
         max_age=int(SESSION_LIFETIME.total_seconds()),
-        # Also HttpOnly: the template reads the value server side and
-        # writes it into the form, so nothing in the page needs to.
+        # HttpOnly too: the template writes the value into the form, so
+        # nothing in the page needs to read it.
         httponly=True,
         secure=_is_secure(),
         samesite="strict",
@@ -97,8 +91,7 @@ class NotSignedInError(Exception):
     """Raised when there is nobody behind the request.
 
     Caught by the surface's own handler, which answers with the sign-in
-    page rather than the API's JSON error. Somebody whose session expired
-    mid-task should land on a form, not on a stack of braces.
+    page rather than the API's JSON error.
     """
 
 
@@ -108,7 +101,7 @@ async def current_administrator(
 ) -> User:
     """The superuser this request belongs to.
 
-    Every check is repeated here rather than trusted from the token: a
+    Checked against the account rather than trusted from the token: a
     session issued two hours ago says nothing about whether the account
     has since been deactivated or had its role taken away.
 
@@ -128,9 +121,7 @@ async def current_administrator(
         user_id = UUID(str(subject))
     except ValueError as error:
         raise NotSignedInError from error
-    # Across tenants on purpose: a superuser here administers the whole
-    # deployment, so the account behind the session need not belong to
-    # whichever tenant the request would otherwise be scoped to.
+    # Cross-tenant, see `router.list_users`.
     with system_context():
         user = await UserRepository(session).get(user_id)
     if user is None or not user.is_active or user.role != UserRole.SUPERUSER:
@@ -157,8 +148,7 @@ async def verify_csrf(
 
     Double submit: the value is in a cookie the page cannot read and in a
     field the server wrote, so anything able to send both already had the
-    page. Compared in constant time, since a timing oracle on this is a
-    way to guess it a character at a time.
+    page. Compared in constant time.
 
     Raises:
         HTTPException: 403 when the two do not match.
