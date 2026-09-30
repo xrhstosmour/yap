@@ -341,6 +341,11 @@ class Settings(BaseSettings):
 
     #     # File storage (S3-compatible).
     STORAGE_BACKEND: str = "file"
+    # The port the local gateway publishes. Named here as well as in the
+    # container configuration so the two can be checked against each
+    # other, see `_reject_storage_endpoint_drift`.
+    STORAGE_API_PORT: int = 9000
+
     STORAGE_ENDPOINT: str = ""
     STORAGE_ACCESS_KEY: str = ""
     STORAGE_SECRET_KEY: str = ""
@@ -446,6 +451,42 @@ class Settings(BaseSettings):
                 "FCM_SERVICE_ACCOUNT_JSON", self.FCM_SERVICE_ACCOUNT_JSON
             )
 
+        return self
+
+    @model_validator(mode="after")
+    def _reject_storage_endpoint_drift(self) -> Self:
+        """Refuse to start when the storage endpoint names the wrong port.
+
+        `STORAGE_API_PORT` and `STORAGE_ENDPOINT` have to agree, and
+        nothing linked them. Moving the gateway off its default port, to
+        clear a collision with something else on the machine, left the
+        endpoint pointing at the old one. Every upload then failed with a
+        connection error at the first byte, which reads as the storage
+        server being down rather than as one stale line of configuration.
+
+        Only for a loopback endpoint, which is the local gateway. A
+        deployment names a real host and the local port says nothing
+        about it.
+
+        Returns:
+            The validated settings.
+
+        Raises:
+            ValueError: If a loopback endpoint names a different port.
+        """
+        if not self.STORAGE_ENDPOINT:
+            return self
+        parsed = urlsplit(self.STORAGE_ENDPOINT)
+        if parsed.hostname not in self.__loopback_hosts:
+            return self
+        if parsed.port is not None and parsed.port != self.STORAGE_API_PORT:
+            message = (
+                f"STORAGE_ENDPOINT names port {parsed.port} but "
+                f"STORAGE_API_PORT is {self.STORAGE_API_PORT}. The local "
+                "gateway is on one of them, and uploads fail against the "
+                "other."
+            )
+            raise ValueError(message)
         return self
 
     @model_validator(mode="after")
