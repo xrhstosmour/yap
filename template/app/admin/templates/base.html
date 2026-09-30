@@ -10,6 +10,9 @@
     <link rel="stylesheet" href="/admin/static/admin.css" />
   </head>
   <body>
+    {# A project's own admin pages list themselves here. Not shipped, so
+       a project that adds none renders nothing. #}
+    {% include "admin_navigation.html" ignore missing %}
     {% block body %}{% endblock %}
   </body>
 </html>
