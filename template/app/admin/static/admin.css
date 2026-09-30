@@ -32,3 +32,10 @@ nav.pages { margin-top: 20px; display: flex; gap: 12px; }
 /* A row for an account that cannot sign in reads as struck through
    rather than coloured, which survives every colour scheme. */
 tr.inactive td:first-child { text-decoration: line-through; }
+
+nav.surfaces {
+  display: flex;
+  gap: 16px;
+  padding-bottom: 12px;
+  font-size: 0.9rem;
+}
