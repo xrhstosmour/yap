@@ -14,7 +14,12 @@ dependencies = [
     "greenlet>=3.1.1",
     "pydantic-settings>=2.6.0",
     "psycopg[binary]>=3.2.0",
-    "PyJWT[crypto]>=2.10.0",
+    # 2.14.0 is the first release without CVE-2026-102266, an
+    # authentication bypass where an empty HMAC key verifies, and the
+    # token-forgery issues alongside it. This is the library that checks
+    # every access token, so the floor is the fixed version rather than
+    # the oldest one that works.
+    "PyJWT[crypto]>=2.14.0",
     "pwdlib[argon2,bcrypt]>=0.3.0",
     "alembic>=1.14.0",
     "tenacity>=9.0.0",
