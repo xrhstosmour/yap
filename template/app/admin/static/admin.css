@@ -1,0 +1,38 @@
+/* The administration surface's only stylesheet.
+
+   A file rather than an inline block, so the content security policy
+   for these pages can stay at `style-src 'self'` and never need
+   `unsafe-inline`. There is no JavaScript at all: every action here
+   is a form post. */
+
+:root {
+  color-scheme: light dark;
+  --line: color-mix(in srgb, currentColor 18%, transparent);
+}
+body {
+  margin: 0 auto;
+  padding: 24px 16px 64px;
+  max-width: 60rem;
+  font: 16px/1.5 system-ui, sans-serif;
+}
+header {
+  display: flex;
+  gap: 16px;
+  align-items: baseline;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 12px;
+  margin-bottom: 24px;
+}
+h1 { font-size: 1.25rem; margin: 0; }
+table { border-collapse: collapse; width: 100%; }
+th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); }
+th { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; }
+form.inline { display: inline; }
+button { font: inherit; padding: 4px 10px; cursor: pointer; }
+.muted { opacity: 0.65; }
+.failure { padding: 10px 12px; border: 1px solid currentColor; margin-bottom: 16px; }
+nav.pages { margin-top: 20px; display: flex; gap: 12px; }
+/* A row for an account that cannot sign in reads as struck through
+   rather than coloured, which survives every colour scheme. */
+tr.inactive td:first-child { text-decoration: line-through; }

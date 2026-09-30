@@ -88,6 +88,31 @@ _DOCS_CSP = (
 )
 
 
+# The administration surface is server-rendered HTML with one stylesheet
+# and no JavaScript at all, so it needs `style-src 'self'` and nothing
+# else loosened. Kept as its own policy rather than widening the default,
+# which would hand every API response a permission it has no use for.
+ADMIN_PATH_PREFIX = "/admin"
+
+_ADMIN_CSP = (
+    "default-src 'none'; "
+    "style-src 'self'; "
+    "img-src 'self' data:; "
+    "form-action 'self'; "
+    "base-uri 'none'; "
+    "frame-ancestors 'none'"
+)
+
+
+def _policy_for(path: str) -> str:
+    """The content security policy one path gets."""
+    if path in DOCS_PATHS:
+        return _DOCS_CSP
+    if path == ADMIN_PATH_PREFIX or path.startswith(f"{ADMIN_PATH_PREFIX}/"):
+        return _ADMIN_CSP
+    return _DEFAULT_CSP
+
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Adds security-focused HTTP headers and blocks AI bot crawlers."""
 
@@ -116,9 +141,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
-        response.headers["Content-Security-Policy"] = (
-            _DOCS_CSP if request.url.path in DOCS_PATHS else _DEFAULT_CSP
-        )
+        response.headers["Content-Security-Policy"] = _policy_for(request.url.path)
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = (
             "camera=(), microphone=(), geolocation=(), interest-cohort=()"

@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Accounts{% endblock %}
+{% block body %}
+<header>
+  <h1>Accounts <span class="muted">({{ total }})</span></h1>
+  <form method="post" action="{{ url_for('sign_out') }}" class="inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <button type="submit">Sign out {{ administrator.full_name or '' }}</button>
+  </form>
+</header>
+
+<form method="get" action="{{ url_for('list_users') }}">
+  <label for="q" class="muted">Search by name</label>
+  <input id="q" name="q" value="{{ query }}" maxlength="100" />
+  <button type="submit">Search</button>
+</form>
+
+<table>
+  <thead>
+    <tr><th>Name</th><th>Role</th><th>Verified</th><th>Joined</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% for user in users %}
+    <tr class="{{ 'inactive' if not user.is_active }}">
+      <td>{{ user.full_name or user.username or user.id }}</td>
+      <td class="muted">{{ user.role.value }}</td>
+      <td class="muted">{{ 'yes' if user.is_verified else 'no' }}</td>
+      <td class="muted">{{ user.created_at.date() }}</td>
+      <td>
+        {% if user.id != administrator.id %}
+        <form method="post" class="inline"
+              action="{{ url_for('set_user_activation', user_id=user.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <input type="hidden" name="is_active"
+                 value="{{ 'false' if user.is_active else 'true' }}" />
+          <button type="submit">
+            {{ 'Deactivate' if user.is_active else 'Reactivate' }}
+          </button>
+        </form>
+        {% else %}
+        <span class="muted">you</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5" class="muted">Nothing here.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<nav class="pages">
+  {% if page > 1 %}
+  <a href="{{ url_for('list_users') }}?q={{ query }}&amp;page={{ page - 1 }}">Back</a>
+  {% endif %}
+  {% if has_more %}
+  <a href="{{ url_for('list_users') }}?q={{ query }}&amp;page={{ page + 1 }}">Next</a>
+  {% endif %}
+</nav>
+{% endblock %}
