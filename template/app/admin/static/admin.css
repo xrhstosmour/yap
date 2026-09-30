@@ -1,9 +1,5 @@
-/* The administration surface's only stylesheet.
-
-   A file rather than an inline block, so the content security policy
-   for these pages can stay at `style-src 'self'` and never need
-   `unsafe-inline`. There is no JavaScript at all: every action here
-   is a form post. */
+/* A file rather than an inline block, so the policy for these pages can
+   stay at `style-src 'self'`. There is no JavaScript at all. */
 
 :root {
   color-scheme: light dark;

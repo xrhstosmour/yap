@@ -88,10 +88,9 @@ _DOCS_CSP = (
 )
 
 
-# The administration surface is server-rendered HTML with one stylesheet
-# and no JavaScript at all, so it needs `style-src 'self'` and nothing
-# else loosened. Kept as its own policy rather than widening the default,
-# which would hand every API response a permission it has no use for.
+# Server-rendered HTML with one stylesheet and no JavaScript, so it needs
+# `style-src 'self'` and nothing else. Its own policy rather than a wider
+# default, which every API response would then carry.
 ADMIN_PATH_PREFIX = "/admin"
 
 _ADMIN_CSP = (
