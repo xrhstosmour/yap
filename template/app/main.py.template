@@ -11,6 +11,7 @@ from collections.abc import AsyncIterator
 from collections.abc import Awaitable
 from collections.abc import Callable
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 import sentry_sdk
@@ -18,12 +19,16 @@ from fastapi import FastAPI
 from fastapi import Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.responses import RedirectResponse
 from fastapi.responses import Response
 from fastapi.routing import APIRoute
+from fastapi.staticfiles import StaticFiles
 from sentry_sdk.types import Event
 from sentry_sdk.types import Hint
 from starlette.middleware.gzip import GZipMiddleware
 
+from app.admin.router import router as admin_router
+from app.admin.session import NotSignedInError
 from app.api.idempotency import IdempotencyMiddleware
 from app.api.request_id import RequestIDMiddleware
 from app.api.v1.router import router as api_v1_router
@@ -291,6 +296,19 @@ def create_app() -> FastAPI:
             ],
         )
 
+    # Administration surface handler.
+    @app.exception_handler(NotSignedInError)
+    async def not_signed_in_handler(
+        request: Request, exception: NotSignedInError
+    ) -> RedirectResponse:
+        """Send somebody without a session to the sign-in page.
+
+        A page, not the API's JSON error. Somebody whose two hours ran
+        out mid-task should land on a form they can fill in rather than
+        on a stack of braces.
+        """
+        return RedirectResponse("/admin/login", status_code=303)
+
     # Token rate limit handler.
     @app.exception_handler(TokenRateLimitError)
     async def token_rate_limit_handler(
@@ -326,6 +344,20 @@ def create_app() -> FastAPI:
 
     # Include API router.
     app.include_router(api_v1_router)
+
+    # The administration surface is mounted beside the API rather than
+    # deployed separately: it reads the same models through the same
+    # session, and a second service would be a second thing to deploy and
+    # keep patched for pages that are lists and forms.
+    app.include_router(admin_router)
+
+    # Its one stylesheet, served from the same origin so its content
+    # security policy never needs to allow an inline block.
+    app.mount(
+        "/admin/static",
+        StaticFiles(directory=Path(__file__).parent / "admin" / "static"),
+        name="admin_static",
+    )
 
     return app
 
