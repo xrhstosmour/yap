@@ -135,6 +135,15 @@ addopts = "-v --tb=short -n auto"
 markers = [
     "slow: requires running services; deselect with '-m \"not slow\"'",
 ]
+# A tenant filter names one model's `tenant_id`. Applied to a query over a
+# different table, PostgreSQL has to bring the filtered table into the FROM
+# with no join condition, and the result is a cross join: counts come back
+# multiplied, and the table that was actually selected is left unscoped. It
+# is silent, the rows look plausible, and tests that assert on one row pass.
+# SQLAlchemy sees it every time, so the warning is the gate.
+filterwarnings = [
+    "error:SELECT statement has a cartesian product:sqlalchemy.exc.SAWarning",
+]
 
 [tool.coverage.run]
 source = ["app"]
