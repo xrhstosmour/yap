@@ -48,6 +48,16 @@ services:
       # forge any address and sidestep rate limiting entirely.
       # Loopback is kept alongside it so a proxy on the host still works.
       - "FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS:-127.0.0.1,172.16.0.0/12}"
+      # How many request handler processes to run. `fastapi run` passes no
+      # worker count, and `uvicorn` reads this variable when none was given,
+      # so without it the container serves every request from one process
+      # and a host with cores to spare sits idle.
+      #
+      # Default of 1 to match `APP_CPU_LIMIT` below. The two have to move
+      # together: workers beyond the CPU quota only add memory, and each one
+      # imports the whole application, which the `APP_MEMORY_LIMIT` has to
+      # hold. This is the same reasoning as `CELERY_CONCURRENCY`.
+      - "WEB_CONCURRENCY=${WEB_CONCURRENCY:-1}"
     ports:
       # Bound to loopback by default. `"8000:8000"` publishes on 0.0.0.0, so
       # with Traefik in front the app was still reachable directly on port
