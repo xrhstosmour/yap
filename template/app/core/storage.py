@@ -303,6 +303,21 @@ async def get_download_url(
     parameters: dict[str, Any] = {"Bucket": bucket, "Key": object_key}
     if mimetype is not None and mimetype not in INLINE_SAFE_MIMETYPES:
         parameters["ResponseContentDisposition"] = _attachment_disposition(filename)
+
+    # The signature covers a timestamp at second resolution, so signing the
+    # same object twice produces two different URLs. Clients cache images by
+    # URL, so a feed that embeds these was re-downloading every photo and
+    # every avatar on each load, having just been handed a new address for
+    # bytes it already had.
+    #
+    # Cached for half the validity rather than all of it, so a URL handed
+    # out at the end of the window still has half its life left to be
+    # fetched with.
+    cache_key = _download_url_cache_key(bucket, object_key, parameters)
+    cached = await _cached_download_url(cache_key)
+    if cached is not None:
+        return cached
+
     # `Params`, not `Parameters`: boto3 rejects the latter outright, so
     # every download URL raised `TypeError` rather than being signed.
     url = await asyncio.to_thread(
@@ -311,7 +326,53 @@ async def get_download_url(
         Params=parameters,
         ExpiresIn=expires_in,
     )
+    await _remember_download_url(cache_key, cast(str, url), expires_in // 2)
     return cast(str, url)
+
+
+def _download_url_cache_key(
+    bucket: str,
+    object_key: str,
+    parameters: dict[str, Any],
+) -> str:
+    """The cache key for one signed URL.
+
+    The disposition is part of it because the same object signed with and
+    without one is two different URLs, and handing out the wrong one would
+    make a browser download a photo instead of showing it.
+    """
+    disposition = parameters.get("ResponseContentDisposition", "")
+    digest = hashlib.sha256(
+        f"{bucket}\n{object_key}\n{disposition}".encode()
+    ).hexdigest()
+    return f"presigned_url:{digest}"
+
+
+async def _cached_download_url(cache_key: str) -> str | None:
+    """Read a previously signed URL, or None.
+
+    Redis being unavailable must not stop a download, so a failure here
+    falls through to signing a fresh URL.
+    """
+    from app.core.cache import get_cache
+
+    try:
+        cached = await (await get_cache()).get(cache_key)
+    except Exception:
+        return None
+    return cached if isinstance(cached, str) else None
+
+
+async def _remember_download_url(cache_key: str, url: str, ttl: int) -> None:
+    """Keep a signed URL so the next caller is handed the same one."""
+    from app.core.cache import get_cache
+
+    if ttl <= 0:
+        return
+    try:
+        await (await get_cache()).set(cache_key, url, ttl=ttl)
+    except Exception:
+        logger.warning("presigned_url_cache_write_failed", object_key=cache_key)
 
 
 async def delete_object(

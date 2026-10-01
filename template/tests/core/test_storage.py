@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from unittest.mock import ANY
 from unittest.mock import MagicMock
 from unittest.mock import patch
@@ -169,8 +170,66 @@ class TestObjectKeyNamespacing:
         assert key == f"thumbnails/{self.SECOND_TENANT}/{self.FIRST_UPLOADER}/abc123"
 
 
+class _MemoryCache:
+    """Stands in for Redis, which unit tests deliberately do not have.
+
+    Only the two calls the signer makes, so the test is about whether the
+    URL is reused rather than about the cache implementation.
+    """
+
+    def __init__(self) -> None:
+        self.entries: dict[str, str] = {}
+
+    async def get(self, key: str) -> str | None:
+        return self.entries.get(key)
+
+    async def set(self, key: str, value: object, ttl: int | None = None) -> bool:
+        self.entries[key] = str(value)
+        return True
+
+
+@pytest.fixture
+def presigned_url_cache() -> Generator[_MemoryCache]:
+    """Give the signer somewhere to remember a URL between calls."""
+    cache = _MemoryCache()
+
+    async def _get_cache() -> _MemoryCache:
+        return cache
+
+    with patch("app.core.cache.get_cache", _get_cache):
+        yield cache
+
+
 class TestGetDownloadUrl:
     """Tests for get_download_url()."""
+
+    @pytest.mark.asyncio
+    async def test_the_same_object_is_signed_once(
+        self, mock_s3_client: MagicMock, presigned_url_cache: _MemoryCache
+    ) -> None:
+        """Two reads of one object have to hand out the same address.
+
+        The signature covers a timestamp, so signing twice produces two
+        URLs for the same bytes, and a client that caches images by URL
+        downloads them again every time a response embeds them.
+        """
+        first = await get_download_url(object_key="stable-key")
+        second = await get_download_url(object_key="stable-key")
+
+        assert first == second
+        assert mock_s3_client.generate_presigned_url.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_a_different_disposition_is_a_different_url(
+        self, mock_s3_client: MagicMock, presigned_url_cache: _MemoryCache
+    ) -> None:
+        """Or a browser would download a photo instead of showing it."""
+        await get_download_url(object_key="shared-key", mimetype="image/png")
+        await get_download_url(
+            object_key="shared-key", mimetype="text/html", filename="page.html"
+        )
+
+        assert mock_s3_client.generate_presigned_url.call_count == 2
 
     @pytest.mark.asyncio
     async def test_returns_presigned_url(self, mock_s3_client) -> None:
