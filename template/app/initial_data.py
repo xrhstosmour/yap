@@ -149,11 +149,15 @@ def _setup_metabase(password: str) -> None:
                 raise
             logger.info("The metabase_readonly role already exists")
 
+        # `GRANT` is DDL and cannot take a bound parameter either, so the
+        # database name is quoted as an identifier rather than wrapped in
+        # double quotes by hand. A name carrying a quote of its own would
+        # otherwise end the identifier and run as SQL.
+        quoted_database = psycopg_sql.Identifier(
+            settings.POSTGRESQL_DATABASE
+        ).as_string(None)
         conn.execute(
-            text(
-                "GRANT CONNECT ON DATABASE "
-                f'"{settings.POSTGRESQL_DATABASE}" TO metabase_readonly'
-            ),
+            text(f"GRANT CONNECT ON DATABASE {quoted_database} TO metabase_readonly"),
         )
 
     engine.dispose()
