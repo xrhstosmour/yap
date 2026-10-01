@@ -19,6 +19,7 @@ from fastapi import FastAPI
 from fastapi import Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.responses import ORJSONResponse
 from fastapi.responses import RedirectResponse
 from fastapi.responses import Response
 from fastapi.routing import APIRoute
@@ -179,6 +180,11 @@ def create_app() -> FastAPI:
         docs_url="/try" if serve_documentation else None,
         redoc_url="/documentation" if serve_documentation else None,
         lifespan=lifespan,
+        # Every route that does not name its own response class encodes
+        # through this one. The default runs the standard library's `json`,
+        # which is the slowest part of answering a list endpoint once the
+        # page is a few hundred rows of nested models.
+        default_response_class=ORJSONResponse,
     )
 
     # Compression middleware, for performance.
