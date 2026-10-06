@@ -227,7 +227,7 @@ async def verify_2fa(
 
     if not data.totp_code and not data.recovery_code:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Either totp_code or recovery_code is required.",
         )
 
