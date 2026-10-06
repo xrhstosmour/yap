@@ -119,8 +119,8 @@ You need:
 # Synchronize with upstream YAP template changes.
 ./scripts/synchronize.sh
 
-# Start dev server.
-uv run fastapi dev app/main.py --host 0.0.0.0 --port 8000
+# Start dev server, with services and migrations.
+./scripts/start.sh
 
 # Start all services.
 docker compose up -d
@@ -200,8 +200,8 @@ it registers a `beat_init` hook that expects the RedBeat scheduler and logs an
 
 FastAPI auto-generates interactive documentation with "Try it out":
 
-- **Swagger UI** ([http://localhost:8000/try](http://localhost:8000/try)): Interactive "Try it out" for every endpoint.
-- **ReDoc** ([http://localhost:8000/documentation](http://localhost:8000/documentation)): Clean reference documentation
+- **Swagger UI** ([http://localhost:{{ development_port }}/try](http://localhost:{{ development_port }}/try)): Interactive "Try it out" for every endpoint.
+- **ReDoc** ([http://localhost:{{ development_port }}/documentation](http://localhost:{{ development_port }}/documentation)): Clean reference documentation
 
 Operation IDs use `<tag>-<route_name>` format for clean client code generation.
 All request/response schemas are fully validated and documented. Paginated list endpoints return `X-Total-Count` and `Link` (RFC 5988) headers.

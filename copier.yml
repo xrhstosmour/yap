@@ -177,6 +177,11 @@ storage_region:
   default: "eu-central-1"
   when: "include_object_storage"
 
+development_port:
+  type: int
+  help: "Port the local development server listens on:"
+  default: 8000
+
 nested:
   type: bool
   help: "Is this project nested inside a larger repository?"
@@ -212,7 +217,7 @@ _message_after_copy: |
   Navigate to the project directory and review .env before starting the server.
 
   Start the development server:
-    uv run fastapi dev app/main.py --host 0.0.0.0 --port 8000
+    ./scripts/start.sh
 
   Start Celery:
     uv run celery -A app.celery_app worker --loglevel=info
@@ -223,8 +228,8 @@ _message_after_copy: |
   {%- endif %}
 
   URLs:
-    Backend ReDoc:     http://localhost:8000/documentation
-    Backend Swagger:   http://localhost:8000/try
+    Backend ReDoc:     http://localhost:{{ development_port }}/documentation
+    Backend Swagger:   http://localhost:{{ development_port }}/try
   {%- if include_flower %}
     Flower:            http://localhost:5555
   {%- endif %}
