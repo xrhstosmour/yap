@@ -73,6 +73,25 @@ class PaginationParameters(BaseModel):
     sort_order: str = Field(default="asc", pattern="^(asc|desc)$")
 
 
+class CursorParameters(BaseModel):
+    """Keyset pagination parameters for list endpoints.
+
+    `cursor` names the last row of the previous page, so a row inserted
+    above the window cannot shift the next page. It is opaque: a client
+    passes back what the previous response gave it and reads nothing out
+    of it.
+
+    Attributes:
+        cursor: The cursor from the previous page, absent on the first.
+        limit: Maximum number of records to return.
+    """
+
+    cursor: str | None = Field(
+        default=None, description="Cursor from the previous page"
+    )
+    limit: int = Field(default=20, ge=1, le=100, description="Max records to return")
+
+
 T = TypeVar("T")
 
 
@@ -94,6 +113,25 @@ class PaginatedResponse[T](BaseSchema):
     page: int = Field(description="Current page number")
     page_size: int = Field(description="Number of data per page")
     pages: int = Field(description="Total number of pages")
+
+
+class CursorPage[T](BaseSchema):
+    """Generic keyset-paginated response schema.
+
+    There is no total and no page number. Both need a count of the whole
+    matching set, which keyset pagination exists to avoid paying for, and
+    a total read from a list being written to is wrong by the time it
+    arrives. `next_cursor` is absent on the last page.
+
+    Attributes:
+        data: The rows in this page.
+        next_cursor: Cursor for the following page, null at the end.
+    """
+
+    data: list[T] = Field(description="Data in the current page")
+    next_cursor: str | None = Field(
+        default=None, description="Cursor for the next page, null on the last"
+    )
 
 
 class MessageResponse(BaseSchema):
