@@ -58,7 +58,7 @@ async def upload_file(
         )
     except FileTooLargeError as e:
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail=str(e),
         ) from e
     except FileTypeMismatchError as e:
