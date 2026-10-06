@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Run the development server.
+# Usage: ./scripts/start.sh             # the API on the default port
+#        ./scripts/start.sh --port 8000 # somewhere other than the default
+#
+# `setup.sh` is what prepares a machine. This only brings the stack up and
+# serves, so it is safe to run every day and cheap to restart.
+
+PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$PROJECT_DIR"
+
+PORT={{ development_port }}
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --port) PORT="$2"; shift 2 ;;
+        *) echo "Unknown argument: $1" >&2; exit 2 ;;
+    esac
+done
+
+if [ ! -f .env ]; then
+    echo "No .env found. Run ./scripts/setup.sh first." >&2
+    exit 1
+fi
+
+# shellcheck source=/dev/null
+set -a; . ./.env; set +a
+
+# The compose service names only resolve inside the Docker network. From the
+# host, reach the published ports on loopback instead.
+export POSTGRESQL_HOST=127.0.0.1
+export REDIS_HOST=127.0.0.1
+
+echo "Starting services..."
+docker compose -f docker-compose.yml up -d postgresql redis{% if include_object_storage %} seaweedfs{% endif %}
+
+echo "Waiting for PostgreSQL..."
+for _ in $(seq 1 30); do
+    if docker compose -f docker-compose.yml exec -T postgresql \
+        pg_isready -q -U "${POSTGRESQL_USER}" 2>/dev/null; then
+        break
+    fi
+    sleep 1
+done
+
+# `setup.sh` already migrated, but a branch switch adds revisions without
+# needing the whole machine prepared again, and this is a no-op when there
+# is nothing to apply.
+echo "Applying migrations..."
+uv run alembic upgrade head
+
+echo "Starting the API on http://localhost:$PORT"
+echo "  Swagger  http://localhost:$PORT/try"
+echo "  ReDoc    http://localhost:$PORT/documentation"
+exec uv run fastapi dev app/main.py --host 0.0.0.0 --port "$PORT"
