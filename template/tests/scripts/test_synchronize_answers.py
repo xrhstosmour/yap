@@ -10,12 +10,15 @@ them to a default and then re-rendered the project from that.
 from __future__ import annotations
 
 import re
+import subprocess
+import tempfile
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ENVIRONMENT_EXAMPLE = PROJECT_ROOT / ".env.example"
 COMPOSE_FILE = PROJECT_ROOT / "docker-compose.app.yml"
 SYNCHRONIZE = PROJECT_ROOT / "scripts" / "synchronize.sh"
+START = PROJECT_ROOT / "scripts" / "start.sh"
 
 
 def _environment_keys() -> set[str]:
@@ -87,3 +90,98 @@ class TestRedbeatIsInferredFromCompose:
 
         assert "docker-compose.app.yml" in line
         assert "pyproject.toml" not in line
+
+
+def _development_port_expression() -> str:
+    """Pull the port reader out of `synchronize.sh`.
+
+    Running the expression the script actually runs, rather than a copy of it,
+    is the point: a reader that no longer matches is the failure.
+
+    Returns:
+        The two shell lines that resolve the answer.
+    """
+    lines = [
+        line
+        for line in SYNCHRONIZE.read_text().splitlines()
+        if line.startswith("development_port=")
+    ]
+    assert lines, "synchronize.sh does not resolve a development port"
+    return "\n".join(lines)
+
+
+class TestDevelopmentPortSurvivesASync:
+    """`development_port` has no `.env` entry, so it is read back from a script.
+
+    A downstream project serving on a port of its own had it rewritten to the
+    template default by the next sync, which left its smoke walk and its
+    mobile client pointed at a server that was no longer there.
+    """
+
+    def test_the_answer_is_emitted(self) -> None:
+        """An answer left out is an answer re-asked and defaulted."""
+        assert "development_port: $development_port" in SYNCHRONIZE.read_text()
+
+    def test_the_answer_is_read_from_the_start_script(self) -> None:
+        """Guard the source, not only that something is emitted."""
+        assert "scripts/start.sh" in _development_port_expression()
+
+    def test_the_expression_recovers_a_port_that_is_not_the_fallback(self) -> None:
+        """A port equal to the fallback would pass with no reader at all.
+
+        This is the case the whole answer exists for, a project serving
+        somewhere other than where the template would have put it.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            scripts = Path(directory) / "scripts"
+            scripts.mkdir()
+            (scripts / "start.sh").write_text("#!/usr/bin/env bash\nPORT=8123\n")
+
+            result = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    f'{_development_port_expression()}\necho "$development_port"',
+                ],
+                capture_output=True,
+                text=True,
+                cwd=directory,
+                check=True,
+            )
+
+        assert result.stdout.strip() == "8123"
+
+    def test_the_expression_recovers_the_port_this_project_serves(self) -> None:
+        """The generated project is the one a sync actually reads."""
+        declared = re.search(r"^PORT=(\d+)$", START.read_text(), re.MULTILINE)
+        assert declared is not None
+
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f'{_development_port_expression()}\necho "$development_port"',
+            ],
+            capture_output=True,
+            text=True,
+            cwd=PROJECT_ROOT,
+            check=True,
+        )
+        assert result.stdout.strip() == declared.group(1)
+
+    def test_a_project_without_the_script_still_answers(self) -> None:
+        """A project generated before `start.sh` existed syncs to the default."""
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    f'{_development_port_expression()}\necho "$development_port"',
+                ],
+                capture_output=True,
+                text=True,
+                cwd=directory,
+                check=True,
+            )
+
+        assert result.stdout.strip() == "8000"
