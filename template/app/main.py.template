@@ -37,6 +37,9 @@ from app.api.v1.websocket import start_broadcast_relay
 from app.api.v1.websocket import stop_broadcast_relay
 from app.core.cache import close_redis
 from app.core.cache import init_redis
+from app.core.connection_budget import current_demand
+from app.core.connection_budget import over_budget
+from app.core.connection_budget import read_ceiling
 from app.core.logging import get_logger
 from app.core.logging import setup_logging
 from app.core.security import TokenRateLimitError
@@ -44,6 +47,7 @@ from app.core.security_middleware import SecurityHeadersMiddleware
 from app.core.settings import settings
 from app.core.tenant import tenant_context
 from app.database import ADDITIONAL_DATABASE_MODE
+from app.database import async_engine
 from app.database import close_db
 from app.database import database_mode_variable
 from app.database import init_db
@@ -136,6 +140,30 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info("database_initialized")
     except Exception as e:
         logger.error("database_init_failed", error=str(e))
+
+    # Refuse to start when the pool can ask for more connections than the
+    # server will grant. A database that cannot be reached is a different
+    # problem, already logged above, so this warns and carries on rather
+    # than turning an outage into a second failure nobody can act on.
+    try:
+        ceiling = await read_ceiling(async_engine)
+    except Exception as e:
+        logger.warning("connection_budget_unchecked", error=str(e))
+    else:
+        demand = current_demand()
+        complaint = over_budget(demand, ceiling)
+        if complaint is not None:
+            logger.error(
+                "connection_budget_exceeded",
+                demand=demand,
+                usable=ceiling.usable,
+            )
+            raise RuntimeError(complaint)
+        logger.info(
+            "connection_budget_checked",
+            demand=demand,
+            usable=ceiling.usable,
+        )
 
     try:
         await init_redis()
