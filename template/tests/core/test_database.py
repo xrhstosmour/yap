@@ -532,8 +532,8 @@ class TestLifespan:
             ) as mock_relay_stop,
             patch("app.main.setup_logging"),
         ):
-            # setup_tracing is imported lazily inside lifespan and already
-            # wrapped in try/except, so we do not need an explicit patch.
+            # Telemetry needs no patch: FastAPI instruments itself and the
+            # lifespan no longer sets anything up.
             async with lifespan(mock_app):
                 pass
 

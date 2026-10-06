@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import ast
 import sys
+from pathlib import Path
 from unittest.mock import MagicMock
 
 # tests/core/test_database.py stubs sys.modules["app.core.telemetry"] with a
@@ -22,7 +24,6 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.util._once import Once
 
-from app.core.telemetry import setup_tracing
 from app.core.telemetry import tracing
 
 
@@ -30,12 +31,15 @@ from app.core.telemetry import tracing
 def _reset_tracer_provider():
     """Reset the global tracer provider around each test.
 
-    setup_tracing() mutates process-global OpenTelemetry state. The SDK
-    guards set_tracer_provider() with a `Once` latch that only allows the
-    provider to be set a single time per process, so clearing the private
-    slot alone is not enough: the latch itself must be replaced too, or
-    every test after the first no-ops and silently keeps a stale provider
-    left behind by an earlier test in the same worker process.
+    The provider is process-global state. The SDK guards
+    set_tracer_provider() with a `Once` latch that only allows it to be set
+    a single time per process, so clearing the private slot alone is not
+    enough: the latch itself must be replaced too, or every test after the
+    first no-ops and silently keeps a stale provider left behind by an
+    earlier test in the same worker process.
+
+    That latch is also why the application must not install a provider of
+    its own, which `TestNothingInstallsATracerProvider` below asserts.
     """
     trace._TRACER_PROVIDER = None
     trace._TRACER_PROVIDER_SET_ONCE = Once()
@@ -57,33 +61,6 @@ def memory_exporter():
     trace.set_tracer_provider(provider)
     yield exporter
     exporter.clear()
-
-
-def test_setup_tracing_returns_tracer() -> None:
-    """setup_tracing() should return a usable Tracer instance."""
-    tracer = setup_tracing(service_name="test-service")
-
-    assert isinstance(tracer, trace.Tracer)
-
-
-def test_setup_tracing_sets_service_name_resource() -> None:
-    """setup_tracing() should register a TracerProvider with the given service name."""
-    setup_tracing(service_name="my-custom-service")
-
-    provider = trace.get_tracer_provider()
-    resource = provider.resource  # type: ignore[union-attr]
-
-    assert resource.attributes["service.name"] == "my-custom-service"
-
-
-def test_setup_tracing_defaults_service_name() -> None:
-    """setup_tracing() should default to 'fastapi-app' when no name is given."""
-    setup_tracing()
-
-    provider = trace.get_tracer_provider()
-    resource = provider.resource  # type: ignore[union-attr]
-
-    assert resource.attributes["service.name"] == "fastapi-app"
 
 
 def test_tracing_creates_span_with_given_name(memory_exporter) -> None:
@@ -124,59 +101,60 @@ def test_tracing_sets_error_attributes_on_exception(memory_exporter) -> None:
     assert spans[0].attributes["error.message"] == "something broke"
 
 
-class TestSpansDoNotGoToStdoutInProduction:
-    """Spans must not be printed into the structured log stream.
+class TestNothingInstallsATracerProvider:
+    """FastAPI installs the provider. Nothing here may install another.
 
-    `ConsoleSpanExporter` was attached unconditionally, so every traced
-    block wrote a multi-line JSON span to the same stdout carrying the
-    one-object-per-line log stream. Any shipper parsing those lines as JSON
-    fails on them.
+    `app/core/telemetry.py` used to build its own and call
+    `trace.set_tracer_provider()`, and in staging and production it built one
+    with no exporter at all. The SDK guards that call with a `Once` latch, so
+    the first provider in a process wins: once FastAPI instruments itself,
+    a second provider silences every automatic span and metric, in exactly
+    the environments worth observing. This asserts the call is gone, rather
+    than trusting that nobody adds it back.
     """
 
-    def _console_exporters(self) -> list[object]:
-        """Collect the console exporters attached to the active provider.
+    def test_the_application_never_sets_a_provider(self) -> None:
+        """Searched across the whole application, not just this module.
 
-        Returns:
-            Every `ConsoleSpanExporter` reachable from the span processors.
+        Parsed rather than grepped. The first version of this matched the
+        string anywhere and failed on the docstring in `telemetry.py` that
+        explains why the call must not be there, which is the sort of false
+        positive that gets a guard deleted rather than fixed.
         """
-        from opentelemetry.sdk.trace.export import ConsoleSpanExporter
+        root = Path(__file__).resolve().parents[2] / "app"
+        offenders = []
+        for source in sorted(root.rglob("*.py")):
+            tree = ast.parse(source.read_text())
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                target = node.func
+                name = (
+                    target.attr
+                    if isinstance(target, ast.Attribute)
+                    else getattr(target, "id", "")
+                )
+                if name == "set_tracer_provider":
+                    offenders.append(f"{source.relative_to(root.parent)}:{node.lineno}")
 
-        provider = trace.get_tracer_provider()
-        processors = provider._active_span_processor._span_processors  # type: ignore[union-attr]
-        return [
-            processor.span_exporter
-            for processor in processors
-            if isinstance(
-                getattr(processor, "span_exporter", None), ConsoleSpanExporter
-            )
-        ]
+        assert not offenders, (
+            "set_tracer_provider wins a one-shot latch and would silence "
+            f"FastAPI's own telemetry: {offenders}"
+        )
 
-    @pytest.mark.parametrize("environment", ["staging", "production"])
-    def test_no_console_exporter_when_deployed(
-        self, environment: str, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A deployed environment gets a provider with nothing printing.
+    def test_no_setup_function_is_exported(self) -> None:
+        """A `setup_tracing` that exists will eventually be called again."""
+        import app.core.telemetry as telemetry
+
+        assert not hasattr(telemetry, "setup_tracing")
+
+    def test_the_span_helper_needs_no_setup(self, memory_exporter) -> None:
+        """`tracing()` has to work against a provider it did not install.
 
         Args:
-            environment: The deployed environment under test.
-            monkeypatch: Fixture used to set the environment.
+            memory_exporter: Fixture installing a provider and exporter.
         """
-        monkeypatch.setattr("app.core.telemetry.settings.ENVIRONMENT", environment)
+        with tracing("after-someone-else-installed-the-provider"):
+            pass
 
-        setup_tracing(service_name="test-service")
-
-        assert self._console_exporters() == []
-
-    def test_console_exporter_stays_in_local(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Printing spans is still useful while developing.
-
-        Args:
-            monkeypatch: Fixture used to set the environment.
-        """
-        monkeypatch.setattr("app.core.telemetry.settings.ENVIRONMENT", "local")
-
-        setup_tracing(service_name="test-service")
-
-        assert len(self._console_exporters()) == 1
+        assert len(memory_exporter.get_finished_spans()) == 1
