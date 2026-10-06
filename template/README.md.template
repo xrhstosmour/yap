@@ -122,6 +122,9 @@ You need:
 # Start dev server, with services and migrations.
 ./scripts/start.sh
 
+# Run every gate CI runs.
+./scripts/verify.sh
+
 # Start all services.
 docker compose up -d
 
