@@ -88,10 +88,10 @@
 ### Observability
 
 - **Structured JSON Logging**: structlog with correlation IDs
-- **OpenTelemetry Tracing**: Distributed trace support
+- **OpenTelemetry**: Traces, metrics and logs from FastAPI itself, no setup code. Point it somewhere with `OTEL_SERVICE_NAME` and `OTEL_EXPORTER_OTLP_ENDPOINT`, and wrap your own blocks with `app.core.telemetry.tracing(...)`. Do not call `set_tracer_provider()`: the first provider in a process wins and would silence all of it.
 - **GlitchTip**: Self-hosted error tracking (Sentry SDK compatible)
 - **Flower**: Celery worker monitoring dashboard
-- **Health Metrics**: Pool stats, cache stats, readiness/liveness probes
+- **Health Metrics**: Pool stats against the Postgres connection ceiling, cache stats, readiness/liveness probes
 
 ### DevOps
 

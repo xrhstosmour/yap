@@ -128,12 +128,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     setup_logging()
     logger.info("application_starting", environment=settings.ENVIRONMENT)
 
-    try:
-        from app.core.telemetry import setup_tracing
-
-        setup_tracing(service_name=settings.PROJECT_NAME)
-    except Exception:
-        pass
+    # Telemetry needs no setup. FastAPI instruments itself and reads
+    # `OTEL_SERVICE_NAME` and `OTEL_EXPORTER_OTLP_ENDPOINT` from the
+    # environment. Installing a provider here would win the SDK's one-shot
+    # latch and silence all of it, see `app/core/telemetry.py`.
 
     try:
         await init_db()
