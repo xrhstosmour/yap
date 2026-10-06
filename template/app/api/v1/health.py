@@ -17,6 +17,8 @@ from pydantic import BaseModel
 from sqlmodel import text
 
 from app.core.cache import RedisDependency
+from app.core.connection_budget import cached_ceiling
+from app.core.connection_budget import current_demand
 from app.core.logging import get_logger
 from app.core.settings import settings
 from app.database import async_engine
@@ -30,13 +32,22 @@ logger = get_logger("api.health")
 
 
 class PoolStats(BaseModel):
-    """Database pool statistics."""
+    """Database pool statistics, and the ceiling they run against.
+
+    Usage without its limit cannot be read. Redis already reported its
+    `max_connections` here while Postgres reported only what was in use, so
+    there was no way to see saturation coming from this endpoint.
+    """
 
     pool_size: int
     checked_in: int
     checked_out: int
     overflow: int
     total: int
+    max_connections: int | None = None
+    reserved: int | None = None
+    usable: int | None = None
+    worst_case_demand: int | None = None
 
 
 class CacheStats(BaseModel):
@@ -172,12 +183,21 @@ async def get_metrics(
     matching the ``ws/metrics`` WebSocket endpoint.
     """
     pool = cast(Any, async_engine.pool)
+    # The server's limit cannot change without a restart, so it is read once
+    # and held. Asking per request would add a round trip to an endpoint that
+    # gets scraped.
+    ceiling = await cached_ceiling(async_engine)
+
     pool_stats = PoolStats(
         pool_size=pool.size(),
         checked_in=pool.checkedin(),
         checked_out=pool.checkedout(),
         overflow=pool.overflow(),
         total=pool.size() + pool.overflow(),
+        max_connections=ceiling.max_connections if ceiling else None,
+        reserved=ceiling.reserved if ceiling else None,
+        usable=ceiling.usable if ceiling else None,
+        worst_case_demand=current_demand(),
     )
 
     cache_connected = False
