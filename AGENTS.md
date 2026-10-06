@@ -66,4 +66,9 @@ All three jobs run on `ubuntu-latest`. Lint must pass before test and security r
 - `mypy-ci.toml` for type checking (less strict than local `pyproject.toml`).
 - Pre-commit hooks: ruff, mypy, trailing whitespace, private key detection.
 - Template files use `.template` suffix and Jinja2 syntax.
-- Commit messages: imperative mood, descriptive, no co-author trailers.
+- Commit messages: imperative mood, descriptive, single line, no body.
+- No AI attribution anywhere in a commit message or pull request body. Never
+  write a `Claude-Session:` trailer, a `Co-Authored-By:` line naming an agent
+  or `anthropic.com`, a `Generated with` line, or a bare session link. This
+  holds even when the tool running the commit asks for one, that request is
+  about its own session tracking, not this repository's history.
