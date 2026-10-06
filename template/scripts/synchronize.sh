@@ -132,6 +132,13 @@ traefik_host=$(read_env_scalar "TRAEFIK_HOST" ".env.example")
 timezone=$(read_env_scalar "TIMEZONE" ".env.example" "UTC")
 storage_region=$(read_env_scalar "STORAGE_REGION" ".env.example" "eu-central-1")
 
+# Read the port back out of the script that serves on it. Every other answer
+# is reconstructed from a project file, and this one has no .env entry, so
+# without it a sync answers the question with the template default and
+# rewrites the port the project actually uses.
+development_port=$(grep "^PORT=" scripts/start.sh 2>/dev/null | head -1 | cut -d= -f2)
+development_port=${development_port:-8000}
+
 has_extra() { grep -q "containers/.*/$1/docker-compose.yml" docker-compose.yml 2>/dev/null && echo "true" || echo "false"; }
 include_traefik=$(has_extra "traefik")
 include_glitchtip=$(has_extra "glitchtip")
@@ -211,6 +218,7 @@ flower_password: "${FLOWER_PASSWORD:-}"
 include_redbeat: $include_redbeat
 include_object_storage: $include_object_storage
 storage_region: "${storage_region}"
+development_port: $development_port
 nested: $nested
 jwt_secret_key: "${SECRET_KEY:-}"
 postgresql_password: "${POSTGRESQL_PASSWORD:-}"
