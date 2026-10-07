@@ -16,6 +16,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 - Add passwordless authentication via magic links
 - Add password reset and email verification flows
 - Add GDPR endpoints for data export and right-to-erasure
+- Add append-only consent records, with the document version each answer was given for
 - Add field-level encryption for user PII, with searchable blind-index hashes
 - Add file storage with S3-compatible backends and optional MinIO
 - Add per-tenant file deduplication keyed on content hash

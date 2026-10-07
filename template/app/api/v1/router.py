@@ -7,6 +7,7 @@ from fastapi import APIRouter
 
 from app.api.v1.api_keys import router as api_keys_router
 from app.api.v1.auth import router as auth_router
+from app.api.v1.consents import router as consents_router
 from app.api.v1.devices import router as devices_router
 from app.api.v1.feature_flags import router as feature_flags_router
 from app.api.v1.files import router as files_router
@@ -26,6 +27,7 @@ router.include_router(api_keys_router)
 router.include_router(files_router)
 router.include_router(devices_router)
 router.include_router(notification_preferences_router)
+router.include_router(consents_router)
 router.include_router(tenants_router)
 router.include_router(health_router)
 router.include_router(feature_flags_router)

@@ -9,6 +9,7 @@ from app.models.audit_log import AuditAction
 from app.models.audit_log import AuditLog
 from app.models.base import BaseModel
 from app.models.base import TenantBase
+from app.models.consent_record import ConsentRecord
 from app.models.device_token import DevicePlatform
 from app.models.device_token import DeviceToken
 from app.models.feature_flag import FeatureFlag
@@ -35,6 +36,7 @@ __all__ = [
     "FeatureFlag",
     "File",
     "Graveyard",
+    "ConsentRecord",
     "NotificationPreference",
     "OAuthAccount",
     "OAuthProvider",
