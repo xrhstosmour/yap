@@ -121,6 +121,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 - Assert a single Alembic head in CI, and fix a CI port conflict causing double migration
 - Scope CI/CD to conditional secrets, and harden workflow permissions
 - Backfill `MINIO_DEFAULT_BUCKET`, `MAILPIT_UI_AUTH`, and `POSTGRESQL_HOST` in `.env`, closing a gap where `docker compose config` failed once MinIO, Mailpit, or GlitchTip was enabled
+- Let `Alembic` itself find the heads in the CI check, it matched the revision lines with a regex that only accepted double quotes, so every migration `alembic revision` generated was invisible to it, a fork between two of them passed and relinking onto one reported a head that `alembic heads` disagreed with
 
 ### Security
 
