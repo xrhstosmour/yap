@@ -30,6 +30,7 @@ from starlette.middleware.gzip import GZipMiddleware
 
 from app.admin.router import router as admin_router
 from app.admin.session import NotSignedInError
+from app.api.client_version import ClientVersionMiddleware
 from app.api.idempotency import IdempotencyMiddleware
 from app.api.request_id import RequestIDMiddleware
 from app.api.v1.router import router as api_v1_router
@@ -222,6 +223,13 @@ def create_app() -> FastAPI:
     # Request ID middleware, for tracing requests across services.
     app.add_middleware(RequestIDMiddleware)
 
+    # Turns away client builds older than the oldest one still served.
+    app.add_middleware(
+        ClientVersionMiddleware,
+        minimum=settings.MINIMUM_CLIENT_VERSION,
+        path_prefix=settings.API_V1_STR,
+    )
+
     # Idempotency middleware that protects mutating endpoints from duplicate processing.
     # Placed after RequestIDMiddleware for correlation IDs in logs.
     # Middleware runs in reverse registration order (LIFO) in Starlette.
@@ -324,6 +332,7 @@ def create_app() -> FastAPI:
                 "X-Idempotency-Key",
                 "X-API-Key",
                 "X-Request-ID",
+                "X-Client-Version",
                 "Accept",
             ],
         )
