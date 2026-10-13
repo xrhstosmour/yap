@@ -57,6 +57,10 @@ class RegisterRequest(BaseSchema):
         max_length=32,
         description="Handle other people find you by, must be unique",
     )
+    is_minimum_age_confirmed: bool = Field(
+        default=False,
+        description="Whether the person says they are at least `MINIMUM_AGE`",
+    )
 
 
 class TokenResponse(BaseSchema):

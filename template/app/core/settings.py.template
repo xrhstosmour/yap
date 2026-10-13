@@ -18,6 +18,7 @@ from urllib.parse import urlsplit
 from pydantic import AnyUrl
 from pydantic import BeforeValidator
 from pydantic import EmailStr
+from pydantic import Field
 from pydantic import HttpUrl
 from pydantic import PostgresDsn
 from pydantic import computed_field
@@ -279,6 +280,11 @@ class Settings(BaseSettings):
     # The oldest client build still served, as `major.minor.patch`. Older
     # builds sending `X-Client-Version` are answered 426. Empty serves all.
     MINIMUM_CLIENT_VERSION: str = ""
+
+    # The youngest age an account may be opened at. Registration has to
+    # confirm it, and the answer is kept as a `minimum_age` consent record.
+    # Zero asks nothing. The right number depends on the countries served.
+    MINIMUM_AGE: int = Field(default=0, ge=0)
 
     # Performance Tuning.
     DATABASE_POOL_SIZE: int = 10
