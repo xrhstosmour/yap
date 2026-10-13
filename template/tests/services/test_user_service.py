@@ -15,11 +15,14 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
+from app.core import SYSTEM_TENANT_ID
 from app.core.tenant import system_context
 from app.models.audit_log import AuditAction
 from app.models.audit_log import AuditLog
+from app.models.file import File
 from app.models.user import User
 from app.models.user import UserRole
+from app.repositories.audit_repository import AuditLogRepository
 from app.schemas.user import UserCreate
 from app.schemas.user import UserUpdate
 from app.schemas.user import UserUpdateMe
@@ -229,6 +232,100 @@ class TestUserServiceDelete:
         assert retrieved is None
 
 
+class TestDeleteMeErasure:
+    """What a self-service deletion leaves behind, against the database."""
+
+    @pytest.mark.asyncio
+    async def test_delete_me_removes_files_handle_and_audit_email(
+        self, session: AsyncSession
+    ) -> None:
+        """The account's files, handle and email in the trail should go."""
+        user_service = _user_service(session)
+        with system_context():
+            user = await user_service.create(
+                UserCreate(email="leaving@example.com", password="password123")
+            )
+            user.username = "leaving"
+            photo = File(
+                filename="photo.png",
+                mimetype="image/png",
+                size=4,
+                content_hash=uuid4().hex,
+                bucket="uploads",
+                object_key=f"photos/{uuid4()}",
+                thumbnail_object_key=f"thumbnails/{uuid4()}",
+                uploaded_by=user.id,
+                tenant_id=user.tenant_id or SYSTEM_TENANT_ID,
+            )
+            session.add(photo)
+            await session.flush()
+            await AuditLogRepository(session).log_user_action_safe(
+                action=AuditAction.LOGIN,
+                user_id=user.id,
+                tenant_id=user.tenant_id or SYSTEM_TENANT_ID,
+                email="leaving@example.com",
+            )
+
+            removed = AsyncMock()
+            with patch("app.services.user_service.delete_object", removed):
+                await user_service.delete_me(user)
+
+            await session.refresh(user)
+            await session.refresh(photo)
+            trail = (
+                (
+                    await session.execute(
+                        select(AuditLog).where(AuditLog.actor_id == str(user.id))
+                    )
+                )
+                .scalars()
+                .all()
+            )
+
+        assert user.username is None
+        assert photo.deleted_at is not None
+        assert {call.kwargs["object_key"] for call in removed.await_args_list} == {
+            photo.object_key,
+            photo.thumbnail_object_key,
+        }
+        assert trail
+        assert all(entry.actor_email is None for entry in trail)
+
+    @pytest.mark.asyncio
+    async def test_delete_me_survives_storage_being_down(
+        self, session: AsyncSession
+    ) -> None:
+        """A storage failure should leave an object behind, not the account."""
+        user_service = _user_service(session)
+        with system_context():
+            user = await user_service.create(
+                UserCreate(email="stuck@example.com", password="password123")
+            )
+            session.add(
+                File(
+                    filename="photo.png",
+                    mimetype="image/png",
+                    size=4,
+                    content_hash=uuid4().hex,
+                    bucket="uploads",
+                    object_key=f"photos/{uuid4()}",
+                    uploaded_by=user.id,
+                    tenant_id=user.tenant_id or SYSTEM_TENANT_ID,
+                )
+            )
+            await session.flush()
+
+            with patch(
+                "app.services.user_service.delete_object",
+                AsyncMock(side_effect=ConnectionError("storage is down")),
+            ):
+                await user_service.delete_me(user)
+
+            await session.refresh(user)
+
+        assert user.deleted_at is not None
+
+
 # ============================================================================ #
 # Mock-based unit tests
 # ============================================================================ #
@@ -240,7 +337,8 @@ def mock_session() -> MagicMock:
     session = MagicMock()
     nested = MagicMock()
     nested.__aenter__ = AsyncMock()
-    nested.__aexit__ = AsyncMock()
+    # False, or the savepoint swallows whatever the code under test raises.
+    nested.__aexit__ = AsyncMock(return_value=False)
     session.begin_nested.return_value = nested
     return session
 
@@ -448,7 +546,7 @@ class TestDeleteMe:
         """Should revoke all active API keys via a bulk UPDATE statement."""
         user = _make_user_mock()
 
-        mock_session.execute = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock())
         mock_user_service.user_repository.update = AsyncMock()
         mock_user_service.user_repository.increment_token_version = AsyncMock()
         mock_user_service.user_repository.delete = AsyncMock()
@@ -460,13 +558,20 @@ class TestDeleteMe:
         ):
             await mock_user_service.delete_me(user)
 
-        # API key revocation, recovery-code deletion and WebAuthn-credential
-        # deletion statements were all issued.
-        assert mock_session.execute.await_count == 3
+        # API key revocation, recovery-code deletion, WebAuthn-credential
+        # deletion and the audit email scrub were all issued. The file lookup
+        # is a SELECT and has no single target table.
         tables = {
-            call.args[0].table.name for call in mock_session.execute.await_args_list
+            call.args[0].table.name
+            for call in mock_session.execute.await_args_list
+            if hasattr(call.args[0], "table")
         }
-        assert tables == {"api_keys", "totp_recovery_codes", "webauthn_credentials"}
+        assert tables == {
+            "api_keys",
+            "totp_recovery_codes",
+            "webauthn_credentials",
+            "audit_logs",
+        }
         mock_user_service.audit_repository.log_user_action_safe.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -476,7 +581,7 @@ class TestDeleteMe:
         """Should hard-delete 2FA credential material, not just soft-delete it."""
         user = _make_user_mock()
 
-        mock_session.execute = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock())
         mock_user_service.user_repository.update = AsyncMock()
         mock_user_service.user_repository.increment_token_version = AsyncMock()
         mock_user_service.user_repository.delete = AsyncMock()
@@ -488,7 +593,11 @@ class TestDeleteMe:
         ):
             await mock_user_service.delete_me(user)
 
-        statements = [call.args[0] for call in mock_session.execute.await_args_list]
+        statements = [
+            call.args[0]
+            for call in mock_session.execute.await_args_list
+            if hasattr(call.args[0], "table")
+        ]
         recovery_code_delete = next(
             s for s in statements if s.table.name == "totp_recovery_codes"
         )
@@ -506,7 +615,7 @@ class TestDeleteMe:
         GDPR-compliant placeholders, and clear 2FA state."""
         user = _make_user_mock(phone="+306912345678")
 
-        mock_session.execute = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock())
         mock_user_service.user_repository.update = AsyncMock()
         mock_user_service.user_repository.increment_token_version = AsyncMock()
         mock_user_service.user_repository.delete = AsyncMock()
@@ -531,6 +640,9 @@ class TestDeleteMe:
         assert data["is_2fa_enabled"] is False
         assert data["totp_secret_encrypted"] is None
         assert data["totp_confirmed_at"] is None
+        assert data["username"] is None
+        assert data["username_normalized"] is None
+        assert data["avatar_file_id"] is None
         assert "token_version" in data
 
     @pytest.mark.asyncio
@@ -540,7 +652,7 @@ class TestDeleteMe:
         """Should invalidate tokens atomically with anonymisation and soft-delete."""
         user = _make_user_mock()
 
-        mock_session.execute = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock())
         mock_user_service.user_repository.update = AsyncMock()
         mock_user_service.user_repository.increment_token_version = AsyncMock()
         mock_user_service.user_repository.delete = AsyncMock()
@@ -562,7 +674,7 @@ class TestDeleteMe:
         """Should write an ACCOUNT_DELETION audit log entry."""
         user = _make_user_mock(tenant_id=uuid4())
 
-        mock_session.execute = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock())
         mock_user_service.user_repository.update = AsyncMock()
         mock_user_service.user_repository.increment_token_version = AsyncMock()
         mock_user_service.user_repository.delete = AsyncMock()
@@ -581,6 +693,8 @@ class TestDeleteMe:
         assert call_kwargs["user_id"] == user.id
         assert call_kwargs["resource_type"] == "user"
         assert call_kwargs["resource_id"] == str(user.id)
+        # The entry outlives the account, so it names it by id alone.
+        assert call_kwargs["email"] is None
 
 
 class TestRevokeAllSessions:
