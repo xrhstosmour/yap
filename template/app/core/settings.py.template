@@ -286,6 +286,11 @@ class Settings(BaseSettings):
     # Zero asks nothing. The right number depends on the countries served.
     MINIMUM_AGE: int = Field(default=0, ge=0)
 
+    # What is running, as the commit the image was built from. Passed in as
+    # the `RELEASE` build argument, so the API reports, and Sentry groups
+    # errors by, the code actually deployed rather than a hand-kept number.
+    RELEASE: str = "development"
+
     # Performance Tuning.
     DATABASE_POOL_SIZE: int = 10
     DATABASE_MAX_OVERFLOW: int = 20

@@ -28,6 +28,11 @@ COPY --chown=appuser:appuser scripts/ ./scripts/
 COPY --chown=appuser:appuser templates/ ./templates/
 COPY --chown=appuser:appuser migrations/ ./migrations/
 
+# The commit this image is built from, reported by `/health` and attached to
+# every Sentry event. Build with `--build-arg RELEASE=$(git rev-parse --short HEAD)`.
+ARG RELEASE=development
+ENV RELEASE=$RELEASE
+
 ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
