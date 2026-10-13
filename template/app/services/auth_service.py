@@ -32,9 +32,11 @@ from app.core.security import verify_password
 from app.core.settings import settings
 from app.core.tenant import system_context
 from app.models.audit_log import AuditAction
+from app.models.consent_record import MINIMUM_AGE_KIND
 from app.models.user import User
 from app.models.user import UserRole
 from app.repositories.audit_repository import AuditLogRepository
+from app.repositories.consent_record_repository import ConsentRecordRepository
 from app.repositories.oauth_account_repository import OAuthAccountRepository
 from app.repositories.user_repository import UserRepository
 from app.schemas.auth import LoginResponse
@@ -64,6 +66,12 @@ class EmailAlreadyExistsError(AuthenticationError):
 
 class UsernameAlreadyExistsError(AuthenticationError):
     """The requested handle is taken."""
+
+    pass
+
+
+class MinimumAgeNotConfirmedError(AuthenticationError):
+    """Registration did not confirm the person is at least `MINIMUM_AGE`."""
 
     pass
 
@@ -242,6 +250,12 @@ class AuthService:
         """
         self._validate_password_strength(data.password)
 
+        # Refused before anything is looked up, so a child's address is
+        # never so much as compared against the table.
+        if settings.MINIMUM_AGE and not data.is_minimum_age_confirmed:
+            message = f"You need to be at least {settings.MINIMUM_AGE} to sign up"
+            raise MinimumAgeNotConfirmedError(message)
+
         # Check if email exists.
         if await self.user_repository.email_exists(data.email):
             raise EmailAlreadyExistsError("Email already registered")
@@ -261,6 +275,14 @@ class AuthService:
             role=UserRole.USER,
             username=data.username,
         )
+
+        if settings.MINIMUM_AGE:
+            await ConsentRecordRepository(self.session).record(
+                user.id,
+                MINIMUM_AGE_KIND,
+                is_granted=True,
+                document_version=str(settings.MINIMUM_AGE),
+            )
 
         logger.info("user_registered", user_id=str(user.id))
 

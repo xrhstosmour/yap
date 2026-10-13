@@ -56,6 +56,7 @@ from app.services.auth_service import AuthenticationError
 from app.services.auth_service import AuthService
 from app.services.auth_service import EmailAlreadyExistsError
 from app.services.auth_service import InvalidCredentialsError
+from app.services.auth_service import MinimumAgeNotConfirmedError
 from app.services.auth_service import UserInactiveError
 from app.services.auth_service import UsernameAlreadyExistsError
 from app.services.auth_service import UserNotFoundError
@@ -96,6 +97,11 @@ async def register(
     except UsernameAlreadyExistsError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
+            detail=str(e),
+        ) from e
+    except MinimumAgeNotConfirmedError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(e),
         ) from e
 

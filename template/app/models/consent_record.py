@@ -27,6 +27,11 @@ from app.models.base import BaseModel
 MAXIMUM_KIND_LENGTH = 64
 MAXIMUM_VERSION_LENGTH = 64
 
+#: The one kind the template itself writes: somebody saying they are at
+#: least `MINIMUM_AGE`, with that age as the document version, so a later
+#: change of the minimum is visible in what each account agreed to.
+MINIMUM_AGE_KIND = "minimum_age"
+
 
 class ConsentRecord(BaseModel, table=True):
     """One answer, at one moment, to one consent question.

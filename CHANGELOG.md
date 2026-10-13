@@ -21,6 +21,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 - Add file storage with S3-compatible backends and optional MinIO
 - Add per-tenant file deduplication keyed on content hash
 - Add `MINIMUM_CLIENT_VERSION`, answering 426 to API clients whose `X-Client-Version` is older
+- Add `MINIMUM_AGE`, refusing registration that does not confirm it and keeping the confirmation as a `minimum_age` consent record, an account opened through Google has no such record until the client asks and records it through `/consents`
 - Add the outbox pattern for transactional event publishing
 - Add a graveyard table retaining soft-deleted records
 - Add search infrastructure with `pg_trgm` and `unaccent` trigram indexes

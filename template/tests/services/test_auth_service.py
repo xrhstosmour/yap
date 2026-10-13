@@ -15,13 +15,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.security import TokenRateLimitError
 from app.core.security import decode_token
 from app.core.security import generate_password_hash
+from app.core.settings import settings
 from app.core.tenant import system_context
+from app.models.consent_record import MINIMUM_AGE_KIND
 from app.models.user import UserRole
+from app.repositories.consent_record_repository import ConsentRecordRepository
+from app.repositories.user_repository import UserRepository
 from app.schemas.auth import RegisterRequest
 from app.services.auth_service import AuthenticationError
 from app.services.auth_service import AuthService
 from app.services.auth_service import EmailAlreadyExistsError
 from app.services.auth_service import InvalidCredentialsError
+from app.services.auth_service import MinimumAgeNotConfirmedError
 from app.services.auth_service import UserInactiveError
 from app.services.auth_service import UsernameAlreadyExistsError
 from app.services.auth_service import UserNotFoundError
@@ -317,6 +322,62 @@ class TestAuthService:
                     username="thanasis",
                 )
             )
+
+    @pytest.mark.asyncio
+    async def test_register_without_confirming_the_minimum_age_is_refused(
+        self, session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Refused, and no account is left behind to be cleaned up."""
+        monkeypatch.setattr(settings, "MINIMUM_AGE", 15)
+        auth_service = _auth_service(session)
+
+        with pytest.raises(MinimumAgeNotConfirmedError, match="15"):
+            await auth_service.register(
+                RegisterRequest(email="too-young@example.com", password="password123")
+            )
+
+        with system_context():
+            assert (
+                await UserRepository(session).get_by_email("too-young@example.com")
+                is None
+            )
+
+    @pytest.mark.asyncio
+    async def test_register_keeps_the_age_it_was_confirmed_against(
+        self, session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The age goes in as the document version, so a later change of
+        the minimum shows in what each account actually agreed to."""
+        monkeypatch.setattr(settings, "MINIMUM_AGE", 15)
+        auth_service = _auth_service(session)
+
+        user = await auth_service.register(
+            RegisterRequest(
+                email="old-enough@example.com",
+                password="password123",
+                is_minimum_age_confirmed=True,
+            )
+        )
+
+        with system_context():
+            current = await ConsentRecordRepository(session).current_for(user.id)
+        assert current[MINIMUM_AGE_KIND].is_granted is True
+        assert current[MINIMUM_AGE_KIND].document_version == "15"
+
+    @pytest.mark.asyncio
+    async def test_register_asks_nothing_when_there_is_no_minimum(
+        self, session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(settings, "MINIMUM_AGE", 0)
+        auth_service = _auth_service(session)
+
+        user = await auth_service.register(
+            RegisterRequest(email="no-minimum@example.com", password="password123")
+        )
+
+        with system_context():
+            current = await ConsentRecordRepository(session).current_for(user.id)
+        assert MINIMUM_AGE_KIND not in current
 
     def test_create_tokens_returns_token_response(self, session: AsyncSession) -> None:
         """create_tokens should return TokenResponse with access and refresh tokens."""
