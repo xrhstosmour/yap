@@ -276,6 +276,10 @@ class Settings(BaseSettings):
     # Idempotency.
     IDEMPOTENCY_TTL_HOURS: int = 24
 
+    # The oldest client build still served, as `major.minor.patch`. Older
+    # builds sending `X-Client-Version` are answered 426. Empty serves all.
+    MINIMUM_CLIENT_VERSION: str = ""
+
     # Performance Tuning.
     DATABASE_POOL_SIZE: int = 10
     DATABASE_MAX_OVERFLOW: int = 20
