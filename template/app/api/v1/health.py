@@ -116,7 +116,7 @@ async def health_check(
 
     return HealthResponse(
         status=overall_status,
-        version="1.0.0",
+        version=settings.RELEASE,
         database=db_status,
         cache=cache_status,
     )

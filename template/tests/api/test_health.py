@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from httpx import ASGITransport
 from httpx import AsyncClient
 
+from app.core.settings import settings
 from app.main import app
 from app.models.user import User
 from app.models.user import UserRole
@@ -150,6 +151,20 @@ def test_health_returns_healthy_status_when_dependencies_available(client) -> No
         assert "version" in data
         assert "database" in data
         assert "cache" in data
+
+
+def test_health_reports_the_release_it_was_built_from(
+    client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The commit the image was built from, not a hand-kept number."""
+    monkeypatch.setattr(settings, "RELEASE", "abc1234")
+
+    response = client.get("/api/v1/health")
+
+    # A failed dependency degrades the body rather than the status, so the
+    # version is there either way.
+    assert response.status_code == 200
+    assert response.json()["version"] == "abc1234"
 
 
 def test_readiness_check_returns_ready(client) -> None:

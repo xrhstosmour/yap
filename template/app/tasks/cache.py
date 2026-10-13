@@ -6,6 +6,7 @@ This module defines background tasks for cache management.
 from app.celery_app import celery_app
 from app.core.cache import get_cache
 from app.core.logging import get_logger
+from app.core.settings import settings
 
 logger = get_logger("tasks.cache")
 
@@ -46,7 +47,7 @@ async def _warm_cache_async() -> None:
     # Add placeholder cache entries.
     # In production, load actual frequently accessed data.
     await cache.set("system:health", {"status": "ok"}, ttl=300)
-    await cache.set("system:version", "1.0.0", ttl=3600)
+    await cache.set("system:version", settings.RELEASE, ttl=3600)
 
 
 @celery_app.task(bind=True, name="app.tasks.cache.clear_cache")

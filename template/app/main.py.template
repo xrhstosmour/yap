@@ -108,6 +108,7 @@ def _before_send(event: Event, hint: Hint) -> Event | None:
 if settings.SENTRY_DSN and settings.ENVIRONMENT != "local":
     sentry_sdk.init(
         dsn=str(settings.SENTRY_DSN),
+        release=settings.RELEASE,
         enable_tracing=True,
         # Do not attach request cookies/headers/IP or user data by default.
         send_default_pii=False,
@@ -199,7 +200,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.PROJECT_NAME,
         description="{{ description }}",
-        version="1.0.0",
+        version=settings.RELEASE,
         openapi_url=(
             f"{settings.API_V1_STR}/openapi.json" if serve_documentation else None
         ),
