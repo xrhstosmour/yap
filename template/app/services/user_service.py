@@ -14,6 +14,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import delete as sa_delete
+from sqlalchemy import select
 from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,8 +23,11 @@ from app.core.encryption import encrypted_column_names
 from app.core.logging import get_logger
 from app.core.security import generate_password_hash
 from app.core.security import verify_password
+from app.core.storage import delete_object
 from app.models.api_key import APIKey
 from app.models.audit_log import AuditAction
+from app.models.audit_log import AuditLog
+from app.models.file import File
 from app.models.totp_recovery_code import TotpRecoveryCode
 from app.models.user import User
 from app.models.user import UserRole
@@ -398,10 +402,12 @@ class UserService:
         """Self-service account deletion (GDPR Article 17).
 
         Revokes all API keys, anonymizes personal fields (email, phone,
-        full_name, hashed_password), clears 2FA (TOTP secret, recovery
-        codes, WebAuthn credentials), soft-deletes the account, and
+        full_name, hashed_password, username, avatar), clears 2FA (TOTP
+        secret, recovery codes, WebAuthn credentials), deletes every file
+        the account uploaded along with its stored bytes, drops the email
+        from the account's audit entries, soft-deletes the account, and
         increments `token_version` to immediately invalidate all
-        outstanding JWTs. Logs the deletion in the audit trail.
+        outstanding JWTs. Logs the deletion in the audit trail, by id only.
 
         Args:
             user: The authenticated user requesting deletion.
@@ -457,22 +463,80 @@ class UserService:
                     "totp_secret_encrypted": None,
                     "totp_confirmed_at": None,
                     "token_version": User.token_version + 1,
+                    # A handle and a face identify a person as surely as an
+                    # email does, and the handle would otherwise stay taken.
+                    "username": None,
+                    "username_normalized": None,
+                    "avatar_file_id": None,
                 },
+            )
+
+            # Every file this account uploaded is its own, the dedup key is
+            # per uploader, so none of it is shared with anybody else.
+            files = list(
+                (
+                    await self.session.execute(
+                        select(File).where(
+                            File.uploaded_by == user.id,  # type: ignore[arg-type]
+                            File.deleted_at.is_(None),  # type: ignore[union-attr]
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            if files:
+                await self.session.execute(
+                    sa_update(File)
+                    .where(File.id.in_([file.id for file in files]))  # type: ignore[attr-defined]
+                    .values(deleted_at=now)
+                )
+
+            # The trail of what the account did is kept, but no longer says
+            # whose email it was.
+            await self.session.execute(
+                sa_update(AuditLog)
+                .where(AuditLog.actor_id == str(user.id))  # type: ignore[arg-type]
+                .values(actor_email=None)
             )
 
             # Soft-delete the record (token already bumped above).
             await self.user_repository.delete(user.id)
 
+        await self._purge_stored_objects(files)
+
         await self.audit_repository.log_user_action_safe(
             action=AuditAction.ACCOUNT_DELETION,
             user_id=user.id,
             tenant_id=tenant_id,
-            email=user.email,
+            email=None,
             resource_type="user",
             resource_id=str(user.id),
         )
 
         logger.info("account_self_deleted", user_id=str(user.id))
+
+    async def _purge_stored_objects(self, files: list[File]) -> None:
+        """Remove deleted files' bytes from storage, one failure at a time.
+
+        Runs after the rows are gone from every read, so a storage outage
+        leaves an orphaned object to find in the log rather than an account
+        that cannot be deleted.
+
+        Args:
+            files: The file rows whose objects should stop existing.
+        """
+        for file in files:
+            keys = [file.thumbnail_object_key, file.object_key]
+            for key in [key for key in keys if key]:
+                try:
+                    await delete_object(object_key=key, bucket=file.bucket)
+                except Exception:
+                    logger.warning(
+                        "deleted_account_object_left_behind",
+                        file_id=str(file.id),
+                        exc_info=True,
+                    )
 
     async def revoke_all_sessions(
         self,
