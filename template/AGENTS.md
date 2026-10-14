@@ -79,9 +79,25 @@ app/
 
 migrations/         Alembic versions
 tests/              pytest suite (api/, services/, repositories/, core/, models/)
-scripts/            setup.sh, lint.sh, backup.sh, assemble.py
+scripts/            setup.sh, lint.sh, backup.sh, offsite_backup.sh, restore.sh, assemble.py
+deploy/             Off-box backup configuration and its systemd timer
 templates/email/    Jinja2 email templates
 ```
+
+## Backups
+
+`backup.sh` dumps the database to `backups/`, on the same disk as the
+database, so on its own it survives a bad migration and nothing else.
+`offsite_backup.sh` takes a fresh dump and has restic push it, with the
+storage volume when there is one, encrypted to a repository off the
+machine, configured in `deploy/backup.env`. `deploy/backup.timer` runs it
+nightly. `restore.sh` pulls a snapshot back and loads it into a new
+database beside the live one, never over it.
+
+Rehearse the restore on a throwaway machine on a schedule. A backup that
+has never been restored is a hope, not a backup. Keep a copy of
+`RESTIC_PASSWORD` off the machine: without it the repository is
+unreadable.
 
 ## Key commands
 

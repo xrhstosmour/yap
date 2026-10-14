@@ -67,3 +67,12 @@ celerybeat-schedule
 # ciphertext and every password hash.
 backups/
 *.sql.gz
+
+# The off-box repository's address and encryption key, and the SSH key
+# for reaching it, used by scripts/offsite_backup.sh. Only the example is
+# committed.
+deploy/backup.env
+deploy/ssh/
+
+# Snapshots pulled back by scripts/restore.sh, the same data as backups/.
+restore/

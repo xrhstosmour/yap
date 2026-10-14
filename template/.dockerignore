@@ -8,6 +8,10 @@ __pycache__
 .gitignore
 .gitattributes
 .env
+deploy/backup.env
+deploy/ssh
+backups
+restore
 .venv
 venv
 *.egg-info
