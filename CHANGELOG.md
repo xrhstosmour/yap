@@ -55,6 +55,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Let `backup.sh` dump a database on any `POSTGRESQL_PORT`, the server listens on it inside the container too and the dump went to 5432, and fall back to a local `pg_dump` when the container is down rather than failing on it
 - Erase more on `DELETE /users/me`: clear the username and avatar, delete every file the account uploaded along with its stored bytes, drop the email from the account's audit entries, and stop writing it into the deletion entry, all of which outlived the account before
 - Pin Python 3.14 in `.python-version`, `requires-python = ">=3.14"` let `uv` pick 3.15 once it shipped, and `psycopg-binary` has no 3.15 wheel yet, so `uv sync` failed on every fresh runner while the Docker image stayed on 3.14
 - Match any of a list of values in `BaseRepository.list(filters=...)` with `IN` instead of `==`, a list was compared as one value, which Postgres rejects outright with `cannot cast type uuid[] to uuid` rather than returning nothing, so filtering by a set of ids failed the query and every caller that needed one had to bypass the method
