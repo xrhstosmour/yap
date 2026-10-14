@@ -1,0 +1,88 @@
+#cloud-config
+# First-boot setup for a fresh Debian server: one key-only `deploy` user,
+# no root or password login over SSH, a firewall open to SSH and HTTP(S)
+# only, fail2ban on SSH, security updates applied unattended, and Docker.
+# Paste it as the provider's user data when creating the machine, after
+# replacing the key below with your own public key.
+#
+# Docker publishes ports through its own iptables rules, past ufw. The
+# compose files publish the infrastructure on 127.0.0.1 only, keep any
+# port added later on 127.0.0.1 too unless it is meant to be public.
+
+users:
+  - name: deploy
+    groups: [sudo]
+    shell: /bin/bash
+    lock_passwd: true
+    # No password exists to type, so sudo cannot ask for one.
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    ssh_authorized_keys:
+      - replace-with-your-public-key
+
+disable_root: true
+ssh_pwauth: false
+
+package_update: true
+package_upgrade: true
+packages:
+  - ca-certificates
+  - curl
+  - git
+  - ufw
+  - fail2ban
+  - python3-systemd
+  - unattended-upgrades
+  - apt-listchanges
+
+write_files:
+  - path: /etc/ssh/sshd_config.d/10-hardening.conf
+    permissions: "0644"
+    content: |
+      PermitRootLogin no
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      AuthenticationMethods publickey
+      AllowUsers deploy
+      MaxAuthTries 3
+      X11Forwarding no
+
+  # Debian's default policy installs from the security archive only.
+  - path: /etc/apt/apt.conf.d/20auto-upgrades
+    permissions: "0644"
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      APT::Periodic::AutocleanInterval "7";
+
+  # Debian logs SSH to the journal, not to auth.log.
+  - path: /etc/fail2ban/jail.d/sshd.local
+    permissions: "0644"
+    content: |
+      [sshd]
+      enabled = true
+      backend = systemd
+      maxretry = 5
+      findtime = 10m
+      bantime = 1h
+
+runcmd:
+  - ufw default deny incoming
+  - ufw default allow outgoing
+  - ufw allow OpenSSH
+  - ufw allow 80/tcp
+  - ufw allow 443/tcp
+  - ufw allow 443/udp
+  - ufw --force enable
+  - systemctl enable --now fail2ban
+  - systemctl restart fail2ban
+  - systemctl restart ssh
+  # Docker's own repository, the Debian package lags behind and has no
+  # compose plugin.
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+  - chmod a+r /etc/apt/keyrings/docker.asc
+  - sh -c 'echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list'
+  - apt-get update
+  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  - usermod -aG docker deploy
+  - install -d -o deploy -g deploy /opt/{{ project_slug }}
