@@ -3,12 +3,11 @@ name: Backend CI
 permissions:
   contents: read
 
+# Pull requests only. `main` takes nothing but merges of pull requests
+# rebased onto it, so a run on the merge would repeat one that passed.
 on:
-  push:
-    branches: [main]
-{% if nested %}
-    paths: ['{{ _folder_name }}/**', '.github/workflows/**']
-{% endif %}
+  workflow_dispatch:
+
   pull_request:
     branches: [main]
 {% if nested %}
