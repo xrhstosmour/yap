@@ -73,3 +73,6 @@ backups/
 # committed.
 deploy/backup.env
 deploy/ssh/
+
+# Snapshots pulled back by scripts/restore.sh, the same data as backups/.
+restore/

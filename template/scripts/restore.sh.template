@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ─── Restore from the off-box repository ─────────────────────────────────────
+# The other half of `offsite_backup.sh`, and the half that proves the first
+# one works. An untested backup is not a backup, so run this regularly
+# against a throwaway machine, not only on the day it is needed.
+#
+# Usage: ./scripts/restore.sh [--snapshot ID] [--database NAME]
+#
+# Pulls a snapshot, `latest` unless told otherwise, into ./restore/, then
+# loads its newest dump into a NEW database, `<database>_restored` unless
+# named. It refuses a database that already exists, so it can never write
+# over the live one: switching the app to the restored database, by
+# changing POSTGRESQL_DATABASE, is a deliberate step of its own.
+{%- if include_object_storage %}
+#
+# The uploaded files land in ./restore/storage/. Copying them into an empty
+# storage volume is printed at the end rather than done, for the same reason.
+{%- endif %}
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'
+info()  { echo -e "${GREEN}[RESTORE]${NC} $(date '+%Y-%m-%d %H:%M:%S') $*"; }
+error() { echo -e "${RED}[RESTORE]${NC} $(date '+%Y-%m-%d %H:%M:%S') $*"; exit 1; }
+
+PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+CONFIGURATION="$PROJECT_DIR/deploy/backup.env"
+RESTIC_IMAGE="restic/restic:0.19.1"
+TARGET="$PROJECT_DIR/restore"
+
+SNAPSHOT="latest"
+DATABASE=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --snapshot) SNAPSHOT="$2"; shift 2 ;;
+        --database) DATABASE="$2"; shift 2 ;;
+        *) error "Unknown argument: $1" ;;
+    esac
+done
+
+if [ ! -f "$CONFIGURATION" ]; then
+    error "deploy/backup.env not found. Copy deploy/backup.env.example and fill it in."
+fi
+
+read_env_scalar() {
+    local key="$1"
+    local file="$2"
+    local fallback="${3:-}"
+    local value
+    value=$(grep "^${key}=" "$file" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' || true)
+    if [ -n "$value" ]; then
+        echo "$value"
+    else
+        echo "$fallback"
+    fi
+}
+
+ENVIRONMENT_FILE="$PROJECT_DIR/.env"
+if [ ! -f "$ENVIRONMENT_FILE" ]; then
+    ENVIRONMENT_FILE=/dev/null
+fi
+DATABASE_USER="${POSTGRESQL_USER:-$(read_env_scalar POSTGRESQL_USER "$ENVIRONMENT_FILE" postgresql)}"
+DATABASE_NAME="${POSTGRESQL_DATABASE:-$(read_env_scalar POSTGRESQL_DATABASE "$ENVIRONMENT_FILE" postgresql)}"
+DATABASE_PORT="${POSTGRESQL_PORT:-$(read_env_scalar POSTGRESQL_PORT "$ENVIRONMENT_FILE" 5432)}"
+DATABASE="${DATABASE:-${DATABASE_NAME}_restored}"
+
+if [ -e "$TARGET" ]; then
+    error "$TARGET already exists. Move it aside first, so an earlier restore is never mixed into this one."
+fi
+mkdir -p "$TARGET"
+
+MOUNTS=(-v "$TARGET:/restore")
+if [ -d "$PROJECT_DIR/deploy/ssh" ]; then
+    MOUNTS+=(-v "$PROJECT_DIR/deploy/ssh:/root/.ssh:ro")
+fi
+
+info "Restoring snapshot $SNAPSHOT into $TARGET"
+docker run --rm \
+    --env-file "$CONFIGURATION" \
+    "${MOUNTS[@]}" \
+    "$RESTIC_IMAGE" restore "$SNAPSHOT" --target /restore
+
+DUMP=$(find "$TARGET/backup/database" -name "${DATABASE_NAME}_*.sql.gz" | sort | tail -1)
+if [ -z "$DUMP" ]; then
+    error "No dump of $DATABASE_NAME in the snapshot."
+fi
+
+# The server listens on POSTGRESQL_PORT inside the container too.
+POSTGRESQL=(docker compose -f "$PROJECT_DIR/docker-compose.yml" exec -T -e PGPORT="$DATABASE_PORT" postgresql)
+
+# `createdb` fails on a name that exists, which is the guard against
+# loading into the live database.
+info "Creating database $DATABASE"
+"${POSTGRESQL[@]}" createdb -U "$DATABASE_USER" "$DATABASE"
+
+info "Loading $(basename "$DUMP") into $DATABASE"
+gunzip -c "$DUMP" | "${POSTGRESQL[@]}" \
+    psql -U "$DATABASE_USER" -d "$DATABASE" -v ON_ERROR_STOP=1 --quiet >/dev/null
+
+TABLES=$("${POSTGRESQL[@]}" psql -U "$DATABASE_USER" -d "$DATABASE" -tAc \
+    "select count(*) from information_schema.tables where table_schema = 'public'")
+info "Loaded $TABLES tables into $DATABASE"
+{%- if include_object_storage %}
+
+FILES=$(find "$TARGET/backup/storage" -type f 2>/dev/null | wc -l | tr -d ' ')
+info "Restored $FILES storage files into $TARGET/backup/storage"
+info "To put them in an empty storage volume, with the storage server stopped:"
+info "  docker run --rm -v \"$TARGET/backup/storage:/from:ro\" -v {{ project_slug }}-seaweedfs:/to alpine cp -a /from/. /to/"
+{%- endif %}
