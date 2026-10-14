@@ -10,6 +10,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Add multi-tenancy with automatic tenant filtering and a `Tenant` model
+- Add `deploy/cloud-init.yaml`, first-boot hardening for a Debian server: a key-only `deploy` user, no root or password SSH, `ufw` open to SSH and HTTP(S), `fail2ban` on SSH, unattended security updates, and Docker
 - Add TOTP two-factor authentication with single-use recovery codes
 - Add WebAuthn credential registration and assertion
 - Add Google OAuth sign-in and an `OAuthAccount` model
