@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ─── Off-box backup ──────────────────────────────────────────────────────────
+# Encrypted copies, somewhere other than this machine, of what it cannot
+# rebuild: the database{% if include_object_storage %} and the uploaded files{% endif %}. A dump on the same disk as the
+# database is lost with that disk, so `backup.sh` alone is not a backup.
+#
+# Takes a fresh dump through `backup.sh`, then has restic push the dump
+# directory{% if include_object_storage %} and the storage volume{% endif %} to the repository named in
+# `deploy/backup.env`. restic runs from its own image, so the host needs
+# nothing beyond Docker, and everything it stores is encrypted with a key
+# that never has to live on this box.
+#
+# Usage: ./scripts/offsite_backup.sh
+# Configuration: deploy/backup.env, copied from deploy/backup.env.example.
+# Schedule: deploy/backup.service and deploy/backup.timer.
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'
+info()  { echo -e "${GREEN}[OFFSITE]${NC} $(date '+%Y-%m-%d %H:%M:%S') $*"; }
+error() { echo -e "${RED}[OFFSITE]${NC} $(date '+%Y-%m-%d %H:%M:%S') $*"; exit 1; }
+
+PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+CONFIGURATION="$PROJECT_DIR/deploy/backup.env"
+
+# Pinned, so a backup that worked last night is not run tonight by a
+# release nobody read.
+RESTIC_IMAGE="restic/restic:0.19.1"
+
+if [ ! -f "$CONFIGURATION" ]; then
+    error "deploy/backup.env not found. Copy deploy/backup.env.example and fill it in."
+fi
+
+# The same lookup as `backup.sh`, so both scripts agree on where the dumps are.
+read_env_scalar() {
+    local key="$1"
+    local file="$2"
+    local fallback="${3:-}"
+    local value
+    value=$(grep "^${key}=" "$file" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' || true)
+    if [ -n "$value" ]; then
+        echo "$value"
+    else
+        echo "$fallback"
+    fi
+}
+
+ENVIRONMENT_FILE="$PROJECT_DIR/.env"
+if [ ! -f "$ENVIRONMENT_FILE" ]; then
+    ENVIRONMENT_FILE=/dev/null
+fi
+BACKUP_DIRECTORY="${BACKUP_DIRECTORY:-$(read_env_scalar BACKUP_DIRECTORY "$ENVIRONMENT_FILE" "$PROJECT_DIR/backups")}"
+
+MOUNTS=(-v "$BACKUP_DIRECTORY:/backup/database:ro")
+{%- if include_object_storage %}
+# Read-only, and read while the storage server runs. Uploaded files are
+# written once and never edited, so a copy taken mid-write misses at most
+# the file being written, which the next night picks up.
+MOUNTS+=(-v "{{ project_slug }}-seaweedfs:/backup/storage:ro")
+{%- endif %}
+
+# An SFTP repository needs a key and a known host. Kept beside the
+# configuration rather than read from the operator's own `~/.ssh`.
+if [ -d "$PROJECT_DIR/deploy/ssh" ]; then
+    MOUNTS+=(-v "$PROJECT_DIR/deploy/ssh:/root/.ssh:ro")
+fi
+
+restic() {
+    docker run --rm \
+        --env-file "$CONFIGURATION" \
+        --hostname "{{ project_slug }}" \
+        "${MOUNTS[@]}" \
+        "$RESTIC_IMAGE" "$@"
+}
+
+info "Taking a fresh dump"
+"$PROJECT_DIR/scripts/backup.sh"
+
+# `cat config` fails only on a repository that does not exist yet, so the
+# first run creates it and every later run leaves it alone.
+if ! restic cat config >/dev/null 2>&1; then
+    info "Initialising the repository"
+    restic init
+fi
+
+info "Sending to the repository"
+restic backup --tag nightly /backup
+
+info "Forgetting old snapshots"
+restic forget --tag nightly --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune
+
+# Structure only, which is cheap. Reading the data back is what
+# `restore.sh` rehearses.
+info "Checking the repository"
+restic check
+
+info "Done"

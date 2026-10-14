@@ -1,0 +1,13 @@
+# Nightly, at a quiet hour. Persistent, so a night the machine was off is
+# caught up at the next boot rather than skipped.
+
+[Unit]
+Description=Nightly off-box backup
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=15m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

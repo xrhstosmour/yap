@@ -34,6 +34,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 - Add pagination headers and a shared pagination helper
 - Add a multi-database engine option and a Copier question for extra databases
 - Add `scripts/synchronize.sh` for pulling template updates into generated projects
+- Add `scripts/offsite_backup.sh`, encrypted off-box backups of the database and the storage volume through restic, with a nightly systemd timer in `deploy/`
 - Add nested-repository support, moving CI into the parent repo's workflows
 - Add compound and performance indexes across the schema
 - Add `AGENTS.md` documenting the template's conventions
