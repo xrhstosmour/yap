@@ -80,9 +80,27 @@ app/
 migrations/         Alembic versions
 tests/              pytest suite (api/, services/, repositories/, core/, models/)
 scripts/            setup.sh, lint.sh, backup.sh, offsite_backup.sh, restore.sh, assemble.py
-deploy/             Off-box backup configuration and its systemd timer
+deploy/             First-boot server setup, off-box backup configuration and its timer
 templates/email/    Jinja2 email templates
 ```
+
+## Hosting
+
+`deploy/cloud-init.yaml` sets up a fresh Debian server on first boot:
+a `deploy` user that logs in with a key only, no root or password SSH,
+`ufw` open to SSH, 80 and 443 only, `fail2ban` on SSH, unattended
+security updates, and Docker. Put your public key in it and paste it as
+the provider's user data when creating the machine. Then, as `deploy`,
+clone the project into `/opt/<project>`, write `.env`, and start the
+stack.
+
+Docker publishes ports past `ufw`. The compose files publish the
+infrastructure on `127.0.0.1`, keep any port added later there too
+unless it is meant to be public.
+
+To run the nightly off-box backup, write `deploy/backup.env`, then link
+`deploy/backup.service` and `deploy/backup.timer` into
+`/etc/systemd/system/` and enable the timer.
 
 ## Backups
 
