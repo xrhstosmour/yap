@@ -236,10 +236,14 @@ class TwoFactorEnrollResponse(BaseSchema):
 
     Attributes:
         qr_data_url: Base64-encoded PNG QR code for authenticator app setup.
+        secret: The same key as base32 text, for typing into an
+            authenticator on the phone showing the QR, which cannot scan
+            its own screen.
         recovery_codes: One-time backup codes (shown once, store securely).
     """
 
     qr_data_url: str = Field(description="Data URL of the QR code PNG image")
+    secret: str = Field(description="The base32 key the QR code encodes")
     recovery_codes: list[str] = Field(
         description="One-time recovery codes; store these in a safe place"
     )

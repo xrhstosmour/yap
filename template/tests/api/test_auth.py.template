@@ -552,6 +552,33 @@ class TestTwoFactorAuth:
     """Tests for 2FA endpoints."""
 
     @pytest.mark.usefixtures("override_get_async_session")
+    async def test_enroll_returns_the_key_as_text(
+        self,
+        client: AsyncClient,
+        session: AsyncSession,
+    ) -> None:
+        """Enrolment should return the key the QR encodes, as base32 text."""
+        from app.core.encryption import decrypt
+
+        auth_service = AuthService(cast(AsyncSession, session))
+        user = await auth_service.register(
+            RegisterRequest(email="2fa-enroll@{{ project_slug }}.com", password="password123")
+        )
+
+        response = await client.post(
+            "/api/v1/auth/2fa/enroll",
+            headers={"Authorization": f"Bearer {create_access_token(subject=user.id)}"},
+        )
+
+        assert response.status_code == 200
+        secret = response.json()["secret"]
+        with system_context():
+            stored = await auth_service.user_repository.get(user.id)
+        assert stored is not None
+        assert stored.totp_secret_encrypted is not None
+        assert decrypt(stored.totp_secret_encrypted) == secret
+
+    @pytest.mark.usefixtures("override_get_async_session")
     async def test_login_issues_challenge_when_2fa_enabled(
         self,
         client: AsyncClient,
