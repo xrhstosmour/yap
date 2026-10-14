@@ -76,11 +76,15 @@ BACKUP_FILE="$BACKUP_DIRECTORY/${DATABASE_NAME}_${TIMESTAMP}.sql.gz"
 info "Starting backup of $DATABASE_NAME from $DATABASE_HOST:$DATABASE_PORT"
 
 # ─── Run pg_dump ─────────────────────────────────────────────────────────────
-if command -v docker &>/dev/null && docker compose ps --quiet postgresql &>/dev/null 2>&1; then
-    # Use docker exec to run pg_dump inside the container
+# `ps --quiet` succeeds with no output when the container is down, so test
+# for a container ID, not the exit code. The server listens on
+# POSTGRESQL_PORT inside the container too, hence `-p`.
+if command -v docker &>/dev/null \
+    && [ -n "$(docker compose -f "$PROJECT_DIR/docker-compose.yml" ps --quiet postgresql 2>/dev/null)" ]; then
     info "Running pg_dump via Docker..."
     docker compose -f "$PROJECT_DIR/docker-compose.yml" exec -T postgresql \
-        pg_dump -U "$DATABASE_USER" -d "$DATABASE_NAME" --no-owner --no-acl | gzip > "$BACKUP_FILE"
+        pg_dump -p "$DATABASE_PORT" -U "$DATABASE_USER" -d "$DATABASE_NAME" --no-owner --no-acl \
+        | gzip > "$BACKUP_FILE"
 else
     # Use local pg_dump
     if command -v pg_dump &>/dev/null; then
