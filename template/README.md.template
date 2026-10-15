@@ -10,6 +10,7 @@
 - **API Keys**: Scoped programmatic access
 - **Multi-tenancy**: Tenant isolation with full CRUD (admin), system tenant fallback
 - **Administration Surface**: `/admin` answers only to `ADMIN_ALLOWED_NETWORKS`, comma separated, private ranges and `Tailscale` by default, and the rest of the internet gets a 404. Every `X-Forwarded-For` address must be allowed too, so a `FORWARDED_ALLOW_IPS` that misses the proxy shuts the surface instead of opening it
+- **Administration Sign-in**: `/admin` asks for the 2FA code, and outside `local` refuses a superuser who has not turned 2FA on
 - **TOTP 2FA**: Time-based one-time passwords with encrypted secrets, recovery codes, rate limiting, and replay prevention
 - **Email Verification**: Redis-backed single-use tokens (24h TTL)
 - **Password Reset**: Redis-backed single-use tokens (1h TTL), invalidates all sessions on reset

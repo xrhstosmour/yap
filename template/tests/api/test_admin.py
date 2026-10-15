@@ -203,6 +203,47 @@ class TestSecondFactor:
         assert client.cookies.get(SESSION_COOKIE) is None
 
     @pytest.mark.anyio
+    async def test_a_deployment_refuses_a_password_alone(
+        self, client: AsyncClient, session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Outside a laptop, a superuser without 2FA is told to turn it on."""
+        from app.core.settings import settings
+
+        monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+        await _account(session, "admin-2fa-none@example.com", "admin-2fa-none")
+
+        response = await client.post(
+            "/admin/login",
+            data={"email": "admin-2fa-none@example.com", "password": PASSWORD},
+        )
+
+        assert response.status_code == 403
+        assert "two-factor" in response.text
+        assert client.cookies.get(SESSION_COOKIE) is None
+
+    @pytest.mark.anyio
+    async def test_a_deployment_still_asks_an_enrolled_superuser(
+        self,
+        client: AsyncClient,
+        session,
+        second_factor: dict[str, Any],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The requirement does not stand in the way of the code page."""
+        from app.core.settings import settings
+
+        monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+        await _enrolled(session, "admin-2fa-prod@example.com", "admin-2fa-prod")
+
+        response = await client.post(
+            "/admin/login",
+            data={"email": "admin-2fa-prod@example.com", "password": PASSWORD},
+        )
+
+        assert response.status_code == 200
+        assert 'name="code"' in response.text
+
+    @pytest.mark.anyio
     async def test_the_right_code_opens_a_session(
         self, client: AsyncClient, session, second_factor: dict[str, Any]
     ) -> None:

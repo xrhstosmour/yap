@@ -28,6 +28,7 @@ from app.admin.session import open_session
 from app.admin.session import verify_csrf
 from app.core.logging import get_logger
 from app.core.rate_limit import check_auth_rate_limit
+from app.core.settings import settings
 from app.core.tenant import system_context
 from app.dependencies import SessionDependency
 from app.models.user import User
@@ -47,6 +48,11 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 #: The one answer to every failed sign-in, see `sign_in`.
 REFUSAL = "Those details do not sign in here."
+
+#: What a superuser without a second factor is told, see `sign_in`.
+SECOND_FACTOR_REQUIRED = (
+    "Turn on two-factor authentication for this account, then sign in here."
+)
 
 #: How many accounts one page shows. Enough to scan, few enough that the
 #: page renders in one go on a slow connection.
@@ -114,6 +120,17 @@ async def sign_in(
             request,
             "second_factor.html",
             {"challenge_token": challenge},
+        )
+    # Required anywhere but a laptop: a password alone is one phishing
+    # email away from the most privileged session there is. Said plainly,
+    # because only the right password for a superuser gets this far.
+    if settings.ENVIRONMENT != "local":
+        logger.warning("admin_sign_in_without_second_factor", user_id=str(user.id))
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            {"failure": SECOND_FACTOR_REQUIRED},
+            status_code=status.HTTP_403_FORBIDDEN,
         )
     return _signed_in(user)
 
