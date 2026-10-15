@@ -139,7 +139,7 @@ class WebAuthnService:
             credential=reg_cred,
             expected_challenge=expected_challenge,
             expected_rp_id=settings.WEBAUTHN_RP_ID,
-            expected_origin=settings.FRONTEND_HOST,
+            expected_origin=settings.webauthn_origins,
             require_user_verification=True,
         )
 
@@ -275,7 +275,7 @@ class WebAuthnService:
             credential=auth_cred,
             expected_challenge=expected_challenge,
             expected_rp_id=settings.WEBAUTHN_RP_ID,
-            expected_origin=settings.FRONTEND_HOST,
+            expected_origin=settings.webauthn_origins,
             credential_public_key=credential_public_key,
             credential_current_sign_count=stored_cred.sign_count,
             require_user_verification=True,

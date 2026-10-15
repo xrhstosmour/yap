@@ -1,6 +1,11 @@
 """Unit tests for `Settings` module."""
 
+from typing import TYPE_CHECKING
+
 import pytest
+
+if TYPE_CHECKING:
+    from app.core.settings import Settings
 
 
 class TestSettingsValidation:
@@ -234,6 +239,47 @@ class TestSettingsValidationProduction:
                 ENVIRONMENT="production",
                 SECRET_KEY="your-secret-key-here",
             )
+
+
+class TestAppAssociation:
+    """Tests for the native app settings and the passkey origins they add."""
+
+    @staticmethod
+    def _settings(**values: object) -> "Settings":
+        from app.core.settings import Settings
+
+        return Settings(
+            _env_file=None,
+            ENVIRONMENT="local",
+            FRONTEND_HOST="https://app.example.com",
+            WEBAUTHN_RP_ID="example.com",
+            SECRET_KEY="test-key",
+            POSTGRESQL_PASSWORD="test",
+            FIRST_SUPERUSER_PASSWORD="test",
+            RABBITMQ_PASSWORD="test",
+            CRYPTO_KEY="dGVzdC1rZXktMzItYnl0ZXMtbG9uZw==",
+            **values,
+        )
+
+    def test_the_android_app_is_a_passkey_origin(self) -> None:
+        """Android presents its signing certificate's hash, not a URL."""
+        fingerprint = ":".join(f"{byte:02x}" for byte in range(32))
+
+        configured = self._settings(ANDROID_CERT_FINGERPRINTS=[fingerprint])
+
+        assert configured.ANDROID_CERT_FINGERPRINTS == [fingerprint.upper()]
+        assert configured.webauthn_origins == [
+            "https://app.example.com",
+            "https://example.com",
+            "android:apk-key-hash:AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        ]
+
+    def test_a_fingerprint_that_is_not_sha256_is_refused(self) -> None:
+        """A SHA-1 fingerprint, what `keytool` also prints, is the usual slip."""
+        import pydantic
+
+        with pytest.raises(pydantic.ValidationError):
+            self._settings(ANDROID_CERT_FINGERPRINTS=[":".join(["AB"] * 20)])
 
 
 class TestParseCors:

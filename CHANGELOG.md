@@ -9,6 +9,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Serve `/.well-known/apple-app-site-association` and `assetlinks.json` from `APPLE_APP_IDS`, `ANDROID_APP_PACKAGE` and `ANDROID_CERT_FINGERPRINTS`, so the native apps can use the domain's passkeys
 - Answer `/admin` only to `ADMIN_ALLOWED_NETWORKS`, private ranges by default, `Tailscale` included, so the open internet gets the same 404 as an unknown path
 - Add multi-tenancy with automatic tenant filtering and a `Tenant` model
 - Add `deploy/cloud-init.yaml`, first-boot hardening for a Debian server: a key-only `deploy` user, no root or password SSH, `ufw` open to SSH and HTTP(S), `fail2ban` on SSH, unattended security updates, and Docker
@@ -136,6 +137,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Accept passkeys from the native apps, `WebAuthn` only accepted `FRONTEND_HOST` as the origin, so a passkey made in the `Android` app, which presents its signing certificate's hash instead, always failed verification
 - Check every `X-Forwarded-For` address against `ADMIN_ALLOWED_NETWORKS` too, a `FORWARDED_ALLOW_IPS` that missed the proxy made every visitor look like the proxy's private address and opened `/admin` to the internet
 - Refuse `/admin` to a superuser without 2FA outside `local`, a password alone opened the most privileged session there is
 - Give `/admin` sessions their own token type, checked against `token_version` and revoked on sign-out, the cookie carried an ordinary access token that the API accepted as a bearer for two hours, that outlived a password change, and that a copy kept working after signing out

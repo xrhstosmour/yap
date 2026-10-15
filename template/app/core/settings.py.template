@@ -6,6 +6,8 @@ Settings are validated at startup to ensure required secrets are configured.
 
 from __future__ import annotations
 
+import base64
+import re
 import warnings
 from pathlib import Path
 from typing import Annotated
@@ -23,6 +25,7 @@ from pydantic import HttpUrl
 from pydantic import IPvAnyNetwork
 from pydantic import PostgresDsn
 from pydantic import computed_field
+from pydantic import field_validator
 from pydantic import model_validator
 from pydantic_settings import BaseSettings
 from pydantic_settings import NoDecode
@@ -377,6 +380,45 @@ class Settings(BaseSettings):
     WEBAUTHN_RP_ID: str = "localhost"
     WEBAUTHN_RP_NAME: str = "{{ project_name }}"
     WEBAUTHN_CHALLENGE_TTL_SECONDS: int = 300
+
+    # The native apps allowed to use this domain's passkeys, comma
+    # separated. iOS: `<team id>.<bundle id>`. Android: the package and the
+    # SHA-256 fingerprints of the certificates that sign it, `AB:CD:...`.
+    # Empty serves no association file, and passkeys work on the web only.
+    APPLE_APP_IDS: Annotated[list[str], NoDecode, BeforeValidator(parse_cors)] = []
+    ANDROID_APP_PACKAGE: str = ""
+    ANDROID_CERT_FINGERPRINTS: Annotated[
+        list[str], NoDecode, BeforeValidator(parse_cors)
+    ] = []
+
+    @field_validator("ANDROID_CERT_FINGERPRINTS")
+    @classmethod
+    def _fingerprints_are_sha256(cls, fingerprints: list[str]) -> list[str]:
+        """Upper case, and refused unless each is 32 colon separated bytes."""
+        normalized = [fingerprint.strip().upper() for fingerprint in fingerprints]
+        for fingerprint in normalized:
+            if not re.fullmatch(r"[0-9A-F]{2}(:[0-9A-F]{2}){31}", fingerprint):
+                raise ValueError(
+                    "ANDROID_CERT_FINGERPRINTS takes SHA-256 fingerprints, "
+                    "32 bytes as AB:CD:..."
+                )
+        return normalized
+
+    @computed_field  # type: ignore[prop-decorator]  # pyright: ignore[reportDecoratorUsage]
+    @property
+    def webauthn_origins(self) -> list[str]:
+        """Every origin a passkey ceremony may come from.
+
+        The web frontend, the relying party's own domain, which is what an
+        iOS app presents, and one `android:apk-key-hash:` origin per signing
+        certificate, which is what an Android app presents instead.
+        """
+        origins = [self.FRONTEND_HOST.rstrip("/"), f"https://{self.WEBAUTHN_RP_ID}"]
+        for fingerprint in self.ANDROID_CERT_FINGERPRINTS:
+            digest = bytes.fromhex(fingerprint.replace(":", ""))
+            encoded = base64.urlsafe_b64encode(digest).decode().rstrip("=")
+            origins.append(f"android:apk-key-hash:{encoded}")
+        return list(dict.fromkeys(origins))
 
     #     # File storage (S3-compatible).
     STORAGE_BACKEND: str = "file"
