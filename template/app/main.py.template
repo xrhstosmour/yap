@@ -37,6 +37,7 @@ from app.api.request_id import RequestIDMiddleware
 from app.api.v1.router import router as api_v1_router
 from app.api.v1.websocket import start_broadcast_relay
 from app.api.v1.websocket import stop_broadcast_relay
+from app.api.well_known import router as well_known_router
 from app.core.cache import close_redis
 from app.core.cache import init_redis
 from app.core.connection_budget import current_demand
@@ -386,6 +387,9 @@ def create_app() -> FastAPI:
 
     # Include API router.
     app.include_router(api_v1_router)
+
+    # At the domain's root, where the platforms look for them.
+    app.include_router(well_known_router)
 
     # Mounted beside the API rather than deployed separately: it reads the
     # same models through the same session.

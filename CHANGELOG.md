@@ -9,6 +9,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Serve `/.well-known/apple-app-site-association` and `assetlinks.json` from `APPLE_APP_IDS`, `ANDROID_APP_PACKAGE` and `ANDROID_CERT_FINGERPRINTS`, so the native apps can use the domain's passkeys
 - Answer `/admin` only to `ADMIN_ALLOWED_NETWORKS`, private ranges by default, `Tailscale` included, so the open internet gets the same 404 as an unknown path
 - Add multi-tenancy with automatic tenant filtering and a `Tenant` model
 - Add `deploy/cloud-init.yaml`, first-boot hardening for a Debian server: a key-only `deploy` user, no root or password SSH, `ufw` open to SSH and HTTP(S), `fail2ban` on SSH, unattended security updates, and Docker
