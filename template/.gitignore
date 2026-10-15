@@ -15,6 +15,7 @@ dist/
 # Environments.
 .env
 .env.local
+.env.production
 .env.*.local
 .venv/
 venv/
