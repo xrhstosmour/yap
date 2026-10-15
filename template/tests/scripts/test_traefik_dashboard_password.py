@@ -89,6 +89,24 @@ class TestThePasswordIsPersisted:
 
         assert f"{KEY}=generated" in (tmp_path / ".env.example").read_text()
 
+    def test_it_stays_out_of_the_example_once_env_exists(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`.env.example` is committed, a working password there leaks.
+
+        Args:
+            tmp_path: Per-test working directory.
+            monkeypatch: Fixture used to change directory.
+        """
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".env").write_text("SECRET_KEY=x\n")
+        (tmp_path / ".env.example").write_text(f"{KEY}=your-password\n")
+
+        _assemble().store_traefik_dashboard_password("generated")
+
+        assert f"{KEY}=generated" in (tmp_path / ".env").read_text()
+        assert "generated" not in (tmp_path / ".env.example").read_text()
+
 
 class TestThePasswordIsStable:
     """A re-assemble must not silently change the working password."""
