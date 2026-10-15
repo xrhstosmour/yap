@@ -120,6 +120,11 @@ if [ -f "$HTPASSWD" ]; then
     unset password hash
 fi
 
+# Development tools stay on this machine. They are dropped from the
+# server's copy of the stack, so they neither run there nor need settings.
+grep -vE 'containers/(email/mailpit|databases/manage/(pgadmin4|redis_commander))/' \
+    docker-compose.yml > "$STAGING/docker-compose.yml"
+
 info "Checking $TARGET."
 remote "command -v rsync >/dev/null && docker compose version >/dev/null" ||
     error "$TARGET needs rsync, and Docker with Compose for its login user."
@@ -136,8 +141,9 @@ rsync -az --delete --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r \
     --exclude='htmlcov/' --exclude='.coverage' --exclude='node_modules/' \
     --exclude='.env' --exclude='.env.*' --exclude='backups/' \
     --exclude='deploy/backup.env' --exclude='deploy/ssh/' \
-    --exclude='acme.json' --exclude='.htpasswd' \
+    --exclude='acme.json' --exclude='.htpasswd' --exclude='/docker-compose.yml' \
     ./ "$TARGET:$REMOTE_DIRECTORY/"
+rsync -az -e "ssh ${SSH_OPTIONS[*]}" --chmod=F644 "$STAGING/docker-compose.yml" "$TARGET:$REMOTE_DIRECTORY/docker-compose.yml"
 
 # The settings readable by the login user only, unlike the rest.
 rsync -az -e "ssh ${SSH_OPTIONS[*]}" --chmod=F600 "$STAGING/.env" "$TARGET:$REMOTE_DIRECTORY/.env"
