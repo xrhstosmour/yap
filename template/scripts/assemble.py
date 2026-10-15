@@ -354,6 +354,7 @@ def store_traefik_dashboard_password(password: str) -> None:
         else:
             lines.append(f"{TRAEFIK_PASSWORD_KEY}={password}")
         Path(path).write_text("\n".join(lines) + "\n")
+        return
 
 
 def main() -> None:
