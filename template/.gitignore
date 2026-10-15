@@ -55,6 +55,9 @@ Thumbs.db
 .htpasswd
 .certificates
 
+# Let's Encrypt account and certificate private keys, written by Traefik.
+acme.json
+
 # Copier.
 # Reconstructed at sync time from .env and project files.
 # Must never be committed because it may contain secrets.

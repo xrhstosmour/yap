@@ -66,6 +66,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Write the generated `Traefik` dashboard password to `.env` only, `assemble.py` also wrote it into the committed `.env.example` whenever `.env` existed
+- Ignore `Traefik`'s `acme.json`, which holds the `Let's Encrypt` private keys
 - Answer HTTPS on an IP address deployed by `scripts/deploy.sh`, which the strict SNI TLS options turned away with 421, and wait for it to report ready like a domain
 - Run the nightly off-box backup as a user unit of the login user from `~/<project>`, where `scripts/deploy.sh` puts the project, so it reaches a rootless `Docker`
 - Run Docker rootless as a `deploy` user without sudo in `deploy/cloud-init.yaml`, with a separate `admin` user for sudo, so breaking out of a container no longer lands in root
