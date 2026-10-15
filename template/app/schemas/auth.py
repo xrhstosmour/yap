@@ -6,6 +6,8 @@ endpoints including login, registration, and token refresh.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from pydantic import EmailStr
 from pydantic import Field
 
@@ -291,6 +293,24 @@ class TwoFactorVerifyResponse(TokenResponse):
     recovery_codes_remaining: int | None = Field(
         default=None,
         description="Unused recovery codes left, after signing in with one",
+    )
+
+
+class TwoFactorStatusResponse(BaseSchema):
+    """Response from GET /auth/2fa/status.
+
+    Attributes:
+        is_enabled: Whether TOTP 2FA is active on the account.
+        enabled_at: When it was turned on, null while it is off.
+        recovery_codes_remaining: Unused recovery codes left, zero while off.
+    """
+
+    is_enabled: bool = Field(description="Whether TOTP 2FA is active")
+    enabled_at: datetime | None = Field(
+        default=None, description="When 2FA was turned on"
+    )
+    recovery_codes_remaining: int = Field(
+        default=0, description="Unused recovery codes left"
     )
 
 

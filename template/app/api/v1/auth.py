@@ -43,6 +43,7 @@ from app.schemas.auth import TokenResponse
 from app.schemas.auth import TwoFactorConfirmRequest
 from app.schemas.auth import TwoFactorDisableRequest
 from app.schemas.auth import TwoFactorEnrollResponse
+from app.schemas.auth import TwoFactorStatusResponse
 from app.schemas.auth import TwoFactorVerifyRequest
 from app.schemas.auth import TwoFactorVerifyResponse
 from app.schemas.auth import WebAuthnLoginBeginRequest
@@ -139,6 +140,34 @@ async def login(
         ) from e
 
     return await service.issue_login_response(user)
+
+
+@router.get(
+    "/2fa/status",
+    response_model=TwoFactorStatusResponse,
+    summary="2FA status",
+    description=(
+        "Whether 2FA is on, since when, and how many recovery codes are left, "
+        "for a security settings screen."
+    ),
+)
+async def two_factor_status(
+    current_user: CurrentUser,
+    session: SessionDependency,
+) -> TwoFactorStatusResponse:
+    """Report the current user's second factor and recovery codes."""
+    from app.services.two_factor_service import TwoFactorAuthService
+
+    if not current_user.is_2fa_enabled:
+        return TwoFactorStatusResponse(is_enabled=False)
+    remaining = await TwoFactorAuthService(session).unused_recovery_code_count(
+        current_user.id
+    )
+    return TwoFactorStatusResponse(
+        is_enabled=True,
+        enabled_at=current_user.totp_confirmed_at,
+        recovery_codes_remaining=remaining,
+    )
 
 
 @router.post(
