@@ -161,13 +161,14 @@ async def two_factor_status(
 
     if not current_user.is_2fa_enabled:
         return TwoFactorStatusResponse(is_enabled=False)
-    remaining = await TwoFactorAuthService(session).unused_recovery_code_count(
-        current_user.id
-    )
+    service = TwoFactorAuthService(session)
     return TwoFactorStatusResponse(
         is_enabled=True,
         enabled_at=current_user.totp_confirmed_at,
-        recovery_codes_remaining=remaining,
+        recovery_codes_remaining=await service.unused_recovery_code_count(
+            current_user.id
+        ),
+        recovery_codes_total=await service.recovery_code_count(current_user.id),
     )
 
 

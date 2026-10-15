@@ -370,6 +370,17 @@ class TwoFactorAuthService:
         )
         return int((await self.session.execute(query)).scalar_one())
 
+    async def recovery_code_count(self, user_id: UUID) -> int:
+        """How many recovery codes the user's current set has, used or not.
+
+        The other half of "7 of 10", so a client never has to assume the
+        size of a set.
+        """
+        query = select(func.count()).where(
+            TotpRecoveryCode.user_id == user_id  # type: ignore[arg-type]
+        )
+        return int((await self.session.execute(query)).scalar_one())
+
     # Management
 
     async def disable(self, user: User, totp_code: str) -> None:

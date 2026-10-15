@@ -789,6 +789,7 @@ class TestTwoFactorStatus:
             "is_enabled": False,
             "enabled_at": None,
             "recovery_codes_remaining": 0,
+            "recovery_codes_total": 0,
         }
 
     @pytest.mark.usefixtures("override_get_async_session")
@@ -829,6 +830,7 @@ class TestTwoFactorStatus:
         assert data["is_enabled"] is True
         assert data["enabled_at"].startswith("2026-03-01")
         assert data["recovery_codes_remaining"] == 1
+        assert data["recovery_codes_total"] == 2
 
 
 class TestMagicLink:
