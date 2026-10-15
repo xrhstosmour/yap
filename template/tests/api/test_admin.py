@@ -386,6 +386,87 @@ class TestReachingThePages:
 
 
 @pytest.mark.usefixtures("override_get_async_session")
+class TestTheSessionToken:
+    """Tests for what the session cookie carries and where it works."""
+
+    @pytest.mark.anyio
+    async def test_the_api_refuses_it_as_a_bearer_token(
+        self, client: AsyncClient, session
+    ) -> None:
+        """It lives two hours, far longer than an API token should."""
+        await _account(session, "admin-bearer@example.com", "admin-bearer")
+        await _sign_in(client, "admin-bearer@example.com")
+        token = client.cookies.get(SESSION_COOKIE)
+
+        response = await client.get(
+            "/api/v1/users/me", headers={"Authorization": f"Bearer {token}"}
+        )
+
+        assert response.status_code == 403
+
+    @pytest.mark.anyio
+    async def test_an_api_token_does_not_open_the_surface(
+        self, client: AsyncClient, session
+    ) -> None:
+        """A token taken from the app is not an administration session."""
+        from app.core.security import create_access_token
+
+        user = await _account(session, "admin-api@example.com", "admin-api")
+        client.cookies.set(
+            SESSION_COOKIE,
+            create_access_token(
+                user.id, additional_claims={"token_version": user.token_version}
+            ),
+            path="/admin",
+        )
+
+        response = await client.get("/admin/users")
+
+        assert response.status_code == 303
+        assert response.headers["location"] == "/admin/login"
+
+    @pytest.mark.anyio
+    async def test_signing_out_everywhere_ends_it(
+        self, client: AsyncClient, session
+    ) -> None:
+        """A changed password moves the version on, and the session ends."""
+        user = await _account(session, "admin-version@example.com", "admin-version")
+        await _sign_in(client, "admin-version@example.com")
+        user.token_version += 1
+        session.add(user)
+        await session.commit()
+
+        response = await client.get("/admin/users")
+
+        assert response.status_code == 303
+        assert response.headers["location"] == "/admin/login"
+
+    @pytest.mark.anyio
+    async def test_signing_out_revokes_it(
+        self, client: AsyncClient, session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A copy of the cookie stops working, not just the deleted one."""
+        from app.core.security import decode_token
+
+        revoked: list[str] = []
+
+        async def _revoke(identifier: str, expires_at: object) -> None:
+            revoked.append(identifier)
+
+        monkeypatch.setattr("app.admin.session.blacklist_token", _revoke)
+        await _account(session, "admin-out@example.com", "admin-out")
+        await _sign_in(client, "admin-out@example.com")
+        issued = decode_token(client.cookies.get(SESSION_COOKIE))["jti"]
+
+        response = await client.post(
+            "/admin/logout", data={"csrf_token": client.cookies.get(CSRF_COOKIE)}
+        )
+
+        assert response.status_code == 303
+        assert revoked == [issued]
+
+
+@pytest.mark.usefixtures("override_get_async_session")
 class TestChangingAnAccount:
     """Tests for POST /admin/users/{id}/activation."""
 
