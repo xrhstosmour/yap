@@ -105,6 +105,15 @@ services:
       context: "."
     container_name: "{{ project_slug }}-celery-worker"
     restart: "unless-stopped"
+    # The image's check asks the API on port 8000, which a worker does not
+    # serve, so it reported unhealthy forever. A ping answered by this
+    # worker proves it is up and connected to the broker.
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.celery_app inspect ping -d celery@$$HOSTNAME --timeout 10 || exit 1"]
+      interval: "60s"
+      timeout: "30s"
+      start_period: "60s"
+      retries: 3
     # Celery's prefork pool defaults to one child process per visible CPU,
     # and a Docker `cpus` quota does not change what `os.cpu_count()`
     # reports, so on a bigger host this would spawn far more workers (each
@@ -146,6 +155,11 @@ services:
       context: "."
     container_name: "{{ project_slug }}-celery-beat"
     restart: "unless-stopped"
+    # The image's check asks the API on port 8000, which beat does not
+    # serve. Beat answers no requests at all, so there is nothing to probe,
+    # Docker restarts it if the process exits.
+    healthcheck:
+      disable: true
 {%- if include_redbeat %}
     command: ["celery", "-A", "app.celery_app", "beat", "-S", "redbeat.RedBeatScheduler", "-l", "info"]
 {%- else %}
