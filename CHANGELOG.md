@@ -9,6 +9,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Export every row of every table pointing at the account, without its credential columns, and fail a test until a new column pointing at the account is classified exported or withheld in `app/core/personal_data.py` or the project's own `personal_data_project.py`
 - Route `/api/` and `/.well-known/` on `APP_DOMAIN` to the app when `Traefik` is included, and nothing else, so `/admin` and `/try` never reach the proxy
 - Serve `/.well-known/apple-app-site-association` and `assetlinks.json` from `APPLE_APP_IDS`, `ANDROID_APP_PACKAGE` and `ANDROID_CERT_FINGERPRINTS`, so the native apps can use the domain's passkeys
 - Answer `/admin` only to `ADMIN_ALLOWED_NETWORKS`, private ranges by default, `Tailscale` included, so the open internet gets the same 404 as an unknown path

@@ -511,6 +511,9 @@ class TestGdprExportMe:
         assert "activity" in data
         assert "exported_at" in data
         assert data["profile"]["email"] == "toexport@{{ project_slug }}.com"
+        assert data["account"]["email"] == "toexport@{{ project_slug }}.com"
+        assert "hashed_password" not in data["account"]
+        assert "records" in data
 
     @pytest.mark.usefixtures("override_get_async_session")
     async def test_export_my_data_unauthenticated(self, client: AsyncClient) -> None:
