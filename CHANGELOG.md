@@ -66,6 +66,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Run the nightly off-box backup as a user unit of the login user from `~/<project>`, where `scripts/deploy.sh` puts the project, so it reaches a rootless `Docker`
+- Run Docker rootless as a `deploy` user without sudo in `deploy/cloud-init.yaml`, with a separate `admin` user for sudo, so breaking out of a container no longer lands in root
 - Run the `Celery` worker and beat containers healthy, the worker answering a ping rather than the API check it inherited, and reach the broker over TLS from every container with its CA mounted where `SSL_CERTIFICATE_PATH` points
 - Pin `assemble.py` to a `containers` commit that has `SeaweedFS`, a project assembled without a local checkout beside it skipped object storage, and whose `Traefik` redirects plain HTTP to HTTPS instead of answering 404
 - Let `backup.sh` dump a database on any `POSTGRESQL_PORT`, the server listens on it inside the container too and the dump went to 5432, and fall back to a local `pg_dump` when the container is down rather than failing on it

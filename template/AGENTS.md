@@ -91,10 +91,11 @@ templates/email/    Jinja2 email templates
 
 The server needs a login user with Docker and Compose, rootless or not,
 and `rsync`. `deploy/cloud-init.yaml` sets one up on a fresh Debian
-server: a `deploy` user that logs in with a key only, no root or
-password SSH, `ufw` open to SSH, 80 and 443 only, `fail2ban` on SSH,
-unattended security updates, and Docker. Put your public key in it and
-paste it as the provider's user data when creating the machine.
+server: an `admin` user for sudo and a `deploy` user without it, both
+logging in with a key only, no root or password SSH, `ufw` open to SSH,
+80 and 443 only, `fail2ban` on SSH, unattended security updates, and
+rootless Docker for `deploy`. Put your public keys in it and paste it as
+the provider's user data when creating the machine.
 
 Deploy from your own machine:
 
