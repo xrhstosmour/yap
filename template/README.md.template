@@ -127,6 +127,9 @@ You need:
 # Run every gate CI runs.
 ./scripts/verify.sh
 
+# Deploy to a server, with production settings in .env.production.
+./scripts/deploy.sh deploy@203.0.113.10 api.example.com
+
 # Start all services.
 docker compose up -d
 
