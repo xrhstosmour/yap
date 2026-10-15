@@ -608,7 +608,7 @@ def build_totp_provisioning_uri(email: str, secret: str) -> str:
         otpauth:// URI string for use in authenticator apps.
     """
     totp = pyotp.TOTP(secret)
-    return totp.provisioning_uri(name=email, issuer_name=settings.PROJECT_NAME)
+    return totp.provisioning_uri(name=email, issuer_name=settings.PRODUCT_NAME)
 
 
 def generate_totp_qr_data_url(provisioning_uri: str) -> str:

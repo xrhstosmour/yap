@@ -197,7 +197,7 @@ def send_welcome_email_task(self, email: str, name: str | None = None) -> dict:
         Result dict with status
     """
     display_name = name or "there"
-    project = settings.PROJECT_NAME
+    project = settings.PRODUCT_NAME
 
     subject = f"Welcome to {project}!"
     body = (
