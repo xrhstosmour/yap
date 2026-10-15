@@ -7,6 +7,7 @@ This module provides the TwoFactorAuthService for managing TOTP-based
 from __future__ import annotations
 
 import asyncio
+import json
 import secrets
 from datetime import UTC
 from datetime import datetime
@@ -37,6 +38,10 @@ from app.models.user import User
 from app.repositories.user_repository import UserRepository
 
 logger = get_logger("service.two_factor")
+
+# How long a renewed set of recovery codes waits for the user to confirm
+# they saved it before it is dropped and the old set stays in force.
+_PENDING_CODES_TTL_SECONDS = 900
 
 
 class TwoFactorError(Exception):
@@ -458,6 +463,71 @@ class TwoFactorAuthService:
         logger.info("totp_recovery_codes_regenerated", user_id=str(user.id))
         return new_codes
 
+    async def begin_recovery_code_renewal(
+        self,
+        user: User,
+        password: str,
+    ) -> list[str]:
+        """Mint a new set of recovery codes, held back until confirmed.
+
+        Asks for the password rather than an authenticator code, so someone
+        who lost the phone but is still signed in elsewhere can renew. The
+        old set keeps working until confirm_recovery_code_renewal(), so
+        abandoning the flow halfway never leaves the account with no codes.
+
+        Args:
+            user: The user renewing their recovery codes.
+            password: The account password, to confirm intent.
+
+        Returns:
+            The new plaintext recovery codes (shown only once).
+
+        Raises:
+            TwoFactorNotEnabledError: If 2FA is not active.
+            TwoFactorRateLimitError: If rate limit exceeded.
+            InvalidTOTPError: If the password is wrong.
+        """
+        if not user.is_2fa_enabled:
+            raise TwoFactorNotEnabledError("2FA is not enabled for this user.")
+
+        await self._check_totp_rate_limit(user.id)
+
+        if not await asyncio.to_thread(verify_password, password, user.hashed_password):
+            raise InvalidTOTPError("Password is incorrect.")
+
+        new_codes = generate_recovery_codes(settings.TOTP_RECOVERY_CODE_COUNT)
+        code_hashes = await asyncio.gather(
+            *(asyncio.to_thread(generate_password_hash, code) for code in new_codes)
+        )
+        redis = await get_redis()
+        await redis.setex(
+            f"2fa:pending-codes:{user.id}",
+            _PENDING_CODES_TTL_SECONDS,
+            json.dumps(code_hashes),
+        )
+        await self._reset_totp_rate_limit(user.id)
+
+        logger.info("totp_recovery_codes_renewal_started", user_id=str(user.id))
+        return new_codes
+
+    async def confirm_recovery_code_renewal(self, user: User) -> None:
+        """Swap the pending recovery codes in and retire the old set.
+
+        Args:
+            user: The user who saved their new codes.
+
+        Raises:
+            TwoFactorError: If no renewal is waiting, or it expired.
+        """
+        redis = await get_redis()
+        pending = await redis.getdel(f"2fa:pending-codes:{user.id}")
+        if not pending:
+            raise TwoFactorError("No new recovery codes are waiting.")
+
+        await self._store_recovery_code_hashes(user.id, json.loads(pending))
+
+        logger.info("totp_recovery_codes_renewed", user_id=str(user.id))
+
     # Private helpers
 
     async def _consume_challenge(self, challenge_token: str) -> User:
@@ -550,18 +620,33 @@ class TwoFactorAuthService:
             user_id: User whose codes to replace.
             plaintext_codes: New plaintext codes to hash and store.
         """
+        # Hash all codes concurrently off the event loop instead of
+        # sequentially, bcrypt is ~100-250ms per call, so hashing 10 codes
+        # one at a time would block the loop for 1-2.5s. Done before the
+        # nested transaction opens, so it is not held open for the hashing.
+        code_hashes = await asyncio.gather(
+            *(
+                asyncio.to_thread(generate_password_hash, code)
+                for code in plaintext_codes
+            )
+        )
+        await self._store_recovery_code_hashes(user_id, list(code_hashes))
+
+    async def _store_recovery_code_hashes(
+        self,
+        user_id: UUID,
+        code_hashes: list[str],
+    ) -> None:
+        """Delete all existing recovery codes and insert these hashed ones.
+
+        Wrapped in a savepoint so the delete-and-insert is atomic.
+
+        Args:
+            user_id: User whose codes to replace.
+            code_hashes: Hashes of the new codes.
+        """
         async with self.session.begin_nested():
             await self._delete_all_recovery_codes(user_id)
-            # Hash all codes concurrently off the event loop instead of
-            # sequentially, bcrypt is ~100-250ms per call, so hashing 10
-            # codes one at a time would block the loop for 1-2.5s while
-            # this nested transaction is open.
-            code_hashes = await asyncio.gather(
-                *(
-                    asyncio.to_thread(generate_password_hash, code)
-                    for code in plaintext_codes
-                )
-            )
             for code_hash in code_hashes:
                 new_code = TotpRecoveryCode(user_id=user_id, code_hash=code_hash)
                 self.session.add(new_code)

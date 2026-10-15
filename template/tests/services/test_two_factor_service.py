@@ -661,3 +661,119 @@ class TestRecoveryCodeLookupHoldsNoLock:
 
             with pytest.raises(InvalidTOTPError):
                 await service.verify_challenge_with_recovery("token", code)
+
+
+class _DictRedis:
+    """Just enough of Redis for a pending set: SETEX and GETDEL on a dict."""
+
+    def __init__(self) -> None:
+        self.values: dict[str, str] = {}
+
+    async def setex(self, key: str, ttl: int, value: str) -> None:
+        del ttl
+        self.values[key] = value
+
+    async def getdel(self, key: str) -> str | None:
+        return self.values.pop(key, None)
+
+
+class TestRenewRecoveryCodes:
+    """Tests for renewing recovery codes with the password."""
+
+    @staticmethod
+    async def _signs_in(service: TwoFactorAuthService, user: object, code: str) -> bool:
+        with (
+            patch.object(
+                service, "_consume_challenge", new_callable=AsyncMock, return_value=user
+            ),
+            patch.object(service, "_check_totp_rate_limit", new_callable=AsyncMock),
+            patch.object(service, "_reset_totp_rate_limit", new_callable=AsyncMock),
+        ):
+            try:
+                await service.verify_challenge_with_recovery("token", code)
+            except InvalidTOTPError:
+                return False
+            return True
+
+    @pytest.mark.anyio
+    async def test_old_codes_work_until_the_new_ones_are_confirmed(
+        self, session: AsyncSession
+    ) -> None:
+        """Abandoning a renewal halfway must never leave no working codes.
+
+        Args:
+            session: Async database session fixture.
+        """
+        from app.models.totp_recovery_code import TotpRecoveryCode
+        from app.models.user import User
+
+        user = User(
+            email="renew-codes@example.com",
+            hashed_password=generate_password_hash("password123"),
+            is_2fa_enabled=True,
+        )
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+        old = ["OLD1-AAAA", "OLD2-AAAA"]
+        for code in old:
+            session.add(
+                TotpRecoveryCode(
+                    user_id=user.id, code_hash=generate_password_hash(code)
+                )
+            )
+        await session.commit()
+
+        service = TwoFactorAuthService(session)
+        redis = _DictRedis()
+        with (
+            patch(
+                "app.services.two_factor_service.get_redis",
+                AsyncMock(return_value=redis),
+            ),
+            patch.object(service, "_check_totp_rate_limit", new_callable=AsyncMock),
+            patch.object(service, "_reset_totp_rate_limit", new_callable=AsyncMock),
+        ):
+            new = await service.begin_recovery_code_renewal(user, "password123")
+
+            assert len(new) == settings.TOTP_RECOVERY_CODE_COUNT
+            assert await self._signs_in(service, user, old[0])
+            assert not await self._signs_in(service, user, new[0])
+
+            await service.confirm_recovery_code_renewal(user)
+
+            assert not await self._signs_in(service, user, old[1])
+            assert await self._signs_in(service, user, new[0])
+
+    @pytest.mark.anyio
+    async def test_wrong_password_mints_nothing(self, session: AsyncSession) -> None:
+        """A wrong password should be refused and leave nothing pending.
+
+        Args:
+            session: Async database session fixture.
+        """
+        from app.models.user import User
+
+        user = User(
+            email="renew-wrong@example.com",
+            hashed_password=generate_password_hash("password123"),
+            is_2fa_enabled=True,
+        )
+        session.add(user)
+        await session.commit()
+
+        service = TwoFactorAuthService(session)
+        redis = _DictRedis()
+        with (
+            patch(
+                "app.services.two_factor_service.get_redis",
+                AsyncMock(return_value=redis),
+            ),
+            patch.object(service, "_check_totp_rate_limit", new_callable=AsyncMock),
+        ):
+            with pytest.raises(InvalidTOTPError):
+                await service.begin_recovery_code_renewal(user, "not-the-password")
+            with pytest.raises(TwoFactorError):
+                await service.confirm_recovery_code_renewal(user)
+
+        assert redis.values == {}

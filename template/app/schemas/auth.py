@@ -326,6 +326,18 @@ class TwoFactorDisableRequest(BaseSchema):
     )
 
 
+class RecoveryCodesRenewRequest(BaseSchema):
+    """Request for POST /auth/2fa/recovery-codes/renew.
+
+    Attributes:
+        password: The account password, to confirm intent.
+    """
+
+    password: str = Field(
+        min_length=1, max_length=MAX_PASSWORD_BYTES, description="Account password"
+    )
+
+
 class RecoveryCodesResponse(BaseSchema):
     """Response containing regenerated recovery codes.
 
