@@ -14,8 +14,11 @@ from pathlib import Path
 import pytest
 import yaml
 
-COMPOSE_FILE = Path(__file__).resolve().parents[2] / "docker-compose.app.yml"
+PROJECT_DIR = Path(__file__).resolve().parents[2]
+COMPOSE_FILE = PROJECT_DIR / "docker-compose.app.yml"
 SERVICES = yaml.safe_load(COMPOSE_FILE.read_text())["services"]
+# A project may move its broker off RabbitMQ, then there is no CA to mount.
+USES_RABBITMQ = "brokers/rabbitmq" in (PROJECT_DIR / "docker-compose.yml").read_text()
 BROKER_CLIENTS = ["app", "celery-worker", "celery-beat"]
 
 
@@ -42,6 +45,7 @@ class TestCeleryContainers:
         assert healthcheck is not None, f"{service} inherits the API check"
         assert "8000" not in str(healthcheck.get("test", ""))
 
+    @pytest.mark.skipif(not USES_RABBITMQ, reason="The project has no RabbitMQ.")
     @pytest.mark.parametrize("service", BROKER_CLIENTS)
     def test_the_broker_ca_is_inside_the_container(self, service: str) -> None:
         """The CA path has to name a file mounted into the same container."""
