@@ -36,6 +36,7 @@ from app.schemas.auth import MagicLinkVerifyRequest
 from app.schemas.auth import PasswordChangeRequest
 from app.schemas.auth import PasswordResetConfirmRequest
 from app.schemas.auth import PasswordResetRequest
+from app.schemas.auth import RecoveryCodesRenewRequest
 from app.schemas.auth import RecoveryCodesResponse
 from app.schemas.auth import RefreshTokenRequest
 from app.schemas.auth import RegisterRequest
@@ -380,6 +381,67 @@ async def regenerate_recovery_codes(
             detail=str(e),
         ) from e
     return RecoveryCodesResponse(recovery_codes=new_codes)
+
+
+@router.post(
+    "/2fa/recovery-codes/renew",
+    response_model=RecoveryCodesResponse,
+    summary="Start renewing recovery codes",
+    description=(
+        "Mint a new set of recovery codes with the account password. The old "
+        "set keeps working until POST /auth/2fa/recovery-codes/renew/confirm."
+    ),
+)
+async def renew_recovery_codes(
+    data: RecoveryCodesRenewRequest,
+    current_user: CurrentUser,
+    session: SessionDependency,
+) -> RecoveryCodesResponse:
+    """Mint new recovery codes, pending until the user confirms them."""
+    from app.services.two_factor_service import TwoFactorAuthService
+    from app.services.two_factor_service import TwoFactorError
+    from app.services.two_factor_service import TwoFactorRateLimitError
+
+    service = TwoFactorAuthService(session)
+    try:
+        new_codes = await service.begin_recovery_code_renewal(
+            current_user, data.password
+        )
+    except TwoFactorRateLimitError as e:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=str(e),
+            headers={"Retry-After": "300"},
+        ) from e
+    except TwoFactorError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+    return RecoveryCodesResponse(recovery_codes=new_codes)
+
+
+@router.post(
+    "/2fa/recovery-codes/renew/confirm",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Confirm renewed recovery codes",
+    description="Put the renewed recovery codes in force and retire the old set.",
+)
+async def confirm_renewed_recovery_codes(
+    current_user: CurrentUser,
+    session: SessionDependency,
+) -> None:
+    """Swap the pending recovery codes in once the user has saved them."""
+    from app.services.two_factor_service import TwoFactorAuthService
+    from app.services.two_factor_service import TwoFactorError
+
+    try:
+        await TwoFactorAuthService(session).confirm_recovery_code_renewal(current_user)
+    except TwoFactorError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
 
 
 @router.post(
