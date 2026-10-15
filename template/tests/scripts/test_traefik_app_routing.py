@@ -17,14 +17,23 @@ import yaml
 COMPOSE_FILE = Path(__file__).resolve().parents[2] / "docker-compose.app.yml"
 
 
+def _labels() -> list[str]:
+    """Read the labels set on the app service.
+
+    Returns:
+        The labels, empty when the project has no reverse proxy.
+    """
+    compose = yaml.safe_load(COMPOSE_FILE.read_text())
+    return compose["services"]["app"].get("labels", [])
+
+
 def _router_rules() -> list[str]:
     """Read every `Traefik` router rule set on the app service.
 
     Returns:
         The rule values, empty when the project has no reverse proxy.
     """
-    compose = yaml.safe_load(COMPOSE_FILE.read_text())
-    labels = compose["services"]["app"].get("labels", [])
+    labels = _labels()
     return [
         label.split("=", 1)[1]
         for label in labels
@@ -58,3 +67,24 @@ class TestTraefikAppRouting:
         """A rule without a host answers for any name pointed at the server."""
         for rule in rules:
             assert "Host(`" in rule, f"{rule} has no host"
+
+    def test_every_router_takes_the_configured_certificates(
+        self, rules: list[str]
+    ) -> None:
+        """A router left off the resolver serves the default certificate."""
+        labels = _labels()
+        routers = [
+            match.group(1)
+            for label in labels
+            if (
+                match := re.fullmatch(
+                    r"traefik\.http\.routers\.([^.]+)\.rule=.*", label
+                )
+            )
+        ]
+        for router in routers:
+            expected = (
+                f"traefik.http.routers.{router}.tls.certresolver="
+                "${TRAEFIK_CERTIFICATE_RESOLVER:-}"
+            )
+            assert expected in labels, f"{router} names no certificate resolver"

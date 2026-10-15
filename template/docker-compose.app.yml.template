@@ -78,6 +78,8 @@ services:
       - "traefik.http.routers.{{ project_slug }}-app.entrypoints=web_secure"
       - "traefik.http.routers.{{ project_slug }}-app.tls=true"
       - "traefik.http.routers.{{ project_slug }}-app.tls.options=tls-opts@file"
+      # `le` for a Let's Encrypt certificate, empty for the existing ones.
+      - "traefik.http.routers.{{ project_slug }}-app.tls.certresolver=${TRAEFIK_CERTIFICATE_RESOLVER:-}"
       - "traefik.http.services.{{ project_slug }}-app.loadbalancer.server.port=8000"
 {%- endif %}
     networks:
