@@ -8,10 +8,12 @@ and HTML emails with optional Jinja2 template rendering.
 from __future__ import annotations
 
 import asyncio
+import re
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from html import escape
+from html import unescape
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -81,6 +83,35 @@ def _get_jinja2_env() -> jinja2.Environment:
 
 
 logger = get_logger("email")
+
+
+def _plain_text(html: str) -> str:
+    """Turn a rendered email into its plain text part.
+
+    Keeps a line per paragraph and heading, and the address of every link
+    next to its text, so the message still works in a client that shows
+    no HTML. The head and the hidden preheader are not part of it.
+
+    Args:
+        html: The rendered HTML body.
+
+    Returns:
+        The plain text body.
+    """
+    text = re.sub(r"(?is)<(head|style)\b.*?</\1>", "", html)
+    text = re.sub(r'(?is)<div class="preheader".*?</div>', "", text)
+
+    def link(match: re.Match[str]) -> str:
+        address = match.group(1)
+        label = re.sub(r"<[^>]+>", "", match.group(2)).strip()
+        return address if label in ("", address) else f"{label}: {address}"
+
+    text = re.sub(r'(?is)<a\b[^>]*href="([^"]*)"[^>]*>(.*?)</a>', link, text)
+    text = re.sub(r"(?i)<br\s*/?>|</(p|h[1-6]|tr|div)>", "\n", text)
+    text = unescape(re.sub(r"<[^>]+>", "", text))
+
+    lines = [re.sub(r"\s+", " ", line).strip() for line in text.splitlines()]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
 async def send_email(
@@ -164,11 +195,7 @@ async def send_email_from_template(
     env = _get_jinja2_env()
     template = env.get_template(template_name)
     html_body = template.render(**context)
-
-    import re
-
-    plain_body = re.sub(r"<[^>]+>", "", html_body)
-    plain_body = re.sub(r"\s+", " ", plain_body).strip()
+    plain_body = _plain_text(html_body)
 
     await send_email(
         to_email=to_email,
