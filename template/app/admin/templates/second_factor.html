@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Sign in{% endblock %}
+{% block body %}
+<header><h1>Administration</h1></header>
+<form method="post" action="{{ url_for('confirm_second_factor') }}">
+  <input type="hidden" name="challenge_token" value="{{ challenge_token }}" />
+  <p>
+    <label for="code">Authenticator or recovery code</label><br />
+    <input id="code" name="code" type="text" required autofocus
+           autocomplete="one-time-code" maxlength="32" />
+  </p>
+  <button type="submit">Sign in</button>
+</form>
+{% endblock %}

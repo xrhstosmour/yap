@@ -135,6 +135,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Ask the administration sign-in for the second factor and rate limit it, a superuser who turned 2FA on still signed in to `/admin` with the password alone, and the form had no throttle against guessing
 - Export every API key in the GDPR data export, the underlying `list()` defaults to twenty and nothing overrode it, so a user with more keys silently got the first twenty, and report when the audit activity is truncated instead of capping it silently
 - Run the `Celery` worker probes off the event loop and stop reporting a broker outage as a healthy idle cluster, three inline `inspect` calls froze the whole process for up to three seconds per request, and any failure was swallowed into a `200` with zeros
 - Stop `CacheService.get_or_set` treating a cached `None` as a miss, a `compute()` returning `None` was recomputed on every call and never served, and lock-losing callers polled for a value that could never appear, so the stampede protection guaranteed a stampede
