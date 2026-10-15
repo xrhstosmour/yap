@@ -68,10 +68,9 @@ class TestTraefikAppRouting:
         for rule in rules:
             assert "Host(`" in rule, f"{rule} has no host"
 
-    def test_every_router_takes_the_configured_certificates(
-        self, rules: list[str]
-    ) -> None:
-        """A router left off the resolver serves the default certificate."""
+    def test_every_router_takes_the_configured_tls(self, rules: list[str]) -> None:
+        """A router left off the resolver serves the default certificate, and
+        one with fixed TLS options answers 421 to a request by IP address."""
         labels = _labels()
         routers = [
             match.group(1)
@@ -88,3 +87,8 @@ class TestTraefikAppRouting:
                 "${TRAEFIK_CERTIFICATE_RESOLVER:-}"
             )
             assert expected in labels, f"{router} names no certificate resolver"
+            expected = (
+                f"traefik.http.routers.{router}.tls.options="
+                "${TRAEFIK_TLS_OPTIONS:-tls-opts@file}"
+            )
+            assert expected in labels, f"{router} fixes its TLS options"
