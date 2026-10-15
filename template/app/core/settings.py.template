@@ -79,6 +79,8 @@ class Settings(BaseSettings):
     Attributes:
         API_V1_STR: URL prefix for API versioning
         PROJECT_NAME: Display name for the application
+        PRODUCT_NAME: Name users see in mail and authenticator apps,
+            defaults to PROJECT_NAME
         ENVIRONMENT: Deployment environment (local/staging/production)
         SECRET_KEY: Cryptographic key for JWT signing
         ACCESS_TOKEN_EXPIRE_MINUTES: JWT access token lifetime
@@ -123,6 +125,7 @@ class Settings(BaseSettings):
     # API Configuration.
     API_V1_STR: str = "/api/v1"
     PROJECT_NAME: str = "{{ project_name }}"
+    PRODUCT_NAME: str = ""
     ENVIRONMENT: Literal["local", "staging", "production"] = "production"
 
     # Security.
@@ -509,6 +512,20 @@ class Settings(BaseSettings):
         """
         host = urlsplit(origin if "//" in origin else f"//{origin}").hostname
         return host in self.__loopback_hosts
+
+    @model_validator(mode="after")
+    def _default_product_name(self) -> Self:
+        """Fall back to the project name when no product name is set.
+
+        The service and the product it ships can carry different names,
+        and only the product's reaches users.
+
+        Returns:
+            The validated settings.
+        """
+        if not self.PRODUCT_NAME:
+            self.PRODUCT_NAME = self.PROJECT_NAME
+        return self
 
     @model_validator(mode="after")
     def _enforce_non_default_secrets(self) -> Self:

@@ -9,6 +9,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add `PRODUCT_NAME`, the name users see in mail subjects and bodies and in authenticator apps, defaulting to `PROJECT_NAME`, which keeps naming the service in logs and the API documentation
 - Add `include_website`, serving `website/` from a read-only `nginx` behind `Traefik` on the API's domain, on every path the API does not take
 - Lay every email out through `templates/email/base.html`, so a project restyles its mail in one file, and keep paragraphs and link addresses in the plain text part
 - Add `scripts/deploy.sh`, deploying the project to a server over SSH with its production settings, building and starting it there, and waiting until it is healthy, with a `Let's Encrypt` certificate when given a domain

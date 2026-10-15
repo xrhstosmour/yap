@@ -220,7 +220,7 @@ class AuthService:
                 context={
                     "name": user.full_name or user.email,
                     url_field_name: url,
-                    "project": settings.PROJECT_NAME,
+                    "project": settings.PRODUCT_NAME,
                 },
             )
         except Exception:
@@ -622,7 +622,7 @@ class AuthService:
             user=user,
             token_factory=create_email_verification_token(user.id),
             url_path="/auth/verify-email",
-            subject=f"Verify your email, {settings.PROJECT_NAME}",
+            subject=f"Verify your email, {settings.PRODUCT_NAME}",
             template_name="verification.html",
             url_field_name="verification_url",
         )
@@ -657,7 +657,7 @@ class AuthService:
                 user=user,
                 token_factory=create_password_reset_token(user.id),
                 url_path="/auth/reset-password",
-                subject=f"Reset your password, {settings.PROJECT_NAME}",
+                subject=f"Reset your password, {settings.PRODUCT_NAME}",
                 template_name="password_reset.html",
                 url_field_name="reset_url",
             )
@@ -889,7 +889,7 @@ class AuthService:
                 user=user,
                 token_factory=create_magic_link_token(user.id),
                 url_path="/auth/magic-link",
-                subject=f"Sign in to {settings.PROJECT_NAME}",
+                subject=f"Sign in to {settings.PRODUCT_NAME}",
                 template_name="magic_link.html",
                 url_field_name="login_url",
             )
