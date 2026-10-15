@@ -65,6 +65,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Answer HTTPS on an IP address deployed by `scripts/deploy.sh`, which the strict SNI TLS options turned away with 421, and wait for it to report ready like a domain
 - Run the nightly off-box backup as a user unit of the login user from `~/<project>`, where `scripts/deploy.sh` puts the project, so it reaches a rootless `Docker`
 - Run Docker rootless as a `deploy` user without sudo in `deploy/cloud-init.yaml`, with a separate `admin` user for sudo, so breaking out of a container no longer lands in root
 - Run the `Celery` worker and beat containers healthy, the worker answering a ping rather than the API check it inherited, and reach the broker over TLS from every container with its CA mounted where `SSL_CERTIFICATE_PATH` points
