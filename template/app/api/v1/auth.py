@@ -44,6 +44,7 @@ from app.schemas.auth import TwoFactorConfirmRequest
 from app.schemas.auth import TwoFactorDisableRequest
 from app.schemas.auth import TwoFactorEnrollResponse
 from app.schemas.auth import TwoFactorVerifyRequest
+from app.schemas.auth import TwoFactorVerifyResponse
 from app.schemas.auth import WebAuthnLoginBeginRequest
 from app.schemas.auth import WebAuthnLoginBeginResponse
 from app.schemas.auth import WebAuthnLoginCompleteRequest
@@ -215,17 +216,18 @@ async def confirm_2fa(
 
 @router.post(
     "/2fa/verify",
-    response_model=TokenResponse,
+    response_model=TwoFactorVerifyResponse,
     summary="Complete 2FA login",
     description=(
         "Exchange a 2FA challenge token + TOTP code (or recovery code) "
-        "for full JWT tokens."
+        "for full JWT tokens. Signing in with a recovery code also says how "
+        "many unused codes are left."
     ),
 )
 async def verify_2fa(
     data: TwoFactorVerifyRequest,
     session: SessionDependency,
-) -> TokenResponse:
+) -> TwoFactorVerifyResponse:
     """Complete 2FA login by verifying the challenge + TOTP or recovery code."""
     from app.services.two_factor_service import InvalidTOTPError
     from app.services.two_factor_service import TwoFactorAuthService
@@ -261,7 +263,13 @@ async def verify_2fa(
             detail=str(e),
         ) from e
 
-    return auth_service.create_tokens(user)
+    tokens = auth_service.create_tokens(user)
+    remaining = (
+        None if data.totp_code else await service.unused_recovery_code_count(user.id)
+    )
+    return TwoFactorVerifyResponse(
+        **tokens.model_dump(), recovery_codes_remaining=remaining
+    )
 
 
 @router.delete(

@@ -687,6 +687,55 @@ class TestTwoFactorAuth:
         data = response.json()
         assert "access_token" in data
         assert "refresh_token" in data
+        assert data["recovery_codes_remaining"] is None
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_verify_with_recovery_code_says_how_many_are_left(
+        self,
+        client: AsyncClient,
+        session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Signing in with a recovery code should count the unused ones left."""
+        from datetime import UTC
+        from datetime import datetime
+
+        from app.core.security import generate_password_hash
+        from app.models.totp_recovery_code import TotpRecoveryCode
+
+        auth_service = AuthService(cast(AsyncSession, session))
+        user = await auth_service.register(
+            RegisterRequest(email="2fa-recovery@{{ project_slug }}.com", password="password123")
+        )
+        hashed = generate_password_hash("AAAA-BBBB")
+        session.add(TotpRecoveryCode(user_id=user.id, code_hash=hashed))
+        session.add(TotpRecoveryCode(user_id=user.id, code_hash=hashed))
+        session.add(
+            TotpRecoveryCode(
+                user_id=user.id, code_hash=hashed, used_at=datetime.now(UTC)
+            )
+        )
+        await session.commit()
+
+        # Mock the recovery check, the count is what is under test.
+        async def _fake_verify_with_recovery(self, token: str, recovery_code: str):
+            return user
+
+        monkeypatch.setattr(
+            "app.services.two_factor_service.TwoFactorAuthService.verify_challenge_with_recovery",
+            _fake_verify_with_recovery,
+        )
+
+        response = await client.post(
+            "/api/v1/auth/2fa/verify",
+            json={
+                "challenge_token": "valid-challenge",
+                "recovery_code": "AAAA-BBBB",
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json()["recovery_codes_remaining"] == 2
 
     @pytest.mark.usefixtures("override_get_async_session")
     async def test_verify_challenge_invalid_totp(
