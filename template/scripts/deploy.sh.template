@@ -101,8 +101,12 @@ chmod 600 "$STAGING/.env"
 set_value APP_DOMAIN "$ADDRESS" "$STAGING/.env"
 if [ "$MODE" = "domain" ]; then
     set_value TRAEFIK_CERTIFICATE_RESOLVER le "$STAGING/.env"
+    set_value TRAEFIK_TLS_OPTIONS "" "$STAGING/.env"
 else
     set_value TRAEFIK_CERTIFICATE_RESOLVER "" "$STAGING/.env"
+    # A request to an IP address carries no server name, which strict SNI
+    # refuses.
+    set_value TRAEFIK_TLS_OPTIONS default "$STAGING/.env"
 fi
 
 # The dashboard login, hashed from the production password rather than
@@ -179,16 +183,20 @@ docker image prune -f >/dev/null
 $COMPOSE ps --format 'table {{ "{{" }}.Service{{ "}}" }}\t{{ "{{" }}.Status{{ "}}" }}'
 EOF
 
-if [ "$MODE" = "domain" ]; then
-    info "Waiting for https://$ADDRESS to answer, the first certificate can take a minute."
-    for _ in $(seq 1 24); do
-        if curl -fsS -o /dev/null --max-time 10 "https://$ADDRESS/api/v1/ready"; then
-            info "Deployed, https://$ADDRESS/api/v1/ready answers."
-            exit 0
-        fi
-        sleep 5
-    done
-    error "The stack is healthy on the server, but https://$ADDRESS/api/v1/ready does not answer. Check that DNS points at the server and ports 80 and 443 are open."
+# The self-signed certificate on an IP address is expected, not trusted.
+CURL=(curl -fsS -o /dev/null --max-time 10)
+if [ "$MODE" = "address" ]; then
+    CURL+=(--insecure)
 fi
-
-warn "Deployed on $ADDRESS without a certificate. Clients will refuse it, deploy with a domain to serve real traffic."
+info "Waiting for https://$ADDRESS to answer, the first certificate can take a minute."
+for _ in $(seq 1 24); do
+    if "${CURL[@]}" "https://$ADDRESS/api/v1/ready"; then
+        info "Deployed, https://$ADDRESS/api/v1/ready answers."
+        if [ "$MODE" = "address" ]; then
+            warn "It runs on a self-signed certificate, clients will refuse it. Deploy with a domain to serve real traffic."
+        fi
+        exit 0
+    fi
+    sleep 5
+done
+error "The stack is healthy on the server, but https://$ADDRESS/api/v1/ready does not answer. Check that DNS points at the server and ports 80 and 443 are open."

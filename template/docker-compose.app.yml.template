@@ -83,7 +83,8 @@ services:
       - "traefik.http.routers.{{ project_slug }}-app.rule=Host(`${APP_DOMAIN?Variable not set}`) && (PathPrefix(`/api/`) || PathPrefix(`/.well-known/`))"
       - "traefik.http.routers.{{ project_slug }}-app.entrypoints=web_secure"
       - "traefik.http.routers.{{ project_slug }}-app.tls=true"
-      - "traefik.http.routers.{{ project_slug }}-app.tls.options=tls-opts@file"
+      # `default` when APP_DOMAIN is an IP address, strict SNI otherwise.
+      - "traefik.http.routers.{{ project_slug }}-app.tls.options=${TRAEFIK_TLS_OPTIONS:-tls-opts@file}"
       # `le` for a Let's Encrypt certificate, empty for the existing ones.
       - "traefik.http.routers.{{ project_slug }}-app.tls.certresolver=${TRAEFIK_CERTIFICATE_RESOLVER:-}"
       - "traefik.http.services.{{ project_slug }}-app.loadbalancer.server.port=8000"
