@@ -26,18 +26,26 @@ from app.admin.session import close_session
 from app.admin.session import open_session
 from app.admin.session import verify_csrf
 from app.core.logging import get_logger
+from app.core.rate_limit import check_auth_rate_limit
 from app.core.tenant import system_context
 from app.dependencies import SessionDependency
+from app.models.user import User
 from app.models.user import UserRole
 from app.repositories.user_repository import UserRepository
 from app.services.auth_service import AuthenticationError
 from app.services.auth_service import AuthService
+from app.services.two_factor_service import TwoFactorAuthService
+from app.services.two_factor_service import TwoFactorError
+from app.services.two_factor_service import TwoFactorRateLimitError
 
 logger = get_logger("admin")
 
 router = APIRouter(prefix="/admin", include_in_schema=False)
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+
+#: The one answer to every failed sign-in, see `sign_in`.
+REFUSAL = "Those details do not sign in here."
 
 #: How many accounts one page shows. Enough to scan, few enough that the
 #: page renders in one go on a slow connection.
@@ -50,15 +58,40 @@ async def sign_in_form(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "login.html", {"failure": None})
 
 
+def _refused(request: Request, status_code: int) -> HTMLResponse:
+    """Start over at the sign-in page, saying no more than `REFUSAL`."""
+    return templates.TemplateResponse(
+        request,
+        "login.html",
+        {"failure": REFUSAL},
+        status_code=status_code,
+    )
+
+
+def _signed_in(user: User) -> RedirectResponse:
+    """Open a session for `user` and send them to the first page."""
+    logger.info("admin_signed_in", user_id=str(user.id))
+    response = RedirectResponse(
+        router.url_path_for("list_users"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+    open_session(response, user)
+    return response
+
+
 # `response_model=None`: FastAPI cannot build one from this union.
-@router.post("/login", response_model=None)
+@router.post(
+    "/login",
+    response_model=None,
+    dependencies=[Depends(check_auth_rate_limit)],
+)
 async def sign_in(
     request: Request,
     session: SessionDependency,
     email: Annotated[str, Form()],
     password: Annotated[str, Form()],
 ) -> HTMLResponse | RedirectResponse:
-    """Check the credentials and start a session.
+    """Check the credentials, then ask for the second factor if there is one.
 
     Every failure answers with the same sentence, or the form becomes a
     way to find out who has an account and who is privileged.
@@ -71,19 +104,53 @@ async def sign_in(
             raise PermissionError
     except (AuthenticationError, PermissionError):
         logger.warning("admin_sign_in_refused")
+        return _refused(request, status.HTTP_401_UNAUTHORIZED)
+    # The API asks for it on every login path, so this one must too, or
+    # the most privileged session is the one a password alone opens.
+    if user.is_2fa_enabled:
+        challenge = await TwoFactorAuthService(session).issue_challenge(user)
         return templates.TemplateResponse(
             request,
-            "login.html",
-            {"failure": "Those details do not sign in here."},
-            status_code=status.HTTP_401_UNAUTHORIZED,
+            "second_factor.html",
+            {"challenge_token": challenge},
         )
-    logger.info("admin_signed_in", user_id=str(user.id))
-    response = RedirectResponse(
-        router.url_path_for("list_users"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
-    open_session(response, user)
-    return response
+    return _signed_in(user)
+
+
+@router.post(
+    "/login/code",
+    response_model=None,
+    dependencies=[Depends(check_auth_rate_limit)],
+)
+async def confirm_second_factor(
+    request: Request,
+    session: SessionDependency,
+    challenge_token: Annotated[str, Form(max_length=128)],
+    code: Annotated[str, Form(max_length=32)],
+) -> HTMLResponse | RedirectResponse:
+    """Finish signing in with an authenticator or a recovery code.
+
+    Six digits are an authenticator code, anything else a recovery code.
+    The challenge is spent either way, so a wrong code starts over at
+    the password.
+    """
+    service = TwoFactorAuthService(session)
+    typed = code.strip()
+    try:
+        if typed.isdigit() and len(typed) == 6:
+            user = await service.verify_challenge(challenge_token, typed)
+        else:
+            user = await service.verify_challenge_with_recovery(challenge_token, typed)
+    except TwoFactorRateLimitError:
+        logger.warning("admin_second_factor_throttled")
+        return _refused(request, status.HTTP_429_TOO_MANY_REQUESTS)
+    except TwoFactorError:
+        logger.warning("admin_second_factor_refused")
+        return _refused(request, status.HTTP_401_UNAUTHORIZED)
+    # Checked again: the challenge outlives a role change made meanwhile.
+    if not user.is_active or user.role != UserRole.SUPERUSER:
+        return _refused(request, status.HTTP_401_UNAUTHORIZED)
+    return _signed_in(user)
 
 
 @router.post("/logout", dependencies=[Depends(verify_csrf)])

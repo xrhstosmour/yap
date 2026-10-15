@@ -138,6 +138,160 @@ class TestSigningIn:
         assert "do not sign in here" in missing.text
 
 
+@pytest.fixture
+def second_factor(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """Stand in for the challenge store, which lives in Redis.
+
+    `verify` holds what the next check answers, an account or an error,
+    and `used` records which kind of code was checked.
+    """
+    from app.services.two_factor_service import TwoFactorAuthService
+
+    state: dict[str, Any] = {"verify": None, "used": None}
+
+    async def _issue(self, user: User) -> str:
+        return "challenge"
+
+    async def _answer(kind: str, token: str) -> User:
+        state["used"] = kind
+        assert token == "challenge"
+        if isinstance(state["verify"], Exception):
+            raise state["verify"]
+        return state["verify"]
+
+    async def _verify(self, token: str, code: str) -> User:
+        return await _answer("authenticator", token)
+
+    async def _recover(self, token: str, code: str) -> User:
+        return await _answer("recovery", token)
+
+    monkeypatch.setattr(TwoFactorAuthService, "issue_challenge", _issue)
+    monkeypatch.setattr(TwoFactorAuthService, "verify_challenge", _verify)
+    monkeypatch.setattr(
+        TwoFactorAuthService, "verify_challenge_with_recovery", _recover
+    )
+    return state
+
+
+async def _enrolled(session, email: str, slug: str) -> User:
+    """A superuser who turned the second factor on."""
+    user = await _account(session, email, slug)
+    user.is_2fa_enabled = True
+    session.add(user)
+    await session.commit()
+    return user
+
+
+@pytest.mark.usefixtures("override_get_async_session")
+class TestSecondFactor:
+    """Tests for POST /admin/login and /admin/login/code with 2FA on."""
+
+    @pytest.mark.anyio
+    async def test_the_password_alone_opens_no_session(
+        self, client: AsyncClient, session, second_factor: dict[str, Any]
+    ) -> None:
+        """The account asked for a second factor, so the form asks for it."""
+        await _enrolled(session, "admin-2fa-ask@example.com", "admin-2fa-ask")
+
+        response = await client.post(
+            "/admin/login",
+            data={"email": "admin-2fa-ask@example.com", "password": PASSWORD},
+        )
+
+        assert response.status_code == 200
+        assert 'name="code"' in response.text
+        assert client.cookies.get(SESSION_COOKIE) is None
+
+    @pytest.mark.anyio
+    async def test_the_right_code_opens_a_session(
+        self, client: AsyncClient, session, second_factor: dict[str, Any]
+    ) -> None:
+        """Six digits are checked as an authenticator code."""
+        user = await _enrolled(session, "admin-2fa-in@example.com", "admin-2fa-in")
+        second_factor["verify"] = user
+
+        response = await client.post(
+            "/admin/login/code",
+            data={"challenge_token": "challenge", "code": "123456"},
+        )
+
+        assert response.status_code == 303
+        assert second_factor["used"] == "authenticator"
+        assert client.cookies.get(SESSION_COOKIE)
+
+    @pytest.mark.anyio
+    async def test_a_recovery_code_opens_a_session(
+        self, client: AsyncClient, session, second_factor: dict[str, Any]
+    ) -> None:
+        """Anything but six digits is checked as a recovery code."""
+        user = await _enrolled(
+            session, "admin-2fa-recover@example.com", "admin-2fa-recover"
+        )
+        second_factor["verify"] = user
+
+        response = await client.post(
+            "/admin/login/code",
+            data={"challenge_token": "challenge", "code": "ABCD-EFGH"},
+        )
+
+        assert response.status_code == 303
+        assert second_factor["used"] == "recovery"
+
+    @pytest.mark.anyio
+    async def test_a_wrong_code_opens_no_session(
+        self, client: AsyncClient, second_factor: dict[str, Any]
+    ) -> None:
+        """Back to the password, with the usual sentence."""
+        from app.services.two_factor_service import InvalidTOTPError
+
+        second_factor["verify"] = InvalidTOTPError("Invalid TOTP code.")
+
+        response = await client.post(
+            "/admin/login/code",
+            data={"challenge_token": "challenge", "code": "000000"},
+        )
+
+        assert response.status_code == 401
+        assert "do not sign in here" in response.text
+        assert client.cookies.get(SESSION_COOKIE) is None
+
+    @pytest.mark.anyio
+    async def test_too_many_codes_are_throttled(
+        self, client: AsyncClient, second_factor: dict[str, Any]
+    ) -> None:
+        """Guessing six digits is the attack this step invites."""
+        from app.services.two_factor_service import TwoFactorRateLimitError
+
+        second_factor["verify"] = TwoFactorRateLimitError("Too many attempts.")
+
+        response = await client.post(
+            "/admin/login/code",
+            data={"challenge_token": "challenge", "code": "000000"},
+        )
+
+        assert response.status_code == 429
+        assert client.cookies.get(SESSION_COOKIE) is None
+
+    @pytest.mark.anyio
+    async def test_a_role_taken_away_meanwhile_opens_no_session(
+        self, client: AsyncClient, session, second_factor: dict[str, Any]
+    ) -> None:
+        """The challenge outlives a demotion made between the two steps."""
+        user = await _enrolled(
+            session, "admin-2fa-demoted@example.com", "admin-2fa-demoted"
+        )
+        user.role = UserRole.USER
+        second_factor["verify"] = user
+
+        response = await client.post(
+            "/admin/login/code",
+            data={"challenge_token": "challenge", "code": "123456"},
+        )
+
+        assert response.status_code == 401
+        assert client.cookies.get(SESSION_COOKIE) is None
+
+
 @pytest.mark.usefixtures("override_get_async_session")
 class TestReachingThePages:
     """Tests for who the pages answer."""
