@@ -200,7 +200,8 @@ class TestSendEmailFromTemplate:
         call_kwargs = mock_send.call_args.kwargs
         assert call_kwargs["to_email"] == "user@test.com"
         assert call_kwargs["subject"] == "Verify Email"
-        assert "Verify your email, Alice" in call_kwargs["body"]
+        assert "Confirm your email" in call_kwargs["body"]
+        assert "Confirm email: https://example.com/verify" in call_kwargs["body"]
         assert '<a href="https://example.com/verify"' in call_kwargs["html"]
 
     @pytest.mark.asyncio
@@ -346,3 +347,67 @@ class TestSendBatchEmails:
         assert result["failed"] == 1
         _, kwargs = mock_logger.error.call_args
         assert "alice@example.com" not in kwargs["error"]
+
+
+class TestEmailTemplates:
+    """Every email renders through the layout with its own values."""
+
+    _CONTEXT = {
+        "name": "Alice",
+        "project": "TestApp",
+        "verification_url": "https://example.com/verify?token=a",
+        "reset_url": "https://example.com/reset?token=b",
+        "login_url": "https://example.com/login?token=c",
+    }
+
+    @pytest.mark.parametrize(
+        ("template_name", "url_key"),
+        [
+            ("verification.html", "verification_url"),
+            ("password_reset.html", "reset_url"),
+            ("magic_link.html", "login_url"),
+        ],
+    )
+    def test_each_link_email_carries_its_link(
+        self, template_name: str, url_key: str
+    ) -> None:
+        """The button and the copyable address both point at the token URL."""
+        from app.core.email import _get_jinja2_env
+
+        html = _get_jinja2_env().get_template(template_name).render(**self._CONTEXT)
+
+        address = self._CONTEXT[url_key].replace("&", "&amp;")
+        assert html.count(f'href="{address}"') == 2
+        assert "Alice" in html
+        assert "TestApp" in html
+
+    def test_the_welcome_names_the_user(self) -> None:
+        """Its placeholders were once consumed when the project was made."""
+        from app.core.email import _get_jinja2_env
+
+        html = _get_jinja2_env().get_template("welcome.html").render(**self._CONTEXT)
+
+        assert "Welcome, Alice" in html
+        assert "Your TestApp account is ready." in html
+
+
+class TestPlainText:
+    """The plain text part reads on its own."""
+
+    def test_it_keeps_lines_and_link_addresses(self) -> None:
+        """A client without HTML still gets each paragraph and every link."""
+        from app.core.email import _plain_text
+
+        text = _plain_text(
+            "<html><head><title>Hidden</title></head><body>"
+            '<div class="preheader">Preview only</div>'
+            "<h1>Title</h1><p>First &amp; more.</p>"
+            '<p><a href="https://example.com/x?a=1&amp;b=2">Open</a></p>'
+            "</body></html>"
+        )
+
+        assert text.splitlines() == [
+            "Title",
+            "First & more.",
+            "Open: https://example.com/x?a=1&b=2",
+        ]

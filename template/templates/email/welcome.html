@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% set heading = "Welcome, " ~ name %}
+{% set preheader = "Your " ~ project ~ " account is ready." %}
+{% block content %}
+<p style="margin: 0 0 16px;">Your {{ project }} account is ready. Glad to have you.</p>
+{% endblock %}

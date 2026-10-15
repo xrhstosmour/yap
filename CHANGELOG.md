@@ -10,6 +10,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Add `include_website`, serving `website/` from a read-only `nginx` behind `Traefik` on the API's domain, on every path the API does not take
+- Lay every email out through `templates/email/base.html`, so a project restyles its mail in one file, and keep paragraphs and link addresses in the plain text part
 - Add `scripts/deploy.sh`, deploying the project to a server over SSH with its production settings, building and starting it there, and waiting until it is healthy, with a `Let's Encrypt` certificate when given a domain
 - Issue a `Let's Encrypt` certificate for `APP_DOMAIN` when `TRAEFIK_CERTIFICATE_RESOLVER` is `le`, and watch a rootless `Docker` socket set in `DOCKER_SOCKET`
 - Export every row of every table pointing at the account, without its credential columns, and fail a test until a new column pointing at the account is classified exported or withheld in `app/core/personal_data.py` or the project's own `personal_data_project.py`
@@ -66,6 +67,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Keep the name and project in `welcome.html`, which generating a project rendered away
 - Refuse to start a deployed environment whose `SMTP_HOST` is `localhost`, a loopback address or `mailpit`, where every email was reported sent and never arrived
 - Leave `Mailpit`, `pgAdmin` and `Redis Commander` off the server in `scripts/deploy.sh`, they ran in production and their settings were required there
 - Write the generated `Traefik` dashboard password to `.env` only, `assemble.py` also wrote it into the committed `.env.example` whenever `.env` existed
