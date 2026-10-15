@@ -1,0 +1,194 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Deploy this project to a server over SSH.
+# Usage: ./scripts/deploy.sh <user@host> <domain-or-ip> [options]
+#
+#   -p, --port PORT           SSH port, 22 by default
+#   -i, --identity FILE       SSH private key
+#   -e, --environment FILE    production settings, .env.production by default
+#
+# Copies the project to ~/{{ project_slug }} on the server, without the git
+# history, local environments or development settings, puts the production
+# settings beside it readable by the login user only, then builds and starts
+# the whole stack there and waits until every container reports healthy.
+#
+# With a domain, `Traefik` requests a `Let's Encrypt` certificate for it,
+# so its DNS has to point at the server first. With an IP address the stack
+# runs on `Traefik`'s own certificate, enough to try a server out, not to
+# serve real clients.
+#
+# The server needs Docker and Compose for the login user, rootless or not,
+# and rsync. Nothing here needs root on the server.
+
+PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$PROJECT_DIR"
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
+warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
+error() { echo -e "${RED}[ERROR]${NC} $*" >&2; exit 1; }
+
+usage() {
+    sed -n '4,9p' "$0" | sed 's/^# \{0,1\}//' >&2
+    exit 2
+}
+
+TARGET="${1:-}"
+ADDRESS="${2:-}"
+[ -n "$TARGET" ] && [ -n "$ADDRESS" ] || usage
+shift 2
+
+SSH_PORT=22
+IDENTITY=""
+ENVIRONMENT_FILE=".env.production"
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -p|--port) SSH_PORT="$2"; shift 2 ;;
+        -i|--identity) IDENTITY="$2"; shift 2 ;;
+        -e|--environment) ENVIRONMENT_FILE="$2"; shift 2 ;;
+        *) usage ;;
+    esac
+done
+
+REMOTE_DIRECTORY="{{ project_slug }}"
+COMPOSE="docker compose -f docker-compose.yml -f docker-compose.app.yml"
+
+# A domain gets a certificate, an address cannot.
+if [[ "$ADDRESS" =~ ^[0-9.]+$ || "$ADDRESS" == *:* ]]; then
+    MODE="address"
+elif [[ "$ADDRESS" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$ ]]; then
+    MODE="domain"
+else
+    error "$ADDRESS is neither a lowercase domain nor an IP address."
+fi
+[[ "$TARGET" =~ ^[a-z_][a-z0-9_-]*@[A-Za-z0-9.:-]+$ ]] || error "$TARGET is not user@host."
+[[ "$SSH_PORT" =~ ^[0-9]+$ ]] || error "$SSH_PORT is not a port."
+
+SSH_OPTIONS=(-p "$SSH_PORT" -o ConnectTimeout=15)
+[ -n "$IDENTITY" ] && SSH_OPTIONS+=(-i "$IDENTITY" -o IdentitiesOnly=yes)
+# Commands for the server are built here, from values checked above.
+# shellcheck disable=SC2029
+remote() { ssh "${SSH_OPTIONS[@]}" "$TARGET" "$@"; }
+
+# Preflight, everything that can be checked before touching the server.
+command -v rsync >/dev/null 2>&1 || error "rsync is required."
+[ -d containers ] || error "No containers/ directory, run ./scripts/setup.sh first."
+[ -f "$ENVIRONMENT_FILE" ] || error "No $ENVIRONMENT_FILE. Copy .env.example, fill in production values, and keep it out of git."
+
+# Placeholders left in the production settings, by name, never by value.
+placeholders=$(grep -E '^[A-Z0-9_]+=(your-|replace-|changeme)' "$ENVIRONMENT_FILE" | cut -d= -f1 || true)
+[ -z "$placeholders" ] || error "$ENVIRONMENT_FILE still has placeholder values for: $(echo "$placeholders" | tr '\n' ' ')"
+if grep -qE '^ENVIRONMENT=(local|development)$' "$ENVIRONMENT_FILE"; then
+    error "$ENVIRONMENT_FILE sets ENVIRONMENT for development, set it to production."
+fi
+
+# The settings that go to the server, with this deployment's address. Built
+# in a private temporary file and removed however the script ends.
+STAGING="$(mktemp -d)"
+trap 'rm -rf "$STAGING"' EXIT
+chmod 700 "$STAGING"
+
+set_value() {
+    local key="$1" value="$2" file="$3"
+    grep -v "^${key}=" "$file" > "$file.next" || true
+    printf '%s=%s\n' "$key" "$value" >> "$file.next"
+    mv "$file.next" "$file"
+}
+
+cp "$ENVIRONMENT_FILE" "$STAGING/.env"
+chmod 600 "$STAGING/.env"
+set_value APP_DOMAIN "$ADDRESS" "$STAGING/.env"
+if [ "$MODE" = "domain" ]; then
+    set_value TRAEFIK_CERTIFICATE_RESOLVER le "$STAGING/.env"
+else
+    set_value TRAEFIK_CERTIFICATE_RESOLVER "" "$STAGING/.env"
+fi
+
+# The dashboard login, hashed from the production password rather than
+# shipping the one `setup.sh` made for this machine.
+HTPASSWD="containers/networking/proxies/traefik/secrets/.htpasswd"
+if [ -f "$HTPASSWD" ]; then
+    password=$(sed -n 's/^TRAEFIK_DASHBOARD_PASSWORD=//p' "$ENVIRONMENT_FILE" | head -1 | tr -d '"')
+    [ -n "$password" ] || error "$ENVIRONMENT_FILE has no TRAEFIK_DASHBOARD_PASSWORD for the dashboard login."
+    hash=$(printf '%s' "$password" | openssl passwd -6 -stdin) || error "openssl could not hash the dashboard password."
+    printf 'admin:%s\n' "$hash" > "$STAGING/.htpasswd"
+    unset password hash
+fi
+
+info "Checking $TARGET."
+remote "command -v rsync >/dev/null && docker compose version >/dev/null" ||
+    error "$TARGET needs rsync, and Docker with Compose for its login user."
+
+info "Copying the project to $TARGET:~/$REMOTE_DIRECTORY."
+# Excluded paths are also kept on the server, so the certificates `Traefik`
+# has issued and the settings survive every deploy. Files are readable by
+# all, the services' own users map to other user IDs than the owner, and
+# the home directory above keeps everyone else out.
+rsync -az --delete --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r \
+    -e "ssh ${SSH_OPTIONS[*]}" \
+    --exclude='.git/' --exclude='.venv/' --exclude='__pycache__/' \
+    --exclude='.mypy_cache/' --exclude='.pytest_cache/' --exclude='.ruff_cache/' \
+    --exclude='htmlcov/' --exclude='.coverage' --exclude='node_modules/' \
+    --exclude='.env' --exclude='.env.*' --exclude='backups/' \
+    --exclude='deploy/backup.env' --exclude='deploy/ssh/' \
+    --exclude='acme.json' --exclude='.htpasswd' \
+    ./ "$TARGET:$REMOTE_DIRECTORY/"
+
+# The settings readable by the login user only, unlike the rest.
+rsync -az -e "ssh ${SSH_OPTIONS[*]}" --chmod=F600 "$STAGING/.env" "$TARGET:$REMOTE_DIRECTORY/.env"
+if [ -f "$STAGING/.htpasswd" ]; then
+    rsync -az -e "ssh ${SSH_OPTIONS[*]}" --chmod=F644 "$STAGING/.htpasswd" "$TARGET:$REMOTE_DIRECTORY/$HTPASSWD"
+fi
+
+RELEASE="$(git rev-parse --short HEAD 2>/dev/null || echo development)"
+
+info "Building and starting the stack, release $RELEASE."
+# shellcheck disable=SC2087 # Expanded here on purpose, the values are checked above.
+remote bash -s <<EOF
+set -euo pipefail
+cd "$REMOTE_DIRECTORY"
+
+# Rootless Docker serves its socket from the user's runtime directory, and
+# Traefik mounts whichever socket this daemon listens on.
+socket=\$(docker context inspect --format '{{ "{{" }}.Endpoints.docker.Host{{ "}}" }}')
+socket=\${socket#unix://}
+grep -v '^DOCKER_SOCKET=' .env > .env.next || true
+printf 'DOCKER_SOCKET=%s\n' "\$socket" >> .env.next
+mv .env.next .env
+chmod 600 .env
+
+$COMPOSE config --quiet
+RELEASE=$RELEASE $COMPOSE build --build-arg RELEASE=$RELEASE
+
+# Load the settings in a throwaway container first. The application refuses
+# settings it cannot run on, and finding that out by starting it would mean
+# the running containers were already replaced by ones that crash. Its
+# input is closed, or it would read the rest of this script as its own.
+if ! $COMPOSE run --rm --no-deps -T app python -c 'import app.core.settings' </dev/null >/dev/null 2>settings-error.log; then
+    # The message only, never the settings values pydantic echoes after it.
+    grep -iE 'error' settings-error.log | sed 's/ \[type=.*\$//' | tail -n 3 >&2
+    rm -f settings-error.log
+    echo "The new settings are rejected, the running stack was left as it was." >&2
+    exit 1
+fi
+rm -f settings-error.log
+
+$COMPOSE up -d --remove-orphans --wait --wait-timeout 300
+docker image prune -f >/dev/null
+$COMPOSE ps --format 'table {{ "{{" }}.Service{{ "}}" }}\t{{ "{{" }}.Status{{ "}}" }}'
+EOF
+
+if [ "$MODE" = "domain" ]; then
+    info "Waiting for https://$ADDRESS to answer, the first certificate can take a minute."
+    for _ in $(seq 1 24); do
+        if curl -fsS -o /dev/null --max-time 10 "https://$ADDRESS/api/v1/ready"; then
+            info "Deployed, https://$ADDRESS/api/v1/ready answers."
+            exit 0
+        fi
+        sleep 5
+    done
+    error "The stack is healthy on the server, but https://$ADDRESS/api/v1/ready does not answer. Check that DNS points at the server and ports 80 and 443 are open."
+fi
+
+warn "Deployed on $ADDRESS without a certificate. Clients will refuse it, deploy with a domain to serve real traffic."
