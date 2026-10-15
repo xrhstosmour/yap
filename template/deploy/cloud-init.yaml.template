@@ -1,23 +1,29 @@
 #cloud-config
-# First-boot setup for a fresh Debian server: one key-only `deploy` user,
-# no root or password login over SSH, a firewall open to SSH and HTTP(S)
-# only, fail2ban on SSH, security updates applied unattended, and Docker.
-# Paste it as the provider's user data when creating the machine, after
-# replacing the key below with your own public key.
+# First-boot setup for a fresh Debian server: an `admin` user for sudo and
+# a `deploy` user without it, both logging in with a key only, no root or
+# password login over SSH, a firewall open to SSH and HTTP(S) only,
+# fail2ban on SSH, security updates applied unattended, and rootless
+# Docker for `deploy`. Paste it as the provider's user data when creating
+# the machine, after replacing the two keys below with your own.
 #
-# Docker publishes ports through its own iptables rules, past ufw. The
-# compose files publish the infrastructure on 127.0.0.1 only, keep any
-# port added later on 127.0.0.1 too unless it is meant to be public.
+# Docker and every container run as `deploy`, so breaking out of a
+# container lands in an account with no sudo, not in root. Their ports
+# open on the host like any other program's and obey ufw.
 
 users:
-  - name: deploy
+  - name: admin
     groups: [sudo]
     shell: /bin/bash
     lock_passwd: true
     # No password exists to type, so sudo cannot ask for one.
     sudo: "ALL=(ALL) NOPASSWD:ALL"
     ssh_authorized_keys:
-      - replace-with-your-public-key
+      - replace-with-your-admin-public-key
+  - name: deploy
+    shell: /bin/bash
+    lock_passwd: true
+    ssh_authorized_keys:
+      - replace-with-your-deploy-public-key
 
 disable_root: true
 ssh_pwauth: false
@@ -27,10 +33,15 @@ package_upgrade: true
 packages:
   - ca-certificates
   - curl
-  - git
-  - ufw
+  - dbus-user-session
   - fail2ban
+  - git
   - python3-systemd
+  - rsync
+  - slirp4netns
+  - sudo
+  - ufw
+  - uidmap
   - unattended-upgrades
   - apt-listchanges
 
@@ -42,7 +53,7 @@ write_files:
       PasswordAuthentication no
       KbdInteractiveAuthentication no
       AuthenticationMethods publickey
-      AllowUsers deploy
+      AllowUsers admin deploy
       MaxAuthTries 3
       X11Forwarding no
 
@@ -65,6 +76,63 @@ write_files:
       findtime = 10m
       bantime = 1h
 
+  # The proxy in rootless Docker binds 80 and 443 without root.
+  - path: /etc/sysctl.d/60-rootless-docker.conf
+    permissions: "0644"
+    content: |
+      net.ipv4.ip_unprivileged_port_start = 80
+
+  # Lets the containers of `deploy` set memory, CPU and process limits.
+  - path: /etc/systemd/system/user@.service.d/delegate.conf
+    permissions: "0644"
+    content: |
+      [Service]
+      Delegate=cpu cpuset io memory pids
+
+  - path: /usr/local/sbin/rootless-docker
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      # Installs rootless Docker for `deploy`, run once by cloud-init.
+      set -euo pipefail
+      runtime="/run/user/$(id -u deploy)"
+      as_deploy() {
+          sudo -u deploy -H XDG_RUNTIME_DIR="$runtime" \
+              DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime/bus" "$@"
+      }
+
+      # Only the binaries are wanted, the system wide daemon stays off.
+      systemctl disable --now docker.service docker.socket containerd.service
+      systemctl mask docker.service docker.socket containerd.service
+      rm -f /var/run/docker.sock
+
+      # The user's systemd, and with it Docker and the containers, starts
+      # at boot without anyone logging in.
+      systemctl daemon-reload
+      loginctl enable-linger deploy
+      for _ in $(seq 1 30); do
+          [ -S "$runtime/bus" ] && break
+          sleep 1
+      done
+
+      # The real client address has to reach the proxy, for rate limits
+      # and logs. RootlessKit 3 keeps it when Docker's own proxy is off,
+      # older releases only with the slower slirp4netns port driver.
+      major=$(rootlesskit --version | grep -oE '[0-9]+' | head -1)
+      configuration=/home/deploy/.config
+      sudo -u deploy mkdir -p "$configuration/docker" "$configuration/systemd/user/docker.service.d"
+      if [ "$major" -ge 3 ]; then
+          echo '{ "userland-proxy": false }' | sudo -u deploy tee "$configuration/docker/daemon.json" >/dev/null
+      else
+          printf '[Service]\nEnvironment="DOCKERD_ROOTLESS_ROOTLESSKIT_NET=slirp4netns"\nEnvironment="DOCKERD_ROOTLESS_ROOTLESSKIT_PORT_DRIVER=slirp4netns"\n' |
+              sudo -u deploy tee "$configuration/systemd/user/docker.service.d/override.conf" >/dev/null
+      fi
+
+      modprobe nf_tables || true
+      as_deploy dockerd-rootless-setuptool.sh install
+      # Plain `docker` reaches the rootless daemon, also over SSH.
+      as_deploy docker context use rootless
+
 runcmd:
   - ufw default deny incoming
   - ufw default allow outgoing
@@ -76,6 +144,7 @@ runcmd:
   - systemctl enable --now fail2ban
   - systemctl restart fail2ban
   - systemctl restart ssh
+  - sysctl --system
   # Docker's own repository, the Debian package lags behind and has no
   # compose plugin.
   - install -m 0755 -d /etc/apt/keyrings
@@ -83,6 +152,5 @@ runcmd:
   - chmod a+r /etc/apt/keyrings/docker.asc
   - sh -c 'echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list'
   - apt-get update
-  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-  - usermod -aG docker deploy
-  - install -d -o deploy -g deploy /opt/{{ project_slug }}
+  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras
+  - /usr/local/sbin/rootless-docker
