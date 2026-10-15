@@ -613,6 +613,38 @@ class Settings(BaseSettings):
             "The API sends credentialed CORS responses to these origins."
         )
 
+    @model_validator(mode="after")
+    def _reject_development_mail_server(self) -> Self:
+        """Refuse to serve a deployed environment that mails nobody.
+
+        `SMTP_HOST` defaults to `localhost`, and the development stack sends
+        to `mailpit`, which keeps every message and delivers none. Either
+        one in a deployed environment means verification, reset and
+        magic-link emails are accepted, reported sent, and never arrive.
+
+        Returns:
+            The validated settings instance.
+
+        Raises:
+            ValueError: If a deployed environment sends to a local server.
+        """
+        if self.ENVIRONMENT == "local":
+            return self
+        if self.SMTP_HOST.strip().lower() not in {
+            "",
+            "localhost",
+            "127.0.0.1",
+            "::1",
+            "mailpit",
+        }:
+            return self
+        raise ValueError(
+            f"SMTP_HOST is '{self.SMTP_HOST}' while ENVIRONMENT is "
+            f"'{self.ENVIRONMENT}', so no email would reach anyone. Set "
+            "SMTP_HOST, SMTP_USER and SMTP_PASSWORD to a transactional email "
+            "provider."
+        )
+
 
 # Global settings instance - load once at module import.
 settings = Settings()
