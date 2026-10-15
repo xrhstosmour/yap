@@ -12,6 +12,9 @@ include:
 {%- if include_traefik %}
   - containers/networking/proxies/traefik/docker-compose.yml
 {%- endif %}
+{%- if include_traefik and include_website %}
+  - containers/web/static/nginx/docker-compose.yml
+{%- endif %}
 {%- if include_glitchtip %}
   - containers/monitoring/codebase/glitchtip/docker-compose.yml
 {%- endif %}
