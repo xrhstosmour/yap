@@ -1,16 +1,23 @@
 # Runs scripts/offsite_backup.sh once. Started nightly by backup.timer.
 #
-# Assumes the project is checked out at /opt/{{ project_slug }}. Install with:
-#   sudo cp deploy/backup.service deploy/backup.timer /etc/systemd/system/
-#   sudo systemctl enable --now backup.timer
-# A failed run shows in `systemctl status backup.service` and the journal.
+# A user unit of the login user that deploys, the one `scripts/deploy.sh`
+# copies the project to `~/{{ project_slug }}` for and that runs Docker,
+# rootless or through the docker group. Install with:
+#   mkdir -p ~/.config/systemd/user
+#   cp ~/{{ project_slug }}/deploy/backup.service ~/{{ project_slug }}/deploy/backup.timer ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now backup.timer
+# The timer fires without anyone logged in only when the user lingers,
+# which a sudoer turns on once with `sudo loginctl enable-linger <user>`.
+# A failed run shows in `systemctl --user status backup.service` and in
+# `journalctl --user -u backup.service`.
 
 [Unit]
 Description={{ project_name }} off-box backup
-Wants=network-online.target
-After=network-online.target docker.service
+# The user's rootless daemon, when there is one.
+After=docker.service
 
 [Service]
 Type=oneshot
-WorkingDirectory=/opt/{{ project_slug }}
-ExecStart=/opt/{{ project_slug }}/scripts/offsite_backup.sh
+WorkingDirectory=%h/{{ project_slug }}
+ExecStart=%h/{{ project_slug }}/scripts/offsite_backup.sh
