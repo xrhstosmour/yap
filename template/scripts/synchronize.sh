@@ -141,6 +141,7 @@ development_port=${development_port:-8000}
 
 has_extra() { grep -q "containers/.*/$1/docker-compose.yml" docker-compose.yml 2>/dev/null && echo "true" || echo "false"; }
 include_traefik=$(has_extra "traefik")
+include_website=$(has_extra "nginx")
 include_glitchtip=$(has_extra "glitchtip")
 include_metabase=$(has_extra "metabase")
 include_pgadmin4=$(has_extra "pgadmin4")
@@ -202,6 +203,7 @@ author_name: "${author_name}"
 author_email: "${author_email}"
 first_superuser_full_name: "${superuser}"
 include_traefik: $include_traefik
+include_website: $include_website
 traefik_host: "${traefik_host}"
 timezone: "${timezone}"
 include_glitchtip: $include_glitchtip

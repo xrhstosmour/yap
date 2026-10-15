@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ project_name }}</title>
+</head>
+<body>
+    <h1>{{ project_name }}</h1>
+    <p>Replace website/index.html with the real site. Every file here is served as it is, on the API's domain.</p>
+</body>
+</html>

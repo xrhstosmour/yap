@@ -91,6 +91,12 @@ traefik_host:
   default: "traefik.{{ project_slug }}.local"
   when: "include_traefik"
 
+include_website:
+  type: bool
+  help: "Serve a static website from website/ on the API's domain?"
+  default: false
+  when: "include_traefik"
+
 timezone:
   type: str
   help: "Server timezone:"
@@ -186,6 +192,10 @@ nested:
   type: bool
   help: "Is this project nested inside a larger repository?"
   default: false
+
+# A starting point only, the project's own site is never replaced by it.
+_skip_if_exists:
+  - website/index.html
 
 _exclude:
   - "**/__pycache__"
