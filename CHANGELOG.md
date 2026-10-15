@@ -65,6 +65,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Refuse to start a deployed environment whose `SMTP_HOST` is `localhost`, a loopback address or `mailpit`, where every email was reported sent and never arrived
 - Write the generated `Traefik` dashboard password to `.env` only, `assemble.py` also wrote it into the committed `.env.example` whenever `.env` existed
 - Ignore `Traefik`'s `acme.json`, which holds the `Let's Encrypt` private keys
 - Answer HTTPS on an IP address deployed by `scripts/deploy.sh`, which the strict SNI TLS options turned away with 421, and wait for it to report ready like a domain

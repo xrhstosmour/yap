@@ -48,6 +48,7 @@ class TestSettingsValidation:
             RABBITMQ_PASSWORD="test",
             CRYPTO_KEY="dGVzdC1rZXktMzItYnl0ZXMtbG9uZw==",
             GOOGLE_CLIENT_SECRET="test-secret",
+            SMTP_HOST="smtp.example.com",
             SMTP_PASSWORD="test-pass",
             STORAGE_SECRET_KEY="test-key",
         )
@@ -370,6 +371,7 @@ class TestLoopbackCorsOrigins:
             ENVIRONMENT="production",
             FRONTEND_HOST="https://app.example.com",
             BACKEND_CORS_ORIGINS="https://admin.example.com",
+            SMTP_HOST="smtp.example.com",
             **self._SECRETS,
         )
 
@@ -382,3 +384,53 @@ class TestLoopbackCorsOrigins:
         settings = Settings(_env_file=None, ENVIRONMENT="local", **self._SECRETS)
 
         assert "http://localhost:5173" in settings.all_cors_origins
+
+
+class TestDevelopmentMailServer:
+    """A deployed environment must send email somewhere that delivers it."""
+
+    _DEPLOYED = {
+        "SECRET_KEY": "test-key",
+        "POSTGRESQL_PASSWORD": "test",
+        "FIRST_SUPERUSER_PASSWORD": "test",
+        "RABBITMQ_PASSWORD": "test",
+        "CRYPTO_KEY": "dGVzdC1rZXktMzItYnl0ZXMtbG9uZw==",
+        "FRONTEND_HOST": "https://app.example.com",
+        "BACKEND_CORS_ORIGINS": [],
+    }
+
+    @pytest.mark.parametrize("host", ["localhost", "mailpit", "127.0.0.1", ""])
+    def test_production_rejects_a_local_mail_server(self, host: str) -> None:
+        """The default and the development catcher both swallow every email."""
+        from app.core.settings import Settings
+
+        with pytest.raises(ValueError, match="no email would reach anyone"):
+            Settings(
+                _env_file=None,
+                ENVIRONMENT="production",
+                SMTP_HOST=host,
+                **self._DEPLOYED,
+            )
+
+    def test_production_accepts_a_provider(self) -> None:
+        """A real mail server still starts."""
+        from app.core.settings import Settings
+
+        settings = Settings(
+            _env_file=None,
+            ENVIRONMENT="production",
+            SMTP_HOST="smtp.example.com",
+            **self._DEPLOYED,
+        )
+
+        assert settings.SMTP_HOST == "smtp.example.com"
+
+    def test_local_keeps_mailpit(self) -> None:
+        """Development sends to the catcher on purpose."""
+        from app.core.settings import Settings
+
+        settings = Settings(
+            _env_file=None, ENVIRONMENT="local", SMTP_HOST="mailpit", **self._DEPLOYED
+        )
+
+        assert settings.SMTP_HOST == "mailpit"
