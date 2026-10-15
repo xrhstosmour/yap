@@ -303,6 +303,8 @@ class TwoFactorStatusResponse(BaseSchema):
         is_enabled: Whether TOTP 2FA is active on the account.
         enabled_at: When it was turned on, null while it is off.
         recovery_codes_remaining: Unused recovery codes left, zero while off.
+        recovery_codes_total: How many codes the current set has, used or
+            not, zero while off.
     """
 
     is_enabled: bool = Field(description="Whether TOTP 2FA is active")
@@ -311,6 +313,9 @@ class TwoFactorStatusResponse(BaseSchema):
     )
     recovery_codes_remaining: int = Field(
         default=0, description="Unused recovery codes left"
+    )
+    recovery_codes_total: int = Field(
+        default=0, description="Codes in the current set, used or not"
     )
 
 
