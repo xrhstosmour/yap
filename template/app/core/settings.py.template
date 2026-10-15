@@ -20,10 +20,12 @@ from pydantic import BeforeValidator
 from pydantic import EmailStr
 from pydantic import Field
 from pydantic import HttpUrl
+from pydantic import IPvAnyNetwork
 from pydantic import PostgresDsn
 from pydantic import computed_field
 from pydantic import model_validator
 from pydantic_settings import BaseSettings
+from pydantic_settings import NoDecode
 from pydantic_settings import SettingsConfigDict
 
 
@@ -47,6 +49,21 @@ def parse_cors(v: Any) -> list[str] | str:  # noqa: ANN401
     elif isinstance(v, (list, str)):
         return v
     raise ValueError(v)
+
+
+#: Where the administration surface answers unless configured otherwise:
+#: loopback, the RFC 1918 ranges, carrier-grade NAT, which is where
+#: `Tailscale` addresses live, and IPv6 unique local. A VPN or the host
+#: itself is the way in, never the open internet.
+PRIVATE_NETWORKS = (
+    "127.0.0.0/8",
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "100.64.0.0/10",
+    "::1/128",
+    "fc00::/7",
+)
 
 
 class Settings(BaseSettings):
@@ -133,6 +150,13 @@ class Settings(BaseSettings):
             origins = [str(o) for o in self.BACKEND_CORS_ORIGINS]
 
         return [str(origin).rstrip("/") for origin in origins] + [self.FRONTEND_HOST]
+
+    # Administration surface. Who may reach `/admin` at all, by client
+    # address, comma separated. Empty turns the surface off. See
+    # `app.admin.network` for why the client address can be trusted.
+    ADMIN_ALLOWED_NETWORKS: Annotated[
+        list[IPvAnyNetwork], NoDecode, BeforeValidator(parse_cors)
+    ] = Field(default=list(PRIVATE_NETWORKS), validate_default=True)
 
     # PostgreSQL Database.
     POSTGRESQL_SERVER: str = "localhost"

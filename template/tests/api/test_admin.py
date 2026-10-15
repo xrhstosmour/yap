@@ -292,6 +292,55 @@ class TestSecondFactor:
         assert client.cookies.get(SESSION_COOKIE) is None
 
 
+class TestReachingTheSurface:
+    """Tests for who the surface answers at all, by network."""
+
+    @staticmethod
+    async def _get(host: str, path: str) -> int:
+        transport = ASGITransport(app=app, client=(host, 40000))
+        async with AsyncClient(transport=transport, base_url="http://test") as one:
+            return (await one.get(path)).status_code
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        "path", ["/admin", "/admin/login", "/admin/static/admin.css"]
+    )
+    async def test_the_internet_finds_nothing(self, path: str) -> None:
+        """The same 404 as a path that does not exist, stylesheet included."""
+        assert await self._get("203.0.113.7", path) == 404
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        "host", ["127.0.0.1", "100.101.102.103", "::ffff:10.0.0.4"]
+    )
+    async def test_a_private_network_finds_the_form(self, host: str) -> None:
+        """The host, a `Tailscale` address, and IPv4 on a dual-stack socket."""
+        assert await self._get(host, "/admin/login") == 200
+
+    @pytest.mark.anyio
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_the_api_still_answers_the_internet(self) -> None:
+        """Only the surface is fenced off."""
+        assert await self._get("203.0.113.7", "/api/v1/health") != 404
+
+    def test_networks_are_read_comma_separated(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The way an environment variable carries them."""
+        from ipaddress import ip_network
+
+        from app.core.settings import Settings
+
+        monkeypatch.setenv("ADMIN_ALLOWED_NETWORKS", "10.1.0.0/16, 100.64.0.0/10")
+
+        configured = Settings()
+
+        assert configured.ADMIN_ALLOWED_NETWORKS == [
+            ip_network("10.1.0.0/16"),
+            ip_network("100.64.0.0/10"),
+        ]
+
+
 @pytest.mark.usefixtures("override_get_async_session")
 class TestReachingThePages:
     """Tests for who the pages answer."""
