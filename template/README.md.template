@@ -108,7 +108,7 @@
 
 You need:
 
-- [uv](https://docs.astasral.sh/uv/getting-started/installation/)
+- [uv](https://docs.astral.sh/uv/getting-started/installation/)
 - [Docker](https://docs.docker.com/engine/install/)
 - Review `.env` and adjust as needed.
 

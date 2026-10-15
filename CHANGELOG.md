@@ -11,7 +11,6 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 - Add `scripts/deploy.sh`, deploying the project to a server over SSH with its production settings, building and starting it there, and waiting until it is healthy, with a `Let's Encrypt` certificate when given a domain
 - Issue a `Let's Encrypt` certificate for `APP_DOMAIN` when `TRAEFIK_CERTIFICATE_RESOLVER` is `le`, and watch a rootless `Docker` socket set in `DOCKER_SOCKET`
-||||||| parent of 3b386ac (Add `scripts/deploy.sh` deploying the stack over SSH)
 - Export every row of every table pointing at the account, without its credential columns, and fail a test until a new column pointing at the account is classified exported or withheld in `app/core/personal_data.py` or the project's own `personal_data_project.py`
 - Route `/api/` and `/.well-known/` on `APP_DOMAIN` to the app when `Traefik` is included, and nothing else, so `/admin` and `/try` never reach the proxy
 - Serve `/.well-known/apple-app-site-association` and `assetlinks.json` from `APPLE_APP_IDS`, `ANDROID_APP_PACKAGE` and `ANDROID_CERT_FINGERPRINTS`, so the native apps can use the domain's passkeys
