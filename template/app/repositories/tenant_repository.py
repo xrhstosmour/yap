@@ -6,7 +6,6 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.sql import Select
 from sqlmodel import func
 from sqlmodel import select
 
@@ -66,8 +65,11 @@ class TenantRepository(BaseRepository[Tenant]):
         sort_by: str = "name",
         sort_order: str = "asc",
     ) -> tuple[list[Tenant], int]:
-        query: Select[tuple[Tenant]] = select(Tenant)
-        count_query: Select[tuple[int]] = select(func.count(Tenant.id))  # type: ignore[arg-type]
+        # Inferred rather than annotated. `Select` changed its type parameter
+        # between SQLAlchemy 2.0 and 2.1, so any written-out shape is wrong on
+        # one of them, and a new project resolves whichever is current.
+        query = select(Tenant)
+        count_query = select(func.count(Tenant.id))  # type: ignore[arg-type]
 
         query = self._apply_soft_delete_filter(query)
         count_query = self._apply_soft_delete_filter(count_query)  # type: ignore[arg-type]
