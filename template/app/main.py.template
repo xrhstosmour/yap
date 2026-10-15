@@ -28,6 +28,7 @@ from sentry_sdk.types import Event
 from sentry_sdk.types import Hint
 from starlette.middleware.gzip import GZipMiddleware
 
+from app.admin.network import AdminNetworkMiddleware
 from app.admin.router import router as admin_router
 from app.admin.session import NotSignedInError
 from app.api.client_version import ClientVersionMiddleware
@@ -217,6 +218,10 @@ def create_app() -> FastAPI:
 
     # Compression middleware, for performance.
     app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+    # Keeps the administration surface to private networks. Inside the
+    # security headers, so its 404 carries them like any other.
+    app.add_middleware(AdminNetworkMiddleware, networks=settings.ADMIN_ALLOWED_NETWORKS)
 
     # Security headers and bot blocking middleware.
     app.add_middleware(SecurityHeadersMiddleware)
