@@ -280,6 +280,20 @@ class TwoFactorVerifyRequest(BaseSchema):
     )
 
 
+class TwoFactorVerifyResponse(TokenResponse):
+    """Response from POST /auth/2fa/verify.
+
+    Attributes:
+        recovery_codes_remaining: Unused recovery codes left, set only when
+            a recovery code was used to sign in.
+    """
+
+    recovery_codes_remaining: int | None = Field(
+        default=None,
+        description="Unused recovery codes left, after signing in with one",
+    )
+
+
 class TwoFactorDisableRequest(BaseSchema):
     """Request for DELETE /auth/2fa/disable.
 

@@ -13,6 +13,7 @@ from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import delete
+from sqlalchemy import func
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import and_
@@ -349,6 +350,20 @@ class TwoFactorAuthService:
                 return user
 
         raise InvalidTOTPError("Invalid recovery code.")
+
+    async def unused_recovery_code_count(self, user_id: UUID) -> int:
+        """How many of a user's recovery codes are still unused.
+
+        Told to whoever just signed in with one, so they know how close
+        they are to running out and can make new ones in time.
+        """
+        query = select(func.count()).where(
+            and_(
+                TotpRecoveryCode.user_id == user_id,  # type: ignore[arg-type]
+                TotpRecoveryCode.used_at.is_(None),  # type: ignore[union-attr]
+            )
+        )
+        return int((await self.session.execute(query)).scalar_one())
 
     # Management
 
