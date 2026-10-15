@@ -98,7 +98,7 @@
 ### DevOps
 
 - **GitHub Actions CI/CD**: Lint, type check, test, security scan (Trivy)
-- **Traefik + Let's Encrypt**: Automatic HTTPS for production
+- **Traefik**: Serves `/api/` and `/.well-known/` on `APP_DOMAIN` over HTTPS and redirects plain HTTP, leaving `/admin` and `/try` to the loopback port. Certificates come from `containers/networking/proxies/traefik/configuration/tls.yml`, or from its Let's Encrypt resolver once uncommented
 - **Metabase**: BI dashboards and data exploration
 - **Mailpit**: Email testing in development
 - **PGAdmin4**: PostgreSQL management UI

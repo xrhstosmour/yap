@@ -67,6 +67,19 @@ services:
       # Override APP_BIND_ADDRESS to 0.0.0.0 to publish deliberately, for a
       # deployment with no reverse proxy that is fronted some other way.
       - "${APP_BIND_ADDRESS:-127.0.0.1}:8000:8000"
+{%- if include_traefik %}
+    labels:
+      # Only the API and the app association files are public. `/admin` and
+      # the `/try` documentation are left off on purpose: reach them over a
+      # private network to the loopback port above instead.
+      - "traefik.enable=true"
+      - "traefik.docker.network={{ project_slug }}-internal"
+      - "traefik.http.routers.{{ project_slug }}-app.rule=Host(`${APP_DOMAIN?Variable not set}`) && (PathPrefix(`/api/`) || PathPrefix(`/.well-known/`))"
+      - "traefik.http.routers.{{ project_slug }}-app.entrypoints=web_secure"
+      - "traefik.http.routers.{{ project_slug }}-app.tls=true"
+      - "traefik.http.routers.{{ project_slug }}-app.tls.options=tls-opts@file"
+      - "traefik.http.services.{{ project_slug }}-app.loadbalancer.server.port=8000"
+{%- endif %}
     networks:
       - "internal"
     depends_on:
