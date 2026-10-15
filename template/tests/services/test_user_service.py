@@ -349,6 +349,8 @@ def mock_user_service(mock_session: MagicMock) -> UserService:
     svc = UserService(mock_session)
     svc.user_repository = MagicMock()
     svc.audit_repository = MagicMock()
+    svc.personal_data = MagicMock()
+    svc.personal_data.collect = AsyncMock(return_value={"account": {}, "records": {}})
     return svc
 
 

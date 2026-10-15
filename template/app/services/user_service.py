@@ -37,6 +37,7 @@ from app.repositories.user_repository import UserRepository
 from app.schemas.user import UserCreate
 from app.schemas.user import UserUpdate
 from app.schemas.user import UserUpdateMe
+from app.services.personal_data_service import PersonalDataService
 from app.services.username import UsernameTakenError
 from app.services.username import resolve_username_change
 
@@ -78,6 +79,7 @@ class UserService:
         self.session = session
         self.user_repository = UserRepository(session)
         self.audit_repository = AuditLogRepository(session)
+        self.personal_data = PersonalDataService(session)
 
     async def get_by_id(self, user_id: UUID) -> User | None:
         """Get user by ID.
@@ -657,6 +659,10 @@ class UserService:
             for log in activity_logs
         ]
 
+        # Every other row that leads back to the account, the project's
+        # tables included, as classified in `app.core.personal_data`.
+        personal_data = await self.personal_data.collect(user.id)
+
         await self.audit_repository.log_user_action_safe(
             action=AuditAction.DATA_EXPORT,
             user_id=user.id,
@@ -675,4 +681,6 @@ class UserService:
             "activity": activity,
             "activity_total": activity_total,
             "activity_truncated": activity_total > len(activity),
+            "account": personal_data["account"],
+            "records": personal_data["records"],
         }

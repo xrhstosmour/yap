@@ -50,7 +50,10 @@ background tasks, and comprehensive security features.
 
 ### Compliance
 - GDPR account deletion (Article 17): anonymizes PII, revokes keys, invalidates JWTs.
-- GDPR data export (Article 20): JSON with profile, API keys, audit activity.
+- GDPR data export (Article 20): JSON with profile, API keys, audit activity, and
+  every row of every table pointing at the account, as classified in
+  `app/core/personal_data.py` and `personal_data_project.py`. A test fails
+  until a new column pointing at the account is exported or withheld.
 - Audit logging on all significant actions.
 
 ### Observability
