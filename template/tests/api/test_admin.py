@@ -318,6 +318,32 @@ class TestReachingTheSurface:
         assert await self._get(host, "/admin/login") == 200
 
     @pytest.mark.anyio
+    async def test_a_proxy_that_is_not_trusted_shuts_it(self) -> None:
+        """`FORWARDED_ALLOW_IPS` missing the proxy fails closed.
+
+        The proxy's own private address is the client then, and the
+        visitor's public one only shows in the header.
+        """
+        transport = ASGITransport(app=app, client=("172.18.0.5", 40000))
+        async with AsyncClient(transport=transport, base_url="http://test") as one:
+            response = await one.get(
+                "/admin/login", headers={"X-Forwarded-For": "203.0.113.7"}
+            )
+
+        assert response.status_code == 404
+
+    @pytest.mark.anyio
+    async def test_a_private_visitor_through_a_proxy_finds_the_form(self) -> None:
+        """A `Tailscale` address forwarded by a private proxy is let in."""
+        transport = ASGITransport(app=app, client=("172.18.0.5", 40000))
+        async with AsyncClient(transport=transport, base_url="http://test") as one:
+            response = await one.get(
+                "/admin/login", headers={"X-Forwarded-For": "100.101.102.103"}
+            )
+
+        assert response.status_code == 200
+
+    @pytest.mark.anyio
     @pytest.mark.usefixtures("override_get_async_session")
     async def test_the_api_still_answers_the_internet(self) -> None:
         """Only the surface is fenced off."""

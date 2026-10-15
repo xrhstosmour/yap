@@ -136,6 +136,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Check every `X-Forwarded-For` address against `ADMIN_ALLOWED_NETWORKS` too, a `FORWARDED_ALLOW_IPS` that missed the proxy made every visitor look like the proxy's private address and opened `/admin` to the internet
 - Give `/admin` sessions their own token type, checked against `token_version` and revoked on sign-out, the cookie carried an ordinary access token that the API accepted as a bearer for two hours, that outlived a password change, and that a copy kept working after signing out
 - Escape recipient values in the HTML body of `send_batch_emails`, a name carrying markup became part of the message
 - Ask the administration sign-in for the second factor and rate limit it, a superuser who turned 2FA on still signed in to `/admin` with the password alone, and the form had no throttle against guessing

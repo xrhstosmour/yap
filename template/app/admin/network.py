@@ -6,8 +6,10 @@ alone to guess passwords against.
 
 The client address is the one `uvicorn` resolved. It honours
 `X-Forwarded-For` only from the peers in `FORWARDED_ALLOW_IPS`, so behind
-a proxy that list has to name the proxy, or every request looks like it
-came from the proxy's own private address and is let in.
+a proxy whose address that list misses, every request looks like it came
+from the proxy's own private address. Every address the header names has
+to be allowed too, so that mistake shuts the surface rather than opening
+it to the internet.
 """
 
 from __future__ import annotations
@@ -30,6 +32,16 @@ from app.core.security_middleware import ADMIN_PATH_PREFIX
 def _is_administration(path: str) -> bool:
     """Whether `path` belongs to the surface, its stylesheet included."""
     return path == ADMIN_PATH_PREFIX or path.startswith(f"{ADMIN_PATH_PREFIX}/")
+
+
+def _forwarded(scope: Scope) -> list[str]:
+    """Every address the `X-Forwarded-For` headers name, in order."""
+    return [
+        hop.strip()
+        for name, value in scope.get("headers", [])
+        if name == b"x-forwarded-for"
+        for hop in value.decode("latin-1").split(",")
+    ]
 
 
 class AdminNetworkMiddleware:
@@ -65,7 +77,8 @@ class AdminNetworkMiddleware:
         """Refuse with a plain 404, or pass the request on."""
         if scope["type"] == "http" and _is_administration(scope["path"]):
             client = scope.get("client")
-            if not self.allows(client[0] if client else None):
+            hops = [client[0] if client else None, *_forwarded(scope)]
+            if not all(self.allows(hop) for hop in hops):
                 response = JSONResponse({"detail": "Not Found"}, status_code=404)
                 await response(scope, receive, send)
                 return
