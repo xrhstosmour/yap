@@ -82,24 +82,40 @@ app/
 
 migrations/         Alembic versions
 tests/              pytest suite (api/, services/, repositories/, core/, models/)
-scripts/            setup.sh, lint.sh, backup.sh, offsite_backup.sh, restore.sh, assemble.py
+scripts/            setup.sh, lint.sh, deploy.sh, backup.sh, offsite_backup.sh, restore.sh, assemble.py
 deploy/             First-boot server setup, off-box backup configuration and its timer
 templates/email/    Jinja2 email templates
 ```
 
 ## Hosting
 
-`deploy/cloud-init.yaml` sets up a fresh Debian server on first boot:
-a `deploy` user that logs in with a key only, no root or password SSH,
-`ufw` open to SSH, 80 and 443 only, `fail2ban` on SSH, unattended
-security updates, and Docker. Put your public key in it and paste it as
-the provider's user data when creating the machine. Then, as `deploy`,
-clone the project into `/opt/<project>`, write `.env`, and start the
-stack.
+The server needs a login user with Docker and Compose, rootless or not,
+and `rsync`. `deploy/cloud-init.yaml` sets one up on a fresh Debian
+server: a `deploy` user that logs in with a key only, no root or
+password SSH, `ufw` open to SSH, 80 and 443 only, `fail2ban` on SSH,
+unattended security updates, and Docker. Put your public key in it and
+paste it as the provider's user data when creating the machine.
 
-Docker publishes ports past `ufw`. The compose files publish the
-infrastructure on `127.0.0.1`, keep any port added later there too
-unless it is meant to be public.
+Deploy from your own machine:
+
+```bash
+cp .env.example .env.production   # fill in production values, never commit it
+./scripts/deploy.sh deploy@203.0.113.10 api.example.com -p 2222 -i ~/.ssh/app_deploy
+```
+
+It refuses placeholder or development settings, copies the project to
+`~/<project>` on the server without git history or local settings,
+writes `.env` there readable by the login user only, sets `APP_DOMAIN`,
+hashes the dashboard password, builds, starts, and waits for every
+container to report healthy, then for `https://<domain>/api/v1/ready`.
+With a domain, `Traefik` gets a `Let's Encrypt` certificate, point its
+DNS at the server first. With an IP address it runs on a self-signed
+certificate, for trying a server out only. Run it again to deploy a new
+version, issued certificates and the settings on the server are kept.
+
+Docker publishes ports past `ufw` unless it runs rootless. The compose
+files publish the infrastructure on `127.0.0.1`, keep any port added
+later there too unless it is meant to be public.
 
 To run the nightly off-box backup, write `deploy/backup.env`, then link
 `deploy/backup.service` and `deploy/backup.timer` into
