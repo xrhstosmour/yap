@@ -117,9 +117,10 @@ Docker publishes ports past `ufw` unless it runs rootless. The compose
 files publish the infrastructure on `127.0.0.1`, keep any port added
 later there too unless it is meant to be public.
 
-To run the nightly off-box backup, write `deploy/backup.env`, then link
-`deploy/backup.service` and `deploy/backup.timer` into
-`/etc/systemd/system/` and enable the timer.
+To run the nightly off-box backup, write `deploy/backup.env` on the
+server, then install `deploy/backup.service` and `deploy/backup.timer` as
+user units of the login user, the steps are at the top of
+`deploy/backup.service`. Deploys keep `deploy/backup.env` in place.
 
 ## Backups
 
