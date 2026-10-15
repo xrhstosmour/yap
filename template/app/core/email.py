@@ -11,6 +11,7 @@ import asyncio
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from html import escape
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -211,7 +212,15 @@ async def send_batch_emails(
         try:
             personalized_subject = subject.format(**recipient)
             personalized_body = body.format(**recipient)
-            personalized_html = html.format(**recipient) if html else None
+            # Escaped for the HTML body only: a value is text, and a name
+            # carrying markup would otherwise become part of the message.
+            personalized_html = (
+                html.format(
+                    **{key: escape(str(value)) for key, value in recipient.items()}
+                )
+                if html
+                else None
+            )
 
             async with semaphore:
                 await send_email(

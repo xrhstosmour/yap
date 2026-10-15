@@ -272,6 +272,24 @@ class TestSendBatchEmails:
         assert mock_send.await_count == 2
 
     @pytest.mark.asyncio
+    async def test_values_are_escaped_in_the_html_body_only(self) -> None:
+        """A name carrying markup stays text in the HTML and as typed in plain."""
+        settings = _make_mock_settings()
+
+        with patch("app.core.email.send_email", new_callable=AsyncMock) as mock_send:
+            await send_batch_emails(
+                recipients=[{"email": "a@test.com", "name": "<a href=x>Al</a>"}],
+                subject="Hello",
+                body="Hi {name}",
+                html="<p>Hi {name}</p>",
+                settings=settings,
+            )
+
+        sent = mock_send.await_args.kwargs
+        assert sent["html"] == "<p>Hi &lt;a href=x&gt;Al&lt;/a&gt;</p>"
+        assert sent["body"] == "Hi <a href=x>Al</a>"
+
+    @pytest.mark.asyncio
     async def test_failure_logs_masked_recipient_not_plaintext_email(self) -> None:
         """A per-recipient failure must not log the plaintext email address."""
         settings = _make_mock_settings()
