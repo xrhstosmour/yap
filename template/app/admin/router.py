@@ -20,6 +20,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 
+from app.admin.session import SESSION_COOKIE
 from app.admin.session import CsrfToken
 from app.admin.session import CurrentAdministrator
 from app.admin.session import close_session
@@ -154,14 +155,16 @@ async def confirm_second_factor(
 
 
 @router.post("/logout", dependencies=[Depends(verify_csrf)])
-async def sign_out(administrator: CurrentAdministrator) -> RedirectResponse:
+async def sign_out(
+    request: Request, administrator: CurrentAdministrator
+) -> RedirectResponse:
     """End the session."""
     logger.info("admin_signed_out", user_id=str(administrator.id))
     response = RedirectResponse(
         router.url_path_for("sign_in_form"),
         status_code=status.HTTP_303_SEE_OTHER,
     )
-    close_session(response)
+    await close_session(response, request.cookies.get(SESSION_COOKIE))
     return response
 
 

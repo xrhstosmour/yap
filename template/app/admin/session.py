@@ -12,6 +12,8 @@ cookie.
 from __future__ import annotations
 
 import secrets
+from datetime import UTC
+from datetime import datetime
 from datetime import timedelta
 from typing import Annotated
 from uuid import UUID
@@ -25,8 +27,10 @@ from fastapi import Request
 from fastapi import Response
 from fastapi import status
 
+from app.core.security import blacklist_token
 from app.core.security import create_access_token
 from app.core.security import decode_token
+from app.core.security import is_token_blacklisted
 from app.core.settings import settings
 from app.core.tenant import system_context
 from app.dependencies import SessionDependency
@@ -45,6 +49,11 @@ CSRF_COOKIE = "admin_csrf"
 #: a way in well before the end of the day.
 SESSION_LIFETIME = timedelta(hours=2)
 
+#: The `type` claim of a session token. Not `access`, so the API refuses
+#: it as a bearer token, and an API token is refused here in turn: each
+#: lives as long as its own surface needs and no longer.
+SESSION_TOKEN_TYPE = "admin_session"
+
 
 def _is_secure() -> bool:
     """Whether cookies may only travel over TLS.
@@ -59,7 +68,14 @@ def open_session(response: Response, user: User) -> None:
     """Sign `user` in and hand the browser its forgery token."""
     response.set_cookie(
         SESSION_COOKIE,
-        create_access_token(user.id, expires_delta=SESSION_LIFETIME),
+        create_access_token(
+            user.id,
+            expires_delta=SESSION_LIFETIME,
+            additional_claims={
+                "type": SESSION_TOKEN_TYPE,
+                "token_version": user.token_version,
+            },
+        ),
         max_age=int(SESSION_LIFETIME.total_seconds()),
         httponly=True,
         secure=_is_secure(),
@@ -81,8 +97,21 @@ def open_session(response: Response, user: User) -> None:
     )
 
 
-def close_session(response: Response) -> None:
-    """Sign out, by throwing both cookies away."""
+async def close_session(response: Response, admin_session: str | None) -> None:
+    """Sign out, by revoking the token and throwing both cookies away.
+
+    Revoked as well as deleted, or a copy of the cookie taken before
+    signing out keeps working until it expires.
+    """
+    if admin_session:
+        try:
+            claims = decode_token(admin_session)
+        except jwt.InvalidTokenError:
+            claims = {}
+        identifier = claims.get("jti")
+        expires = claims.get("exp")
+        if isinstance(identifier, str) and isinstance(expires, int):
+            await blacklist_token(identifier, datetime.fromtimestamp(expires, UTC))
     response.delete_cookie(SESSION_COOKIE, path="/admin")
     response.delete_cookie(CSRF_COOKIE, path="/admin")
 
@@ -103,7 +132,8 @@ async def current_administrator(
 
     Checked against the account rather than trusted from the token: a
     session issued two hours ago says nothing about whether the account
-    has since been deactivated or had its role taken away.
+    has since been deactivated, had its role taken away, or signed out
+    everywhere.
 
     Raises:
         NotSignedInError: If there is no usable session.
@@ -114,8 +144,13 @@ async def current_administrator(
         claims = decode_token(admin_session)
     except jwt.InvalidTokenError as error:
         raise NotSignedInError from error
+    if claims.get("type") != SESSION_TOKEN_TYPE:
+        raise NotSignedInError
     subject = claims.get("sub")
     if not subject:
+        raise NotSignedInError
+    identifier = claims.get("jti")
+    if not isinstance(identifier, str) or await is_token_blacklisted(identifier):
         raise NotSignedInError
     try:
         user_id = UUID(str(subject))
@@ -125,6 +160,10 @@ async def current_administrator(
     with system_context():
         user = await UserRepository(session).get(user_id)
     if user is None or not user.is_active or user.role != UserRole.SUPERUSER:
+        raise NotSignedInError
+    # A changed password or a sign-out everywhere moves the version on,
+    # and that has to end this session too.
+    if claims.get("token_version") != user.token_version:
         raise NotSignedInError
     return user
 
