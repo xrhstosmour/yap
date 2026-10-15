@@ -17,7 +17,7 @@ from typing import Any
 REPO_URL = "https://github.com/xrhstosmour/containers.git"
 # Pin to a specific commit instead of floating on the default branch tip.
 # Bump this deliberately when the containers repo needs to be updated.
-REPO_COMMIT = "7272a2d6c618bac0568f11b46554b0dd9eaedd2e"
+REPO_COMMIT = "8033294081b5c13267ab03b3cdd91085a348006f"
 
 
 def cache_directory() -> str:
