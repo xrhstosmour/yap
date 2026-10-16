@@ -156,6 +156,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Run the vendored `PostgreSQL` as its own user, uid 70, the server no longer starts as root and the entrypoint skips the outdated `gosu`
 - Move the vendored `Redis` and the CI service to `8.10-alpine`, `7.4` carried high `OpenSSL` findings fixed only on the 8 line
 - Patch the vendored `Traefik` to `v3.7.15`, `nginx` to `1.30-alpine` and `SeaweedFS` to `4.48`, clearing their fixed high and critical vulnerabilities
 - Accept passkeys from the native apps, `WebAuthn` only accepted `FRONTEND_HOST` as the origin, so a passkey made in the `Android` app, which presents its signing certificate's hash instead, always failed verification
