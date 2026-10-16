@@ -15,6 +15,9 @@ include:
 {%- if include_traefik and include_website %}
   - containers/web/static/nginx/docker-compose.yml
 {%- endif %}
+{%- if include_traefik and include_tiles %}
+  - containers/web/maps/tiles/docker-compose.yml
+{%- endif %}
 {%- if include_glitchtip %}
   - containers/monitoring/codebase/glitchtip/docker-compose.yml
 {%- endif %}

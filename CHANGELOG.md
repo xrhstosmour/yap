@@ -9,6 +9,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add `include_tiles`, serving map tiles under `/tiles/` on the API's domain through a caching proxy, so phones never reach the tile provider and its key stays on the server, set with `TILE_UPSTREAM` and `TILE_UPSTREAM_QUERY`
 - Add `PRODUCT_NAME`, the name users see in mail subjects and bodies and in authenticator apps, defaulting to `PROJECT_NAME`, which keeps naming the service in logs and the API documentation
 - Add `include_website`, serving `website/` from a read-only `nginx` behind `Traefik` on the API's domain, on every path the API does not take
 - Lay every email out through `templates/email/base.html`, so a project restyles its mail in one file, and keep paragraphs and link addresses in the plain text part
