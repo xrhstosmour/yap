@@ -97,6 +97,12 @@ include_website:
   default: false
   when: "include_traefik"
 
+include_tiles:
+  type: bool
+  help: "Serve cached map tiles under /tiles/ on the API's domain?"
+  default: false
+  when: "include_traefik"
+
 timezone:
   type: str
   help: "Server timezone:"
