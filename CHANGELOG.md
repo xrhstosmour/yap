@@ -156,6 +156,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Move the vendored `Redis` and the CI service to `8.10-alpine`, `7.4` carried high `OpenSSL` findings fixed only on the 8 line
 - Patch the vendored `Traefik` to `v3.7.15`, `nginx` to `1.30-alpine` and `SeaweedFS` to `4.48`, clearing their fixed high and critical vulnerabilities
 - Accept passkeys from the native apps, `WebAuthn` only accepted `FRONTEND_HOST` as the origin, so a passkey made in the `Android` app, which presents its signing certificate's hash instead, always failed verification
 - Check every `X-Forwarded-For` address against `ADMIN_ALLOWED_NETWORKS` too, a `FORWARDED_ALLOW_IPS` that missed the proxy made every visitor look like the proxy's private address and opened `/admin` to the internet
