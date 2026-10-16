@@ -81,3 +81,51 @@ class TestConfigured:
             "package_name": "com.example.app",
             "sha256_cert_fingerprints": [FINGERPRINT],
         }
+
+
+class TestLinks:
+    """Links open the apps only on the paths named."""
+
+    @pytest.mark.anyio
+    async def test_ios_claims_the_link_paths(
+        self, client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(settings, "APPLE_APP_IDS", ["ABCDE12345.com.example.app"])
+        monkeypatch.setattr(settings, "APP_LINK_PATHS", ["/auth/*"])
+
+        response = await client.get("/.well-known/apple-app-site-association")
+
+        assert response.json()["applinks"] == {
+            "details": [
+                {
+                    "appIDs": ["ABCDE12345.com.example.app"],
+                    "components": [{"/": "/auth/*"}],
+                }
+            ]
+        }
+
+    @pytest.mark.anyio
+    async def test_ios_claims_no_links_without_paths(
+        self, client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(settings, "APPLE_APP_IDS", ["ABCDE12345.com.example.app"])
+        monkeypatch.setattr(settings, "APP_LINK_PATHS", [])
+
+        response = await client.get("/.well-known/apple-app-site-association")
+
+        assert "applinks" not in response.json()
+
+    @pytest.mark.anyio
+    async def test_android_handles_links_with_paths(
+        self, client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(settings, "ANDROID_APP_PACKAGE", "com.example.app")
+        monkeypatch.setattr(settings, "ANDROID_CERT_FINGERPRINTS", [FINGERPRINT])
+        monkeypatch.setattr(settings, "APP_LINK_PATHS", ["/auth/*"])
+
+        response = await client.get("/.well-known/assetlinks.json")
+
+        assert response.json()[0]["relation"] == [
+            "delegate_permission/common.get_login_creds",
+            "delegate_permission/common.handle_all_urls",
+        ]

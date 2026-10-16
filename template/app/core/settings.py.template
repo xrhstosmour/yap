@@ -393,6 +393,9 @@ class Settings(BaseSettings):
     ANDROID_CERT_FINGERPRINTS: Annotated[
         list[str], NoDecode, BeforeValidator(parse_cors)
     ] = []
+    # The link paths the apps open instead of the browser, comma separated,
+    # `*` matching any run of characters, `/auth/*`. Empty opens none.
+    APP_LINK_PATHS: Annotated[list[str], NoDecode, BeforeValidator(parse_cors)] = []
 
     @field_validator("ANDROID_CERT_FINGERPRINTS")
     @classmethod
