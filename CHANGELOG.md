@@ -70,6 +70,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Add every setting `.env.example` has and `.env` lacks when `setup.sh` runs, so a setting a template update requires, such as `APP_DOMAIN`, no longer stops `docker compose` on a machine set up before it existed
 - Keep the name and project in `welcome.html`, which generating a project rendered away
 - Refuse to start a deployed environment whose `SMTP_HOST` is `localhost`, a loopback address or `mailpit`, where every email was reported sent and never arrived
 - Leave `Mailpit`, `pgAdmin` and `Redis Commander` off the server in `scripts/deploy.sh`, they ran in production and their settings were required there

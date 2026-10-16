@@ -137,6 +137,26 @@ chmod 600 .env
 "${SED_INPLACE[@]}" "s|^REDIS_URL=.*|REDIS_URL=redis://:your-redis-password@redis:6379/0|" .env.example
 "${SED_INPLACE[@]}" "s/SENTRY_DSN=.*/SENTRY_DSN=https:\/\/public:secret@sentry.com\/1/" .env.example
 
+# Append every setting `.env.example` has and `.env` lacks, as the example
+# has it. A project's `.env` is made once, so a setting the template adds
+# later, one a compose file requires, would otherwise stop `docker compose`
+# on a machine that set up before it existed. Values already in `.env` are
+# never touched, and a secret arrives as its placeholder, which the backfill
+# below replaces.
+add_missing_settings() {
+    local example="$1" target="$2" line key
+    if [ -s "$target" ] && [ -n "$(tail -c 1 "$target")" ]; then
+        printf '\n' >>"$target"
+    fi
+    while IFS= read -r line; do
+        key="${line%%=*}"
+        if ! grep -q "^${key}=" "$target"; then
+            printf '%s\n' "$line" >>"$target"
+            info "Added $key to .env."
+        fi
+    done < <(grep -E '^[A-Z_][A-Z0-9_]*=' "$example")
+}
+
 # Write KEY=VALUE into an environment file, treating VALUE as literal text.
 #
 # `sed` interprets its replacement: a bare `&` expands to the whole match and
@@ -204,6 +224,8 @@ with open(path, "w") as handle:
     handle.writelines(lines)
 PY
 }
+
+add_missing_settings .env.example .env
 
 # Replace KEY's value only when it is empty, a placeholder ("your-..."), or
 # matches the optional extra placeholder (e.g. a well-known service default).
