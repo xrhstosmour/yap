@@ -9,13 +9,16 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from starlette.requests import Request
-    from starlette.responses import Response
-
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.middleware.base import RequestResponseEndpoint
+from starlette.datastructures import Headers
+from starlette.datastructures import MutableHeaders
 from starlette.responses import PlainTextResponse
+
+if TYPE_CHECKING:
+    from starlette.types import ASGIApp
+    from starlette.types import Message
+    from starlette.types import Receive
+    from starlette.types import Scope
+    from starlette.types import Send
 
 AI_BOT_PATTERNS: list[re.Pattern] = [
     re.compile(p, re.IGNORECASE)
@@ -112,50 +115,57 @@ def _policy_for(path: str) -> str:
     return _DEFAULT_CSP
 
 
-class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+class SecurityHeadersMiddleware:
     """Adds security-focused HTTP headers and blocks AI bot crawlers."""
 
-    async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint
-    ) -> Response:
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         """Add security headers and check user agent.
 
         Args:
-            request: Incoming request
-            call_next: Next middleware or handler
-
-        Returns:
-            Response with security headers
+            scope: The ASGI connection scope.
+            receive: The ASGI receive channel.
+            send: The ASGI send channel, whose response gets the headers.
         """
-        user_agent = request.headers.get("User-Agent", "")
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        request_headers = Headers(scope=scope)
+        user_agent = request_headers.get("User-Agent", "")
 
         for pattern in AI_BOT_PATTERNS:
             if pattern.search(user_agent):
-                return PlainTextResponse(
-                    "Forbidden",
-                    status_code=403,
-                )
+                response = PlainTextResponse("Forbidden", status_code=403)
+                await response(scope, receive, send)
+                return
 
-        response = await call_next(request)
-
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["Content-Security-Policy"] = _policy_for(request.url.path)
-        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Permissions-Policy"] = (
-            "camera=(), microphone=(), geolocation=(), interest-cohort=()"
+        policy = _policy_for(scope["path"])
+        is_https = (
+            scope.get("scheme") == "https"
+            or request_headers.get("X-Forwarded-Proto") == "https"
         )
-        response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
-        response.headers["X-DNS-Prefetch-Control"] = "off"
-        response.headers["X-Download-Options"] = "noopen"
-        response.headers["X-Permitted-Cross-Domain-Policies"] = "none"
 
-        if (
-            request.url.scheme == "https"
-            or request.headers.get("X-Forwarded-Proto") == "https"
-        ):
-            response.headers["Strict-Transport-Security"] = (
-                "max-age=31536000; includeSubDomains; preload"
-            )
+        async def send_with_headers(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                headers["X-Content-Type-Options"] = "nosniff"
+                headers["X-Frame-Options"] = "DENY"
+                headers["Content-Security-Policy"] = policy
+                headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+                headers["Permissions-Policy"] = (
+                    "camera=(), microphone=(), geolocation=(), interest-cohort=()"
+                )
+                headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
+                headers["X-DNS-Prefetch-Control"] = "off"
+                headers["X-Download-Options"] = "noopen"
+                headers["X-Permitted-Cross-Domain-Policies"] = "none"
+                if is_https:
+                    headers["Strict-Transport-Security"] = (
+                        "max-age=31536000; includeSubDomains; preload"
+                    )
+            await send(message)
 
-        return response
+        await self.app(scope, receive, send_with_headers)

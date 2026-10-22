@@ -9,15 +9,15 @@ from __future__ import annotations
 import re
 import uuid
 from contextvars import ContextVar
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from starlette.requests import Request
-    from starlette.responses import Response
 
 import structlog
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.middleware.base import RequestResponseEndpoint
+from starlette.datastructures import Headers
+from starlette.datastructures import MutableHeaders
+from starlette.types import ASGIApp
+from starlette.types import Message
+from starlette.types import Receive
+from starlette.types import Scope
+from starlette.types import Send
 
 request_id_context: ContextVar[str] = ContextVar("request_id", default="")
 
@@ -28,7 +28,7 @@ request_id_context: ContextVar[str] = ContextVar("request_id", default="")
 _REQUEST_ID_PATTERN = re.compile(r"^[\w\-]{8,64}$")
 
 
-class RequestIDMiddleware(BaseHTTPMiddleware):
+class RequestIDMiddleware:
     """Middleware that assigns or propagates a request ID per request.
 
     Reads X-Request-ID from incoming requests, or generates a new UUID.
@@ -37,19 +37,22 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
     same `correlation_id`, and appended to the response headers.
     """
 
-    async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint
-    ) -> Response:
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         """Extract or generate request ID, store in context, and return in response.
 
         Args:
-            request: Incoming Starlette request
-            call_next: Next middleware or endpoint handler
-
-        Returns:
-            Starlette response with X-Request-ID header
+            scope: The ASGI connection scope.
+            receive: The ASGI receive channel.
+            send: The ASGI send channel, whose response gets X-Request-ID.
         """
-        request_id = request.headers.get("X-Request-ID")
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        request_id = Headers(scope=scope).get("X-Request-ID")
         if not request_id or not _REQUEST_ID_PATTERN.match(request_id):
             request_id = str(uuid.uuid7())
 
@@ -62,13 +65,16 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         # instead of `add_correlation_id` minting an unrelated UUID per
         # log call.
         structlog.contextvars.bind_contextvars(correlation_id=request_id)
+
+        async def send_with_request_id(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                MutableHeaders(scope=message)["X-Request-ID"] = request_id
+            await send(message)
+
         try:
-            response = await call_next(request)
+            await self.app(scope, receive, send_with_request_id)
         finally:
             structlog.contextvars.unbind_contextvars("correlation_id")
-        response.headers["X-Request-ID"] = request_id
-
-        return response
 
 
 def get_request_id() -> str:
