@@ -17,6 +17,7 @@ from app.core.security import decode_token
 from app.core.security import generate_password_hash
 from app.core.settings import settings
 from app.core.tenant import system_context
+from app.core.tenant import tenant_context
 from app.models.consent_record import MINIMUM_AGE_KIND
 from app.models.user import UserRole
 from app.repositories.consent_record_repository import ConsentRecordRepository
@@ -585,6 +586,72 @@ class TestAuthServiceCreateUser:
         )
 
         assert user.role == UserRole.SUPERUSER
+
+
+class TestPasswordChangesEndSessions:
+    """A new password must sign out every token issued before it."""
+
+    @staticmethod
+    async def _register_with_tokens(
+        auth_service: AuthService, email: str
+    ) -> tuple[Any, Any]:
+        """Register a user and issue them a token pair.
+
+        Args:
+            auth_service: Service under test.
+            email: Email for the new user.
+
+        Returns:
+            The user and their tokens.
+        """
+        user = await auth_service.register(
+            RegisterRequest(email=email, password="oldpassword1")
+        )
+        return user, auth_service.create_tokens(user)
+
+    @pytest.mark.asyncio
+    async def test_a_reset_refuses_earlier_refresh_tokens(
+        self, session: AsyncSession
+    ) -> None:
+        """Someone holding a stolen token loses it once the owner resets."""
+        auth_service = _auth_service(session)
+        user, tokens = await self._register_with_tokens(
+            auth_service, "reset-ends@example.com"
+        )
+
+        with (
+            patch(
+                "app.core.security.verify_password_reset_token",
+                AsyncMock(return_value=user.id),
+            ),
+            patch(
+                "app.services.auth_service.is_token_blacklisted",
+                AsyncMock(return_value=False),
+            ),
+        ):
+            await auth_service.reset_password("valid-token", "newpassword2")
+            with pytest.raises(AuthenticationError, match="password change"):
+                await auth_service.refresh_tokens(tokens.refresh_token)
+
+    @pytest.mark.asyncio
+    async def test_a_change_refuses_earlier_refresh_tokens(
+        self, session: AsyncSession
+    ) -> None:
+        """Changing the password signs out the other devices too."""
+        auth_service = _auth_service(session)
+        user, tokens = await self._register_with_tokens(
+            auth_service, "change-ends@example.com"
+        )
+
+        with patch(
+            "app.services.auth_service.is_token_blacklisted",
+            AsyncMock(return_value=False),
+        ):
+            # A signed-in request carries the user's tenant.
+            with tenant_context(user.tenant_id):
+                await auth_service.change_password(user, "oldpassword1", "newpassword2")
+            with pytest.raises(AuthenticationError, match="password change"):
+                await auth_service.refresh_tokens(tokens.refresh_token)
 
 
 class TestResetPassword:
