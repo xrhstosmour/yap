@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import UTC
+from datetime import datetime
+from datetime import timedelta
+
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -371,3 +375,92 @@ class TestAPIKeyRepository:
             count = await repo.count_active_by_user(user.id)
 
         assert count == 2
+
+    async def _add_key(
+        self,
+        session: AsyncSession,
+        key_id: str,
+        *,
+        expires_at: datetime | None = None,
+        is_active: bool = True,
+    ) -> APIKey:
+        """Persist a key for the first tenant and user.
+
+        Args:
+            session: Async database session fixture.
+            key_id: Unique key ID.
+            expires_at: When the key expires, naive UTC like the column.
+            is_active: Whether the key is active.
+
+        Returns:
+            Persisted APIKey instance.
+        """
+        tenant = await self._create_tenant(session, slug=f"org-{key_id}")
+        user = await self._create_user(session, email=f"{key_id}@example.com")
+        key = APIKey(
+            key_id=key_id,
+            key_hash="hashed_secret",
+            key_prefix="sk_",
+            name=key_id,
+            scopes=["read"],
+            tenant_id=tenant.id,
+            user_id=user.id,
+            expires_at=expires_at,
+            is_active=is_active,
+        )
+        session.add(key)
+        await session.commit()
+        return key
+
+    @pytest.mark.anyio
+    async def test_a_key_read_back_answers_whether_it_expired(
+        self, session: AsyncSession
+    ) -> None:
+        """The naive stored time used to raise against an aware now."""
+        now = datetime.now(UTC).replace(tzinfo=None)
+        await self._add_key(session, "pk_past", expires_at=now - timedelta(days=1))
+        await self._add_key(session, "pk_future", expires_at=now + timedelta(days=1))
+        session.expire_all()
+        repo = APIKeyRepository(session)
+
+        past = await repo.get_by_key_id("pk_past")
+        future = await repo.get_by_key_id("pk_future")
+
+        assert past is not None
+        assert future is not None
+        assert past.is_expired()
+        assert not past.is_valid()
+        assert not future.is_expired()
+        assert future.is_valid()
+
+    @pytest.mark.anyio
+    async def test_deactivate_expired_keys_leaves_the_rest_alone(
+        self, session: AsyncSession
+    ) -> None:
+        """Only active keys past their expiry are switched off."""
+        now = datetime.now(UTC).replace(tzinfo=None)
+        await self._add_key(session, "pk_expired", expires_at=now - timedelta(days=1))
+        await self._add_key(session, "pk_current", expires_at=now + timedelta(days=1))
+        await self._add_key(session, "pk_forever")
+        await self._add_key(
+            session,
+            "pk_revoked",
+            expires_at=now - timedelta(days=1),
+            is_active=False,
+        )
+        repo = APIKeyRepository(session)
+
+        count = await repo.deactivate_expired_keys()
+        session.expire_all()
+
+        assert count == 1
+        active = {
+            key_id: (await repo.get_by_key_id(key_id)).is_active  # type: ignore[union-attr]
+            for key_id in ("pk_expired", "pk_current", "pk_forever", "pk_revoked")
+        }
+        assert active == {
+            "pk_expired": False,
+            "pk_current": True,
+            "pk_forever": True,
+            "pk_revoked": False,
+        }
