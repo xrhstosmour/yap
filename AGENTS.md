@@ -14,7 +14,7 @@ copier copy --trust /path/to/yap path/to/project
 Required inputs: `project_name`, `project_slug`, `author_name`, `author_email`.
 Secrets (`jwt_secret_key`, `postgresql_password`, etc.) auto-generate if left
 empty. Optional Docker services (Traefik, GlitchTip, Metabase, pgAdmin4,
-Mailpit, Redis Commander, Flower, MinIO, RedBeat) are toggled via boolean flags.
+Mailpit, Redis Commander, Flower, SeaweedFS object storage, RedBeat) are toggled via boolean flags.
 
 ## Project layout
 
