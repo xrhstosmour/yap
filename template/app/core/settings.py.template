@@ -358,6 +358,17 @@ class Settings(BaseSettings):
     # Google OAuth CSRF state token TTL in seconds (default: 10 minutes).
     GOOGLE_OAUTH_STATE_TTL_SECONDS: int = 600
 
+    # Sign in with Apple. The native apps only need `APPLE_BUNDLE_ID`, the
+    # audience of the identity tokens they send. The web flow needs the
+    # Services ID as `APPLE_CLIENT_ID` and a Sign in with Apple key from the
+    # developer account: its ID, the team ID, and the `.p8` contents, PEM
+    # and all. Leave them empty to disable the matching flow.
+    APPLE_BUNDLE_ID: str = ""
+    APPLE_CLIENT_ID: str = ""
+    APPLE_TEAM_ID: str = ""
+    APPLE_KEY_ID: str = ""
+    APPLE_PRIVATE_KEY: str = ""
+
     # PostgreSQL full-text search language configuration.
     FTS_LANGUAGE: str = "simple"
 
@@ -545,6 +556,8 @@ class Settings(BaseSettings):
 
         if self.GOOGLE_CLIENT_ID:
             self._check_secret("GOOGLE_CLIENT_SECRET", self.GOOGLE_CLIENT_SECRET)
+        if self.APPLE_CLIENT_ID:
+            self._check_secret("APPLE_PRIVATE_KEY", self.APPLE_PRIVATE_KEY)
         if self.SMTP_USER:
             self._check_secret("SMTP_PASSWORD", self.SMTP_PASSWORD)
         if self.STORAGE_BACKEND == "s3":
