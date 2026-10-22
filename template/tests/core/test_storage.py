@@ -297,6 +297,16 @@ class TestGetDownloadUrl:
         assert "ResponseContentDisposition" not in kwargs["Params"]
 
     @pytest.mark.asyncio
+    async def test_the_verified_mimetype_decides_the_served_type(
+        self, mock_s3_client: MagicMock
+    ) -> None:
+        """The stored object's own type cannot turn an image into HTML."""
+        await get_download_url(object_key="test-key", mimetype="image/png")
+
+        _, kwargs = mock_s3_client.generate_presigned_url.call_args
+        assert kwargs["Params"]["ResponseContentType"] == "image/png"
+
+    @pytest.mark.asyncio
     async def test_no_mimetype_does_not_force_attachment(
         self, mock_s3_client: MagicMock
     ) -> None:
