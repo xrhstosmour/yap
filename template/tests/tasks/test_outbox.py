@@ -16,6 +16,7 @@ if isinstance(sys.modules.get("app.tasks.outbox"), MagicMock):
     del sys.modules["app.tasks.outbox"]
 
 from app.models.outbox import OutboxEvent  # noqa: E402
+from app.tasks.outbox import BATCH_SIZE  # noqa: E402
 from app.tasks.outbox import process_outbox  # noqa: E402
 
 
@@ -112,3 +113,62 @@ def test_process_outbox_forwards_null_tenant_id() -> None:
     _, kwargs = mock_send_task.call_args
     envelope = json.loads(kwargs["args"][0])
     assert envelope["tenant_id"] is None
+
+
+def _drain(batches: list[list[OutboxEvent]], send_task: Any = None) -> Any:
+    """Run the task against `get_pending` returning these batches in turn.
+
+    Args:
+        batches: What each successive `get_pending` call returns.
+        send_task: Replacement for `send_task`, a plain mock by default.
+
+    Returns:
+        The task result and the mocked outbox and session.
+    """
+    mock_session = AsyncMock()
+    mock_outbox = AsyncMock()
+    mock_outbox.get_pending = AsyncMock(side_effect=batches)
+
+    @asynccontextmanager
+    async def _factory() -> Any:
+        yield mock_session
+
+    with (
+        patch("app.database.celery_session_factory", _factory),
+        patch("app.models.outbox.Outbox", return_value=mock_outbox),
+        patch("app.tasks.outbox.celery_app.send_task", send_task or MagicMock()),
+    ):
+        result = process_outbox.apply()
+    return result, mock_outbox, mock_session
+
+
+def test_a_backlog_is_drained_in_one_run() -> None:
+    """One batch per beat tick capped dispatch at ten events a second."""
+    full = [_make_event() for _ in range(BATCH_SIZE)]
+    result, mock_outbox, mock_session = _drain([full, full, [_make_event()]])
+
+    assert result.result["processed"] == 2 * BATCH_SIZE + 1
+    assert mock_outbox.get_pending.await_count == 3
+    # Each batch commits, so its claim on the rows ends with it.
+    assert mock_session.commit.await_count == 3
+
+
+def test_a_failing_batch_stops_the_drain() -> None:
+    """Refetching at once would spend every retry in a broker outage."""
+    full = [_make_event() for _ in range(BATCH_SIZE)]
+    result, mock_outbox, _ = _drain(
+        [full, full], send_task=MagicMock(side_effect=ConnectionError("broker down"))
+    )
+
+    assert result.result["failed"] == BATCH_SIZE
+    assert mock_outbox.get_pending.await_count == 1
+
+
+def test_the_drain_stops_at_its_deadline() -> None:
+    """A run hands over to the next beat tick instead of overlapping it."""
+    full = [_make_event() for _ in range(BATCH_SIZE)]
+    with patch("app.tasks.outbox.DRAIN_SECONDS", 0.0):
+        result, mock_outbox, _ = _drain([full, full])
+
+    assert result.result["processed"] == BATCH_SIZE
+    assert mock_outbox.get_pending.await_count == 1
