@@ -8,6 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter
 from fastapi import Depends
 from fastapi import HTTPException
+from fastapi import Query
 from fastapi import status
 from fastapi.requests import Request
 
@@ -81,7 +82,7 @@ def _can_access_tenant(current_user: User, tenant_id: UUID) -> bool:
     description="List all tenants with pagination and filtering. Admin only.",
 )
 async def list_tenants(
-    parameters: Annotated[TenantListParameters, Depends()],
+    parameters: Annotated[TenantListParameters, Query()],
     current_user: SuperuserUser,
     service: TenantServiceDependency,
     request: Request,

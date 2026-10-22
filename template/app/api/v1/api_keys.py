@@ -10,8 +10,8 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter
-from fastapi import Depends
 from fastapi import HTTPException
+from fastapi import Query
 from fastapi import status
 from fastapi.requests import Request
 
@@ -82,7 +82,7 @@ async def create_api_key(
     description="List all API keys for the current user.",
 )
 async def list_api_keys(
-    parameters: Annotated[APIKeyListParameters, Depends()],
+    parameters: Annotated[APIKeyListParameters, Query()],
     current_user: CurrentUser,
     session: SessionDependency,
     request: Request,
