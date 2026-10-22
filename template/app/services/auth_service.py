@@ -818,27 +818,63 @@ class AuthService:
         if not google_id or not email:
             raise AuthenticationError("Invalid Google userinfo response")
 
+        return await self._login_with_oauth_identity(
+            OAuthProvider.GOOGLE, google_id, email, full_name
+        )
+
+    async def _login_with_oauth_identity(
+        self,
+        provider: str,
+        provider_user_id: str,
+        email: str | None,
+        full_name: str | None,
+    ) -> LoginResponse:
+        """Find or create the account behind a verified provider identity.
+
+        The provider has already proven the identity, this only maps it
+        to a local account: the linked one, else the one with the same
+        email, linked on the way, else a new verified one.
+
+        Args:
+            provider: `OAuthProvider` value of the identity.
+            provider_user_id: The provider's stable subject ID.
+            email: Verified email from the provider, `None` when it sent
+                none, which only works for an identity already linked.
+            full_name: Display name for a new account, if the provider
+                gave one.
+
+        Returns:
+            LoginResponse with tokens, or a 2FA challenge if the account
+            has 2FA enabled.
+
+        Raises:
+            AuthenticationError: If the identity is unlinked and has no
+                email to link or register with.
+            UserInactiveError: If the account is inactive.
+        """
         # Find existing linked account by provider subject ID.
         oauth_account = await self.oauth_account_repository.get_by_provider(
-            OAuthProvider.GOOGLE, google_id
+            provider, provider_user_id
         )
 
         if oauth_account:
             user: User | None = oauth_account.user
+        elif not email:
+            raise AuthenticationError(f"No email in the {provider} identity.")
         else:
             user = await self.user_repository.get_by_email(email)
             if user:
-                # Link Google to an existing password-based account.
+                # Link the provider to an existing password-based account.
                 await self.oauth_account_repository.create_link(
                     user_id=user.id,
-                    provider=OAuthProvider.GOOGLE,
-                    provider_user_id=google_id,
+                    provider=provider,
+                    provider_user_id=provider_user_id,
                     provider_email=email,
                     tenant_id=user.tenant_id,
                 )
-                logger.info("google_account_linked", user_id=str(user.id))
+                logger.info(f"{provider}_account_linked", user_id=str(user.id))
             else:
-                # Register a new account for first-time Google login.
+                # Register a new account for a first-time provider login.
                 # NOTE: OAuth users are created without a tenant_id.
                 # Projects requiring multi-tenancy should assign a tenant
                 # during OAuth registration (e.g. via invitation or subdomain).
@@ -854,17 +890,17 @@ class AuthService:
                 )
                 await self.oauth_account_repository.create_link(
                     user_id=user.id,
-                    provider=OAuthProvider.GOOGLE,
-                    provider_user_id=google_id,
+                    provider=provider,
+                    provider_user_id=provider_user_id,
                     provider_email=email,
                     tenant_id=user.tenant_id,
                 )
-                logger.info("google_user_created", user_id=str(user.id))
+                logger.info(f"{provider}_user_created", user_id=str(user.id))
 
         if not user or not user.is_active:
             raise UserInactiveError("User account is inactive.")
 
-        logger.info("google_login_success", user_id=str(user.id))
+        logger.info(f"{provider}_login_success", user_id=str(user.id))
         return await self.issue_login_response(user)
 
     async def send_magic_link(self, email: str) -> None:
