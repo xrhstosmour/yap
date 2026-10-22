@@ -210,3 +210,26 @@ class TestCreateAppleClientSecret:
         assert jwt.get_unverified_header(secret)["kid"] == "KEY1234567"
         assert (claims["iss"], claims["sub"]) == ("TEAM123456", "com.example.web")
         assert claims["exp"] - claims["iat"] <= 300
+
+    def test_speaks_for_the_client_it_is_given(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A code from the app is exchanged and revoked as the bundle ID."""
+        private_key = ec.generate_private_key(ec.SECP256R1())
+        pem = private_key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        ).decode()
+        monkeypatch.setattr(security.settings, "APPLE_PRIVATE_KEY", pem)
+        monkeypatch.setattr(security.settings, "APPLE_CLIENT_ID", "com.example.web")
+
+        secret = create_apple_client_secret("com.example.app")
+        claims = jwt.decode(
+            secret,
+            private_key.public_key(),
+            algorithms=["ES256"],
+            audience=APPLE_ISSUER,
+        )
+
+        assert claims["sub"] == "com.example.app"

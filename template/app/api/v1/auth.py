@@ -957,7 +957,10 @@ async def apple_native_login(
     service = AuthService(session)
     try:
         return await service.apple_native_login(
-            data.identity_token, data.nonce, data.full_name
+            data.identity_token,
+            data.nonce,
+            data.full_name,
+            authorization_code=data.authorization_code,
         )
     except AuthenticationError as exc:
         raise _apple_login_error(exc) from exc

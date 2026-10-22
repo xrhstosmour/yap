@@ -712,12 +712,15 @@ async def verify_apple_oauth_state(state: str) -> str | None:
     return await _consume_oauth_state(_APPLE_OAUTH_STATE_PREFIX, state)
 
 
-def create_apple_client_secret() -> str:
+def create_apple_client_secret(client_id: str | None = None) -> str:
     """Sign the short-lived client secret Apple's token endpoint expects.
 
     Apple has no static client secret, it takes a JWT signed with the
-    `.p8` key from the developer account, naming the team and the
-    Services ID.
+    `.p8` key from the developer account, naming the team and the client.
+
+    Args:
+        client_id: The client the secret speaks for, the app's bundle ID
+            for a code from the app. Defaults to the web Services ID.
 
     Returns:
         ES256 JWT valid for five minutes.
@@ -729,7 +732,7 @@ def create_apple_client_secret() -> str:
             "iat": issued_at,
             "exp": issued_at + 300,
             "aud": APPLE_ISSUER,
-            "sub": settings.APPLE_CLIENT_ID,
+            "sub": client_id or settings.APPLE_CLIENT_ID,
         },
         settings.APPLE_PRIVATE_KEY,
         algorithm="ES256",
