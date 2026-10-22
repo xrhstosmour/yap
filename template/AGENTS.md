@@ -11,7 +11,7 @@ background tasks, and comprehensive security features.
 - WebAuthn passkeys.
 - Magic link (passwordless) login via email.
 - Google OAuth 2.0 (extensible to Apple, Microsoft via `OAuthProvider` enum).
-- API key authentication (bcrypt-hashed, prefix-based scoping).
+- API key authentication (SHA-256-hashed, prefix-based scoping).
 - `token_version` column invalidates all JWTs on password change or admin revoke.
 
 ### Multi-tenancy

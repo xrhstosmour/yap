@@ -464,3 +464,18 @@ class TestAPIKeyRepository:
             "pk_forever": True,
             "pk_revoked": False,
         }
+
+    @pytest.mark.anyio
+    async def test_update_key_hash_needs_no_tenant_context(
+        self, session: AsyncSession
+    ) -> None:
+        """It runs during authentication, before a tenant is known."""
+        key = await self._add_key(session, "pk_rehash")
+        repo = APIKeyRepository(session)
+
+        await repo.update_key_hash(key.id, "sha256:abc")
+        session.expire_all()
+
+        found = await repo.get_by_key_id("pk_rehash")
+        assert found is not None
+        assert found.key_hash == "sha256:abc"

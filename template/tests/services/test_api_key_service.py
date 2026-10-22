@@ -12,6 +12,8 @@ from uuid import uuid4
 
 import pytest
 
+from app.core.security import generate_password_hash
+from app.core.security import hash_api_key
 from app.models.api_key import APIKey
 from app.schemas.api_key import APIKeyCreate
 from app.schemas.api_key import APIKeyUpdate
@@ -331,16 +333,12 @@ class TestVerify:
         """Should return the APIKey when key_id and secret are valid."""
         key_id = "key_valid12345"
         secret = "sk_validsecret1234567890"
-        mock_key = _make_api_key_mock(key_id=key_id, is_valid_return=True)
+        mock_key = _make_api_key_mock(key_id=key_id, key_hash=hash_api_key(secret))
 
         service.apikey_repository.get_by_key_id = AsyncMock(return_value=mock_key)
         service.apikey_repository.update_last_used = AsyncMock()
 
-        with patch(
-            "app.services.api_key_service.verify_password",
-            return_value=True,
-        ):
-            result = await service.verify(key_id, secret)
+        result = await service.verify(key_id, secret)
 
         assert result is mock_key
         service.apikey_repository.get_by_key_id.assert_awaited_once_with(key_id)
@@ -351,53 +349,39 @@ class TestVerify:
         self,
         service: APIKeyService,
     ) -> None:
-        """Should return None and use dummy hash when key_id not found."""
-        key_id = "key_nonexistent"
-        secret = "sk_somesecret1234567890"
-
+        """Should return None when key_id is not found."""
         service.apikey_repository.get_by_key_id = AsyncMock(return_value=None)
 
-        with patch(
-            "app.services.api_key_service.verify_password",
-            return_value=False,
-        ) as mock_verify:
-            result = await service.verify(key_id, secret)
+        result = await service.verify("key_nonexistent", "sk_somesecret1234567890")
 
         assert result is None
-        # Should verify against dummy hash to prevent timing attacks.
-        mock_verify.assert_called_once()
-        # The first call should include DUMMY_PASSWORD_HASH.
-        from app.core.security import DUMMY_PASSWORD_HASH
-
-        mock_verify.assert_called_with(secret, DUMMY_PASSWORD_HASH)
+        service.apikey_repository.update_last_used.assert_not_called()
+        service.apikey_repository.update_last_used.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_verify_wrong_secret(
         self,
         service: APIKeyService,
     ) -> None:
-        """Should return None when password verification fails."""
+        """Should return None when the secret does not match the hash."""
         key_id = "key_exists_but_wrong_secret"
-        secret = "sk_wrongsecret1234567890"
-        mock_key = _make_api_key_mock(key_id=key_id)
+        mock_key = _make_api_key_mock(
+            key_id=key_id, key_hash=hash_api_key("sk_rightsecret1234567890")
+        )
 
         service.apikey_repository.get_by_key_id = AsyncMock(return_value=mock_key)
 
-        with patch(
-            "app.services.api_key_service.verify_password",
-            return_value=False,
-        ):
-            result = await service.verify(key_id, secret)
+        result = await service.verify(key_id, "sk_wrongsecret1234567890")
 
         assert result is None
         service.apikey_repository.update_last_used.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_verify_inactive_key(
+    async def test_an_invalid_key_is_refused_before_any_hashing(
         self,
         service: APIKeyService,
     ) -> None:
-        """Should return None when key is not valid (inactive/expired/deleted)."""
+        """A revoked or expired key costs no bcrypt check, even a legacy one."""
         key_id = "key_inactive12345"
         secret = "sk_inactivesecret1234567890"
         mock_key = _make_api_key_mock(key_id=key_id, is_valid_return=False)
@@ -407,11 +391,83 @@ class TestVerify:
         with patch(
             "app.services.api_key_service.verify_password",
             return_value=True,
-        ):
+        ) as mock_verify:
             result = await service.verify(key_id, secret)
 
         assert result is None
+        mock_verify.assert_not_called()
         service.apikey_repository.update_last_used.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_a_legacy_bcrypt_key_is_moved_to_sha256(
+        self,
+        service: APIKeyService,
+    ) -> None:
+        """A key from before SHA-256 still works once, and is rehashed."""
+        key_id = "key_legacy12345"
+        secret = "sk_legacysecret1234567890"
+        mock_key = _make_api_key_mock(
+            key_id=key_id, key_hash=generate_password_hash(secret)
+        )
+
+        service.apikey_repository.get_by_key_id = AsyncMock(return_value=mock_key)
+        service.apikey_repository.update_key_hash = AsyncMock()
+        service.apikey_repository.update_last_used = AsyncMock()
+
+        result = await service.verify(key_id, secret)
+
+        assert result is mock_key
+        service.apikey_repository.update_key_hash.assert_awaited_once_with(
+            mock_key.id, hash_api_key(secret)
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_legacy_key_with_the_wrong_secret_is_not_rehashed(
+        self,
+        service: APIKeyService,
+    ) -> None:
+        """Rehashing a wrong secret would replace the key with the guess."""
+        key_id = "key_legacy12345"
+        mock_key = _make_api_key_mock(
+            key_id=key_id,
+            key_hash=generate_password_hash("sk_rightsecret1234567890"),
+        )
+
+        service.apikey_repository.get_by_key_id = AsyncMock(return_value=mock_key)
+        service.apikey_repository.update_key_hash = AsyncMock()
+
+        result = await service.verify(key_id, "sk_wrongsecret1234567890")
+
+        assert result is None
+        service.apikey_repository.update_key_hash.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("last_used_at", "written"),
+        [
+            (datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=1), False),
+            (datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=10), True),
+        ],
+        ids=["recent", "stale"],
+    )
+    async def test_last_used_is_written_at_most_every_interval(
+        self,
+        service: APIKeyService,
+        last_used_at: datetime,
+        written: bool,
+    ) -> None:
+        """Every request used to update the row, queuing on its lock."""
+        key_id = "key_busy12345"
+        secret = "sk_busysecret1234567890"
+        mock_key = _make_api_key_mock(
+            key_id=key_id, key_hash=hash_api_key(secret), last_used_at=last_used_at
+        )
+
+        service.apikey_repository.get_by_key_id = AsyncMock(return_value=mock_key)
+        service.apikey_repository.update_last_used = AsyncMock()
+
+        assert await service.verify(key_id, secret) is mock_key
+        assert service.apikey_repository.update_last_used.await_count == int(written)
 
 
 # Update

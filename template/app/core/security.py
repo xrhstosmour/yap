@@ -8,6 +8,8 @@ password reset, and Google OAuth state management.
 from __future__ import annotations
 
 import base64
+import hashlib
+import hmac
 import io
 import secrets
 import string
@@ -358,9 +360,53 @@ def generate_api_key(prefix: str = API_KEY_PREFIX) -> tuple[str, str]:
     )
 
     full_key = f"{prefix}_{random_part}"
-    hashed_key = generate_password_hash(full_key)
+    hashed_key = hash_api_key(full_key)
 
     return full_key, hashed_key
+
+
+API_KEY_HASH_PREFIX = "sha256:"
+
+
+def hash_api_key(key: str) -> str:
+    """Hash an API key for storage.
+
+    SHA-256 rather than bcrypt. A password needs a slow hash because people
+    pick guessable ones, but these keys are long random secrets, so a fast
+    hash leaves nothing to guess while bcrypt cost a full check, about a
+    quarter of a second of CPU, on every API-key request. Unkeyed, so
+    rotating `CRYPTO_KEY` or `SECRET_KEY` does not invalidate every key.
+
+    Args:
+        key: The full API key.
+
+    Returns:
+        The hex digest, prefixed with `sha256:`.
+    """
+    return API_KEY_HASH_PREFIX + hashlib.sha256(key.encode()).hexdigest()
+
+
+# Compared against when no key matches, so an unknown key ID takes as long
+# as a known one.
+DUMMY_API_KEY_HASH: str = hash_api_key(secrets.token_urlsafe(32))
+
+
+def is_legacy_api_key_hash(stored: str) -> bool:
+    """Whether a stored key hash is bcrypt, from before `hash_api_key`."""
+    return not stored.startswith(API_KEY_HASH_PREFIX)
+
+
+def verify_api_key(key: str, stored: str) -> bool:
+    """Check an API key against its stored SHA-256 hash.
+
+    Args:
+        key: The full API key presented.
+        stored: The stored hash, from `hash_api_key`.
+
+    Returns:
+        Whether they match, compared in constant time.
+    """
+    return hmac.compare_digest(hash_api_key(key), stored)
 
 
 def generate_api_key_id() -> str:

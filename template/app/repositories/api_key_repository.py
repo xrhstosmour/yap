@@ -84,6 +84,25 @@ class APIKeyRepository(BaseRepository[APIKey]):
         )
         await self.session.flush()
 
+    async def update_key_hash(self, key_id: str | UUID, key_hash: str) -> None:
+        """Replace a key's stored hash, deliberately unscoped.
+
+        Runs during authentication, like ``update_last_used``, to move a key
+        from its bcrypt hash to the SHA-256 one.
+
+        Args:
+            key_id: API key ID
+            key_hash: The new stored hash
+        """
+        from sqlalchemy import update
+
+        await self.session.execute(
+            update(APIKey)
+            .where(APIKey.id == key_id)  # type: ignore[arg-type]
+            .values(key_hash=key_hash)
+        )
+        await self.session.flush()
+
     async def revoke(self, key_id: str | UUID) -> APIKey | None:
         """Revoke an API key.
 

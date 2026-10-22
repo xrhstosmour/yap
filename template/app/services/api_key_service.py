@@ -15,9 +15,12 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
-from app.core.security import DUMMY_PASSWORD_HASH
+from app.core.security import DUMMY_API_KEY_HASH
 from app.core.security import generate_api_key
 from app.core.security import generate_api_key_id
+from app.core.security import hash_api_key
+from app.core.security import is_legacy_api_key_hash
+from app.core.security import verify_api_key
 from app.core.security import verify_password
 from app.models.api_key import APIKey
 from app.models.audit_log import AuditAction
@@ -28,6 +31,25 @@ from app.schemas.api_key import APIKeyCreate
 from app.schemas.api_key import APIKeyUpdate
 
 logger = get_logger("service.api_key")
+
+# How often a key in use has its `last_used_at` written.
+LAST_USED_INTERVAL = timedelta(minutes=5)
+
+
+def _is_stale(last_used_at: datetime | None) -> bool:
+    """Whether `last_used_at` is old enough to be written again.
+
+    Args:
+        last_used_at: The stored time, naive UTC from the database.
+
+    Returns:
+        True when never set or older than `LAST_USED_INTERVAL`.
+    """
+    if last_used_at is None:
+        return True
+    if last_used_at.tzinfo is None:
+        last_used_at = last_used_at.replace(tzinfo=UTC)
+    return datetime.now(UTC) - last_used_at >= LAST_USED_INTERVAL
 
 
 class APIKeyService:
@@ -82,7 +104,7 @@ class APIKeyService:
         # Create API key.
         # NOTE: key_prefix stores the first 12 chars of the raw secret for
         # identification (Stripe-style). The full key is never stored; only a
-        # bcrypt hash is persisted. The prefix allows users to recognize their
+        # SHA-256 hash is persisted. The prefix allows users to recognize their
         # keys in listings without exposing the full secret.
         api_key = await self.apikey_repository.create(
             {
@@ -132,20 +154,33 @@ class APIKeyService:
         api_key = await self.apikey_repository.get_by_key_id(key_id)
 
         if not api_key:
-            # Verify against dummy to prevent timing attacks.
-            await asyncio.to_thread(verify_password, provided_key, DUMMY_PASSWORD_HASH)
+            # Compare anyway, so response time does not tell an anonymous
+            # caller which key IDs exist.
+            verify_api_key(provided_key, DUMMY_API_KEY_HASH)
             return None
 
-        # Verify the key.
-        if not await asyncio.to_thread(verify_password, provided_key, api_key.key_hash):
-            return None
-
-        # Check if valid.
+        # Revoked, expired or deleted keys stop here, before any bcrypt.
         if not api_key.is_valid():
             return None
 
-        # Update last used.
-        await self.apikey_repository.update_last_used(api_key.id)
+        if is_legacy_api_key_hash(api_key.key_hash):
+            # A key created before SHA-256 hashing still verifies with bcrypt
+            # once, and is moved to the fast hash on that use.
+            if not await asyncio.to_thread(
+                verify_password, provided_key, api_key.key_hash
+            ):
+                return None
+            await self.apikey_repository.update_key_hash(
+                api_key.id, hash_api_key(provided_key)
+            )
+        elif not verify_api_key(provided_key, api_key.key_hash):
+            return None
+
+        # Stamped at most once per interval. Writing it on every request made
+        # each one a row update, and concurrent requests on one key queue on
+        # that row's lock.
+        if _is_stale(api_key.last_used_at):
+            await self.apikey_repository.update_last_used(api_key.id)
 
         return api_key
 

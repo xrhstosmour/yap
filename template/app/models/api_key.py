@@ -33,7 +33,7 @@ class APIKey(BaseModel, table=True):
     Attributes:
         id: UUID primary key
         key_id: Public identifier for the key (shown in UI)
-        key_hash: Bcrypt hash of the full key (stored securely)
+        key_hash: SHA-256 hash of the full key, or bcrypt for an older one
         key_prefix: First 8 chars for identification
         name: Human-readable name for the key
         description: Description of the key's purpose
