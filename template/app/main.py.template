@@ -6,10 +6,7 @@ with all middleware, routers, and lifespan events.
 
 from __future__ import annotations
 
-import time
 from collections.abc import AsyncIterator
-from collections.abc import Awaitable
-from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -21,19 +18,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.responses import ORJSONResponse
 from fastapi.responses import RedirectResponse
-from fastapi.responses import Response
 from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
 from sentry_sdk.types import Event
 from sentry_sdk.types import Hint
 from starlette.middleware.gzip import GZipMiddleware
 
-from app import database
 from app.admin.network import AdminNetworkMiddleware
 from app.admin.router import router as admin_router
 from app.admin.session import NotSignedInError
 from app.api.client_version import ClientVersionMiddleware
 from app.api.idempotency import IdempotencyMiddleware
+from app.api.middleware import DatabaseModeMiddleware
+from app.api.middleware import RequestLoggingMiddleware
+from app.api.middleware import TenantContextMiddleware
 from app.api.request_id import RequestIDMiddleware
 from app.api.v1.router import router as api_v1_router
 from app.api.v1.websocket import start_broadcast_relay
@@ -49,11 +47,8 @@ from app.core.logging import setup_logging
 from app.core.security import TokenRateLimitError
 from app.core.security_middleware import SecurityHeadersMiddleware
 from app.core.settings import settings
-from app.core.tenant import tenant_context
-from app.database import ADDITIONAL_DATABASE_MODE
 from app.database import async_engine
 from app.database import close_db
-from app.database import database_mode_variable
 from app.database import init_db
 
 logger = get_logger("app")
@@ -243,83 +238,15 @@ def create_app() -> FastAPI:
     # Middleware runs in reverse registration order (LIFO) in Starlette.
     app.add_middleware(IdempotencyMiddleware)
 
-    # Database mode middleware.
-    # Sets the database_mode_variable contextvar from the X-Database-Mode header before
-    # request processing. get_async_session() reads the contextvar to route
-    # database queries to the additional database when mode is "additional".
-    # Unknown modes are rejected with 400 so callers get immediate feedback
-    # instead of silently routing to the default database.
-    @app.middleware("http")
-    async def database_mode_middleware(
-        request: Request,
-        call_next: Callable[[Request], Awaitable[Response]],
-    ) -> Response:
-        raw = request.headers.get("X-Database-Mode", "")
-        mode = raw.strip().lower() if raw else ""
-        if mode and mode != ADDITIONAL_DATABASE_MODE:
-            return Response(
-                content=f"Unknown database mode: {mode}",
-                status_code=400,
-            )
-        # Refused here rather than left to `get_async_session()`, whose
-        # `RuntimeError` reached anyone who sent the header as a 500.
-        if mode and database.additional_async_session_factory is None:
-            return Response(
-                content="The additional database is not configured",
-                status_code=400,
-            )
-        token = database_mode_variable.set(mode)
-        try:
-            response = await call_next(request)
-        finally:
-            database_mode_variable.reset(token)
-        return response
+    # Routes the request to the database its `X-Database-Mode` header names.
+    app.add_middleware(DatabaseModeMiddleware)
 
-    # Tenant context middleware.
-    #
-    # This looks like a no-op and is not. `request.state.tenant_id` is set by
-    # `get_current_user`, a dependency, which runs downstream of every
-    # middleware, so the value read here is always None. What matters is the
-    # `with` block: it scopes the tenant ContextVar to this request and
-    # restores it afterwards. Without it, the tenant set by one request's
-    # dependency stays set for the next request handled on the same task, so
-    # an unauthenticated request inherits the previous caller's tenant.
-    # `tests/core/test_tenant.py` covers exactly that.
-    @app.middleware("http")
-    async def tenant_middleware(
-        request: Request,
-        call_next: Callable[[Request], Awaitable[Response]],
-    ) -> Response:
-        """Scope the tenant context to this request."""
-        tenant_id = getattr(request.state, "tenant_id", None)
-
-        with tenant_context(tenant_id):
-            response = await call_next(request)
-
-        return response
+    # Scopes the tenant context to one request, see the class for why it
+    # is not the no-op it looks like.
+    app.add_middleware(TenantContextMiddleware)
 
     # Request logging middleware.
-    @app.middleware("http")
-    async def logging_middleware(
-        request: Request,
-        call_next: Callable[[Request], Awaitable[Response]],
-    ) -> Response:
-        """Log all requests with timing."""
-        start_time = time.time()
-
-        response = await call_next(request)
-
-        duration = time.time() - start_time
-
-        logger.info(
-            "request_completed",
-            method=request.method,
-            path=request.url.path,
-            status_code=response.status_code,
-            duration_ms=round(duration * 1000, 2),
-        )
-
-        return response
+    app.add_middleware(RequestLoggingMiddleware)
 
     # CORS middleware. Registered last (outermost), so it wraps every other
     # middleware and the exception handlers below. Starlette runs
