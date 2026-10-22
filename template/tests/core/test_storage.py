@@ -554,6 +554,18 @@ class TestStripImageMetadata:
 
         assert strip_image_metadata(content) is content
 
+    def test_returns_an_image_whose_metadata_cannot_be_read_untouched(self) -> None:
+        content = b"\x89PNG\r\n\x1a\n" + b"cut short"
+
+        assert strip_image_metadata(content) is content
+
+    def test_refuses_a_located_photo_whose_pixels_are_cut_short(self) -> None:
+        photo = _photo(_located_exif(), size=(64, 64))
+        truncated = photo[: photo.index(b"\xff\xda") + 16]
+
+        with pytest.raises(OSError, match="truncated"):
+            strip_image_metadata(truncated)
+
 
 class TestUploadObject:
     """Tests for upload_object()."""

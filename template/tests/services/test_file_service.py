@@ -291,6 +291,26 @@ class TestUpload:
         mock_upload.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_refuses_an_image_it_cannot_read(self, service: FileService) -> None:
+        user = make_user()
+        mock_file = MagicMock()
+        mock_file.filename = "photo.png"
+        mock_file.content_type = "image/png"
+        mock_file.read = AsyncMock(side_effect=[PNG_MAGIC_BYTES, b""])
+
+        with (
+            patch(
+                "app.services.file_service.strip_image_metadata",
+                side_effect=OSError("image file is truncated"),
+            ),
+            patch("app.services.file_service.upload_file") as mock_upload,
+            pytest.raises(FileTypeMismatchError),
+        ):
+            await service.upload(mock_file, user)
+
+        mock_upload.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_skips_thumbnail_task_for_non_image(
         self, service: FileService
     ) -> None:

@@ -158,6 +158,8 @@ class FileService:
                 raise FileTooLargeError(
                     "The image has too many pixels to accept."
                 ) from error
+            except OSError as error:
+                raise FileTypeMismatchError("The image could not be read.") from error
             if stripped is not content:
                 content = stripped
                 content_hash = hashlib.sha256(content).hexdigest()
