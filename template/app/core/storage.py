@@ -149,11 +149,14 @@ def strip_image_metadata(content: bytes) -> bytes:
     A phone writes where a photo was taken into it, and the original is
     what other people download. Only re-encoded when there is metadata to
     drop, upright as the orientation tag said, keeping its colour profile.
-    Content PIL cannot read, and animations, are returned as they came.
+    Content PIL cannot read the metadata of, and animations, are returned
+    as they came.
 
     Raises:
         PIL.Image.DecompressionBombError: If the image decodes to more than
             `MAX_IMAGE_PIXELS`, as `_build_thumbnail` refuses.
+        OSError: If the metadata reads but the pixels do not, a truncated
+            photo, which cannot be stored without keeping its location.
     """
     import PIL.Image
     import PIL.ImageOps
@@ -163,10 +166,12 @@ def strip_image_metadata(content: bytes) -> bytes:
         warnings.simplefilter("error", PIL.Image.DecompressionBombWarning)
         try:
             image = PIL.Image.open(io.BytesIO(content))
-        except PIL.UnidentifiedImageError:
+            exif = image.getexif()
+            frames = getattr(image, "n_frames", 1)
+        except OSError:
             return content
         # Re-encoding an animation would keep only its first frame.
-        if not image.getexif() or getattr(image, "n_frames", 1) > 1:
+        if not exif or frames > 1:
             return content
         image_format = image.format
         icc_profile = image.info.get("icc_profile")
