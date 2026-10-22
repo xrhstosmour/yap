@@ -8,8 +8,9 @@ Database routing:
     `ADDITIONAL_DATABASE_MODE` (``"additional"``, from the ``X-Database-Mode``
     header), the additional engine supplies the session. This enables
     preview/demo/staging database isolation without per-model flag columns.
-    Call ``get_additional_sync_session()`` for Alembic migrations on the
-    additional database.
+    Alembic builds its own engine in ``migrations/env.py`` from the settings,
+    so it migrates the additional database when ``POSTGRESQL_DATABASE`` names
+    it.
 
     The additional database engines are only created when
     ``settings.POSTGRESQL_ADDITIONAL_DATABASE`` is configured (non-empty), the
@@ -201,7 +202,8 @@ def get_sync_session() -> Generator[Session]:
         Sync Session instance for migrations.
 
     Note:
-        Only used by Alembic during migrations.
+        For scripts and tests that need a sync session. Alembic builds its
+        own engine in ``migrations/env.py``.
         Use async session in application code.
     """
     with sync_session_factory() as session:
@@ -220,7 +222,8 @@ def get_additional_sync_session() -> Generator[Session]:
         Sync Session instance for migrations.
 
     Note:
-        Only used by Alembic when targeting the additional database.
+        For scripts and tests that need a sync session on the additional
+        database. Alembic builds its own engine in ``migrations/env.py``.
 
     Raises:
         RuntimeError: If ``settings.POSTGRESQL_ADDITIONAL_DATABASE`` is not
