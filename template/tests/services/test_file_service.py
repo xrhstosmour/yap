@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
+import hashlib
+import io
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
 from unittest.mock import patch
 from uuid import UUID
 
+import PIL.Image
 import pytest
 
 from app.core import SYSTEM_TENANT_ID
 from app.core.settings import settings
 from app.models.file import File
 from app.services.file_service import FileService
+from app.services.file_service import FileTooLargeError
 from app.services.file_service import FileTypeMismatchError
 
 PNG_MAGIC_BYTES = b"\x89PNG\r\n\x1a\n" + b"rest of a fake png"
@@ -234,6 +238,57 @@ class TestUpload:
             await service.upload(mock_file, user)
 
         mock_task.delay.assert_called_once_with(file_id=str(new_record.id))
+
+    @pytest.mark.asyncio
+    async def test_stores_and_hashes_a_photo_without_its_location(
+        self, service: FileService
+    ) -> None:
+        """The stored bytes carry no GPS, and dedup keys on those bytes."""
+        exif = PIL.Image.Exif()
+        exif[0x8825] = {1: "N", 2: (37.0, 58.0, 0.0)}
+        output = io.BytesIO()
+        PIL.Image.new("RGB", (4, 4), "red").save(output, format="JPEG", exif=exif)
+        user = make_user()
+        mock_file = MagicMock()
+        mock_file.filename = "photo.jpg"
+        mock_file.content_type = "image/jpeg"
+        mock_file.read = AsyncMock(side_effect=[output.getvalue(), b""])
+        service.file_repository.get_by_content_hash = AsyncMock(return_value=None)
+        service.file_repository.create_or_increment = AsyncMock(
+            return_value=(MagicMock(), False)
+        )
+
+        with patch("app.services.file_service.upload_file") as mock_upload:
+            mock_upload.return_value = ("uploads/abc123", "abc123")
+            await service.upload(mock_file, user)
+
+        stored = mock_upload.call_args.kwargs["content"]
+        record = service.file_repository.create_or_increment.call_args.args[0]
+        assert dict(PIL.Image.open(io.BytesIO(stored)).getexif()) == {}
+        assert record["content_hash"] == hashlib.sha256(stored).hexdigest()
+        assert record["size"] == len(stored)
+
+    @pytest.mark.asyncio
+    async def test_refuses_an_image_with_too_many_pixels(
+        self, service: FileService
+    ) -> None:
+        user = make_user()
+        mock_file = MagicMock()
+        mock_file.filename = "photo.png"
+        mock_file.content_type = "image/png"
+        mock_file.read = AsyncMock(side_effect=[PNG_MAGIC_BYTES, b""])
+
+        with (
+            patch(
+                "app.services.file_service.strip_image_metadata",
+                side_effect=PIL.Image.DecompressionBombError("too large"),
+            ),
+            patch("app.services.file_service.upload_file") as mock_upload,
+            pytest.raises(FileTooLargeError),
+        ):
+            await service.upload(mock_file, user)
+
+        mock_upload.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_skips_thumbnail_task_for_non_image(
