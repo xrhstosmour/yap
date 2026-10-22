@@ -13,6 +13,9 @@ background tasks, and comprehensive security features.
 - Google OAuth 2.0, and Sign in with Apple, native (`POST /auth/apple/native`,
   identity token and nonce from the app) and web (`GET /auth/apple`). Extensible
   to Microsoft via the `OAuthProvider` enum.
+- Account deletion unlinks every provider and revokes the Apple refresh token,
+  which the app gets by also sending its `authorization_code` to the native
+  endpoint. Without it there is nothing to revoke.
 - API key authentication (SHA-256-hashed, prefix-based scoping).
 - `token_version` column invalidates all JWTs on password change or admin revoke.
 

@@ -740,6 +740,34 @@ def create_apple_client_secret(client_id: str | None = None) -> str:
     )
 
 
+async def revoke_apple_token(refresh_token: str, client_id: str) -> None:
+    """Revoke an Apple refresh token, ending the app's authorization.
+
+    Apple expects this when an account made with Sign in with Apple is
+    deleted, the person's Apple ID then no longer lists the app.
+
+    Args:
+        refresh_token: The refresh token from the code exchange.
+        client_id: The client the token was issued to.
+
+    Raises:
+        httpx.HTTPError: If Apple cannot be reached or refuses the token.
+    """
+    import httpx
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        response = await client.post(
+            f"{APPLE_ISSUER}/auth/revoke",
+            data={
+                "client_id": client_id,
+                "client_secret": create_apple_client_secret(client_id),
+                "token": refresh_token,
+                "token_type_hint": "refresh_token",
+            },
+        )
+    response.raise_for_status()
+
+
 async def _apple_signing_key(key_id: str) -> jwt.PyJWK | None:
     """Return Apple's public key `key_id`, fetching the set when needed.
 

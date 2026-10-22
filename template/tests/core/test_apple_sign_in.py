@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
+import httpx
 import jwt
 import pytest
 from cryptography.hazmat.primitives import serialization
@@ -18,6 +19,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from app.core import security
 from app.core.security import APPLE_ISSUER
 from app.core.security import create_apple_client_secret
+from app.core.security import revoke_apple_token
 from app.core.security import verify_apple_identity_token
 
 BUNDLE_ID = "com.example.app"
@@ -233,3 +235,44 @@ class TestCreateAppleClientSecret:
         )
 
         assert claims["sub"] == "com.example.app"
+
+
+def _apple_revoking(status_code: int) -> MagicMock:
+    """Patch `httpx.AsyncClient` to answer the revoke request."""
+    request = httpx.Request("POST", f"{APPLE_ISSUER}/auth/revoke")
+    response = httpx.Response(status_code, request=request)
+    client = MagicMock()
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock()
+    client.post = AsyncMock(return_value=response)
+    return MagicMock(return_value=client)
+
+
+class TestRevokeAppleToken:
+    """Tests for `revoke_apple_token`."""
+
+    async def test_revokes_the_refresh_token_as_its_client(self) -> None:
+        client_class = _apple_revoking(200)
+
+        with (
+            patch("httpx.AsyncClient", client_class),
+            patch.object(security, "create_apple_client_secret", return_value="s"),
+        ):
+            await revoke_apple_token("refresh", "com.example.app")
+
+        call = client_class.return_value.post.call_args
+        assert call.args == (f"{APPLE_ISSUER}/auth/revoke",)
+        assert call.kwargs["data"] == {
+            "client_id": "com.example.app",
+            "client_secret": "s",
+            "token": "refresh",
+            "token_type_hint": "refresh_token",
+        }
+
+    async def test_a_refusal_is_raised(self) -> None:
+        with (
+            patch("httpx.AsyncClient", _apple_revoking(400)),
+            patch.object(security, "create_apple_client_secret", return_value="s"),
+            pytest.raises(httpx.HTTPStatusError),
+        ):
+            await revoke_apple_token("refresh", "com.example.app")

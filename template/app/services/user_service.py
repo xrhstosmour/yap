@@ -22,12 +22,15 @@ from app.core import SYSTEM_TENANT_ID
 from app.core.encryption import encrypted_column_names
 from app.core.logging import get_logger
 from app.core.security import generate_password_hash
+from app.core.security import revoke_apple_token
 from app.core.security import verify_password
 from app.core.storage import delete_object
 from app.models.api_key import APIKey
 from app.models.audit_log import AuditAction
 from app.models.audit_log import AuditLog
 from app.models.file import File
+from app.models.oauth_account import OAuthAccount
+from app.models.oauth_account import OAuthProvider
 from app.models.totp_recovery_code import TotpRecoveryCode
 from app.models.user import User
 from app.models.user import UserRole
@@ -407,9 +410,11 @@ class UserService:
         full_name, hashed_password, username, avatar), clears 2FA (TOTP
         secret, recovery codes, WebAuthn credentials), deletes every file
         the account uploaded along with its stored bytes, drops the email
-        from the account's audit entries, soft-deletes the account, and
-        increments `token_version` to immediately invalidate all
-        outstanding JWTs. Logs the deletion in the audit trail, by id only.
+        from the account's audit entries, unlinks every OAuth provider and
+        revokes the Sign in with Apple authorization, soft-deletes the
+        account, and increments `token_version` to immediately invalidate
+        all outstanding JWTs. Logs the deletion in the audit trail, by id
+        only.
 
         Args:
             user: The authenticated user requesting deletion.
@@ -441,6 +446,34 @@ class UserService:
             await self.session.execute(
                 sa_delete(WebAuthnCredential).where(
                     WebAuthnCredential.user_id == user.id  # type: ignore[arg-type]
+                )
+            )
+
+            # The links hold the provider's email and the refresh tokens, so
+            # they go, which also lets the same provider identity sign up
+            # again. Apple's tokens are kept aside to revoke once the rows
+            # are gone.
+            links = list(
+                (
+                    await self.session.execute(
+                        select(OAuthAccount).where(
+                            OAuthAccount.user_id == user.id  # type: ignore[arg-type]
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            apple_tokens = [
+                (link.refresh_token, link.refresh_token_client_id)
+                for link in links
+                if link.provider == OAuthProvider.APPLE
+                and link.refresh_token
+                and link.refresh_token_client_id
+            ]
+            await self.session.execute(
+                sa_delete(OAuthAccount).where(
+                    OAuthAccount.user_id == user.id  # type: ignore[arg-type]
                 )
             )
 
@@ -506,6 +539,7 @@ class UserService:
             await self.user_repository.delete(user.id)
 
         await self._purge_stored_objects(files)
+        await self._revoke_apple_authorizations(apple_tokens, user.id)
 
         await self.audit_repository.log_user_action_safe(
             action=AuditAction.ACCOUNT_DELETION,
@@ -539,6 +573,29 @@ class UserService:
                         file_id=str(file.id),
                         exc_info=True,
                     )
+
+    async def _revoke_apple_authorizations(
+        self, tokens: list[tuple[str, str]], user_id: UUID
+    ) -> None:
+        """Revoke a deleted account's Sign in with Apple tokens.
+
+        Like the storage purge, runs once the account is gone, so Apple
+        being unreachable leaves a log line to act on rather than an
+        account that cannot be deleted.
+
+        Args:
+            tokens: Each refresh token with the client it was issued to.
+            user_id: The deleted account, for the log.
+        """
+        for refresh_token, client_id in tokens:
+            try:
+                await revoke_apple_token(refresh_token, client_id)
+            except Exception:
+                logger.warning(
+                    "deleted_account_apple_token_not_revoked",
+                    user_id=str(user_id),
+                    exc_info=True,
+                )
 
     async def revoke_all_sessions(
         self,

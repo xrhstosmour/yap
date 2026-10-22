@@ -20,6 +20,7 @@ from app.core.tenant import system_context
 from app.models.audit_log import AuditAction
 from app.models.audit_log import AuditLog
 from app.models.file import File
+from app.models.oauth_account import OAuthAccount
 from app.models.user import User
 from app.models.user import UserRole
 from app.repositories.audit_repository import AuditLogRepository
@@ -325,6 +326,79 @@ class TestDeleteMeErasure:
 
         assert user.deleted_at is not None
 
+    @staticmethod
+    async def _linked(user_service: UserService, email: str) -> User:
+        """An account linked to Apple, with a refresh token, and to Google."""
+        user = await user_service.create(
+            UserCreate(email=email, password="password123")
+        )
+        tenant_id = user.tenant_id or SYSTEM_TENANT_ID
+        user_service.session.add_all(
+            [
+                OAuthAccount(
+                    user_id=user.id,
+                    provider="apple",
+                    provider_user_id=f"apple-{user.id}",
+                    provider_email=email,
+                    refresh_token="apple-refresh",
+                    refresh_token_client_id="com.example.app",
+                    tenant_id=tenant_id,
+                ),
+                OAuthAccount(
+                    user_id=user.id,
+                    provider="google",
+                    provider_user_id=f"google-{user.id}",
+                    provider_email=email,
+                    tenant_id=tenant_id,
+                ),
+            ]
+        )
+        await user_service.session.flush()
+        return user
+
+    @pytest.mark.asyncio
+    async def test_delete_me_unlinks_providers_and_revokes_apple(
+        self, session: AsyncSession
+    ) -> None:
+        user_service = _user_service(session)
+        with system_context():
+            user = await self._linked(user_service, "apple-leaving@example.com")
+
+            revoke = AsyncMock()
+            with patch("app.services.user_service.revoke_apple_token", revoke):
+                await user_service.delete_me(user)
+
+            links = (
+                (
+                    await session.execute(
+                        select(OAuthAccount).where(OAuthAccount.user_id == user.id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+
+        revoke.assert_awaited_once_with("apple-refresh", "com.example.app")
+        assert links == []
+
+    @pytest.mark.asyncio
+    async def test_delete_me_survives_apple_being_down(
+        self, session: AsyncSession
+    ) -> None:
+        user_service = _user_service(session)
+        with system_context():
+            user = await self._linked(user_service, "apple-stuck@example.com")
+
+            with patch(
+                "app.services.user_service.revoke_apple_token",
+                AsyncMock(side_effect=ConnectionError("Apple is down")),
+            ):
+                await user_service.delete_me(user)
+
+            await session.refresh(user)
+
+        assert user.deleted_at is not None
+
 
 # ============================================================================ #
 # Mock-based unit tests
@@ -570,6 +644,7 @@ class TestDeleteMe:
         }
         assert tables == {
             "api_keys",
+            "oauth_accounts",
             "totp_recovery_codes",
             "webauthn_credentials",
             "audit_logs",
