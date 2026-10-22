@@ -63,6 +63,21 @@ def _stub_git(directory: Path, *, exit_code: int, output: str) -> Path:
     return binary
 
 
+def _stub_curl(directory: Path, *, exit_code: int) -> None:
+    """Put a fake `curl` next to the `git` stub, answering whether GitHub
+    has a commit.
+
+    Args:
+        directory: Where the `git` stub lives.
+        exit_code: Zero when GitHub has the commit, 22 for a 404.
+    """
+    binary = directory / "bin"
+    binary.mkdir(exist_ok=True)
+    stub = binary / "curl"
+    stub.write_text(f"#!/bin/sh\nexit {exit_code}\n")
+    stub.chmod(stub.stat().st_mode | stat.S_IEXEC)
+
+
 def _run(project: Path, path_entry: Path) -> subprocess.CompletedProcess[str]:
     """Run the script with a doctored `PATH`.
 
@@ -165,6 +180,61 @@ class TestReachableRemote:
         _run(project, path_entry)
 
         assert not (project / ".copier" / ".version.bak").exists()
+
+
+class TestRenderedCommit:
+    """The commit Copier rendered is the base the next sync updates from."""
+
+    RENDERED = "_src_path: gh:xrhstosmour/yap\n_commit: abc1234\n"
+
+    def test_a_commit_github_has_is_kept(self, project: Path) -> None:
+        """Replacing it would skip every template change since it.
+
+        Args:
+            project: The generated project root.
+        """
+        (project / ".copier" / ".version").write_text(self.RENDERED)
+        path_entry = _stub_git(project, exit_code=0, output=RESOLVED_SHA)
+        _stub_curl(project, exit_code=0)
+
+        result = _run(project, path_entry)
+
+        assert result.returncode == 0, result.stderr
+        assert (project / ".copier" / ".version").read_text() == self.RENDERED
+
+    def test_a_commit_github_lacks_falls_back_to_the_remote(
+        self, project: Path
+    ) -> None:
+        """A dirty local render records a commit that exists nowhere.
+
+        Args:
+            project: The generated project root.
+        """
+        (project / ".copier" / ".version").write_text(self.RENDERED)
+        path_entry = _stub_git(project, exit_code=0, output=RESOLVED_SHA)
+        _stub_curl(project, exit_code=22)
+
+        result = _run(project, path_entry)
+
+        assert result.returncode == 0, result.stderr
+        version = (project / ".copier" / ".version").read_text()
+        assert f"_commit: {RESOLVED_SHA}" in version
+
+    def test_a_described_commit_keeps_only_its_hash(self, project: Path) -> None:
+        """`git describe` output is not a ref GitHub can look up.
+
+        Args:
+            project: The generated project root.
+        """
+        (project / ".copier" / ".version").write_text(
+            "_src_path: gh:xrhstosmour/yap\n_commit: fix-commit-12-gabc1234\n"
+        )
+        path_entry = _stub_git(project, exit_code=0, output=RESOLVED_SHA)
+        _stub_curl(project, exit_code=0)
+
+        _run(project, path_entry)
+
+        assert (project / ".copier" / ".version").read_text() == self.RENDERED
 
 
 class TestMissingVersionFile:
