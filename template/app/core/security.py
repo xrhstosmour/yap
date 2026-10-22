@@ -624,13 +624,11 @@ async def create_google_oauth_state(redirect_uri: str) -> str:
     Returns:
         Opaque URL-safe state string (32 bytes, base64url encoded).
     """
-    from app.core.cache import get_redis
-
-    redis = await get_redis()
-    state = secrets.token_urlsafe(32)
-    key = f"{_GOOGLE_OAUTH_STATE_PREFIX}:{state}"
-    await redis.setex(key, settings.GOOGLE_OAUTH_STATE_TTL_SECONDS, redirect_uri)
-    return state
+    return await _create_oauth_state(
+        _GOOGLE_OAUTH_STATE_PREFIX,
+        redirect_uri,
+        settings.GOOGLE_OAUTH_STATE_TTL_SECONDS,
+    )
 
 
 async def verify_google_oauth_state(state: str) -> str | None:
@@ -646,14 +644,173 @@ async def verify_google_oauth_state(state: str) -> str | None:
         The bound `redirect_uri` if the token is valid and unexpired,
         `None` if the token is missing or already consumed.
     """
+    return await _consume_oauth_state(_GOOGLE_OAUTH_STATE_PREFIX, state)
+
+
+async def _create_oauth_state(prefix: str, redirect_uri: str, ttl: int) -> str:
+    """Store a fresh state token bound to `redirect_uri` under `prefix`."""
     from app.core.cache import get_redis
 
     redis = await get_redis()
-    key = f"{_GOOGLE_OAUTH_STATE_PREFIX}:{state}"
+    state = secrets.token_urlsafe(32)
+    await redis.setex(f"{prefix}:{state}", ttl, redirect_uri)
+    return state
+
+
+async def _consume_oauth_state(prefix: str, state: str) -> str | None:
+    """Return the `redirect_uri` bound to `state` and delete it, once."""
+    from app.core.cache import get_redis
+
+    redis = await get_redis()
 
     # Atomic get-and-delete: no race window between read and delete.
-    stored_uri: str | None = await redis.getdel(key)
+    stored_uri: str | None = await redis.getdel(f"{prefix}:{state}")
     return stored_uri
+
+
+# Sign in with Apple.
+APPLE_ISSUER = "https://appleid.apple.com"
+_APPLE_KEYS_URL = "https://appleid.apple.com/auth/keys"
+_APPLE_OAUTH_STATE_PREFIX = "apple_oauth_state"
+_APPLE_OAUTH_STATE_TTL_SECONDS = 600
+# Apple rotates its signing keys rarely, an hour of caching saves a fetch
+# per sign-in. A token naming a key not in the cache refetches early, but
+# at most once a minute, so made-up key IDs cannot turn every request into
+# a call to Apple.
+_APPLE_KEYS_TTL_SECONDS = 3600
+_APPLE_KEYS_REFETCH_SECONDS = 60
+_apple_keys: dict[str, jwt.PyJWK] = {}
+_apple_keys_fetched_at: float | None = None
+
+
+async def create_apple_oauth_state(redirect_uri: str) -> str:
+    """Create a single-use CSRF state token for the Apple web flow.
+
+    Same contract as `create_google_oauth_state`, under its own prefix so
+    a Google state cannot complete an Apple sign-in.
+
+    Args:
+        redirect_uri: The redirect URI that will be sent to Apple.
+
+    Returns:
+        Opaque URL-safe state string.
+    """
+    return await _create_oauth_state(
+        _APPLE_OAUTH_STATE_PREFIX, redirect_uri, _APPLE_OAUTH_STATE_TTL_SECONDS
+    )
+
+
+async def verify_apple_oauth_state(state: str) -> str | None:
+    """Consume an Apple CSRF state token.
+
+    Args:
+        state: CSRF state string received in the callback.
+
+    Returns:
+        The bound `redirect_uri`, `None` if missing or already consumed.
+    """
+    return await _consume_oauth_state(_APPLE_OAUTH_STATE_PREFIX, state)
+
+
+def create_apple_client_secret() -> str:
+    """Sign the short-lived client secret Apple's token endpoint expects.
+
+    Apple has no static client secret, it takes a JWT signed with the
+    `.p8` key from the developer account, naming the team and the
+    Services ID.
+
+    Returns:
+        ES256 JWT valid for five minutes.
+    """
+    issued_at = int(datetime.now(UTC).timestamp())
+    return jwt.encode(
+        {
+            "iss": settings.APPLE_TEAM_ID,
+            "iat": issued_at,
+            "exp": issued_at + 300,
+            "aud": APPLE_ISSUER,
+            "sub": settings.APPLE_CLIENT_ID,
+        },
+        settings.APPLE_PRIVATE_KEY,
+        algorithm="ES256",
+        headers={"kid": settings.APPLE_KEY_ID},
+    )
+
+
+async def _apple_signing_key(key_id: str) -> jwt.PyJWK | None:
+    """Return Apple's public key `key_id`, fetching the set when needed.
+
+    Raises:
+        httpx.HTTPError: If Apple's key set cannot be fetched.
+    """
+    import time
+
+    import httpx
+
+    global _apple_keys_fetched_at
+
+    now = time.monotonic()
+    age = None if _apple_keys_fetched_at is None else now - _apple_keys_fetched_at
+    stale = age is None or age > _APPLE_KEYS_TTL_SECONDS
+    unknown = key_id not in _apple_keys and (
+        age is None or age > _APPLE_KEYS_REFETCH_SECONDS
+    )
+    if stale or unknown:
+        async with httpx.AsyncClient(timeout=5) as client:
+            response = await client.get(_APPLE_KEYS_URL)
+        response.raise_for_status()
+        key_set = jwt.PyJWKSet.from_dict(response.json())
+        _apple_keys.clear()
+        _apple_keys.update({key.key_id: key for key in key_set.keys if key.key_id})
+        _apple_keys_fetched_at = now
+
+    return _apple_keys.get(key_id)
+
+
+async def verify_apple_identity_token(
+    token: str, audience: str, nonce: str | None = None
+) -> dict[str, Any]:
+    """Verify an Apple identity token and return its claims.
+
+    Checks the signature against Apple's published keys, the issuer, the
+    audience and the expiry. With `nonce`, also checks the token was
+    minted for it: the client sends Apple the SHA-256 of a random value
+    and the server the value itself, so a token lifted from elsewhere
+    cannot be replayed without it.
+
+    Args:
+        token: The identity token, a JWT.
+        audience: The bundle ID for the native flow, the Services ID for
+            the web flow.
+        nonce: The raw nonce the client hashed into the request, if any.
+
+    Returns:
+        The verified claims.
+
+    Raises:
+        jwt.InvalidTokenError: If any check fails.
+        httpx.HTTPError: If Apple's key set cannot be fetched.
+    """
+    key_id = jwt.get_unverified_header(token).get("kid")
+    key = await _apple_signing_key(key_id) if isinstance(key_id, str) else None
+    if key is None:
+        raise jwt.InvalidTokenError("Unknown Apple signing key.")
+
+    claims: dict[str, Any] = jwt.decode(
+        token,
+        key,
+        algorithms=["RS256"],
+        audience=audience,
+        issuer=APPLE_ISSUER,
+        options={"require": ["exp", "iat", "iss", "aud", "sub"]},
+    )
+
+    if nonce is not None:
+        expected = hashlib.sha256(nonce.encode()).hexdigest()
+        if not hmac.compare_digest(str(claims.get("nonce", "")), expected):
+            raise jwt.InvalidTokenError("Apple nonce mismatch.")
+
+    return claims
 
 
 # TOTP / 2FA Utilities.

@@ -188,6 +188,67 @@ class GoogleCallbackRequest(BaseSchema):
     )
 
 
+class AppleAuthUrlResponse(BaseSchema):
+    """Sign in with Apple authorization URL response.
+
+    Attributes:
+        url: Full Apple authorization URL including CSRF state.
+    """
+
+    url: str = Field(description="Apple authorization URL")
+
+
+class AppleCallbackRequest(BaseSchema):
+    """Apple web flow callback request.
+
+    Request body for `POST /auth/apple/callback`, carrying what Apple
+    posted to the registered redirect URI.
+
+    Attributes:
+        code: Authorization code Apple posted.
+        state: CSRF state token Apple posted back.
+        redirect_uri: Must exactly match the authorization request.
+        full_name: Name from the `user` field Apple posts, first
+            authorization only.
+    """
+
+    code: str = Field(description="Authorization code Apple posted")
+    state: str = Field(description="CSRF state token Apple posted back")
+    redirect_uri: str = Field(
+        description="Redirect URI used in the authorization request"
+    )
+    full_name: str | None = Field(
+        default=None,
+        max_length=255,
+        description="Name Apple posted on the first authorization",
+    )
+
+
+class AppleNativeLoginRequest(BaseSchema):
+    """Native Sign in with Apple request.
+
+    Request body for `POST /auth/apple/native`, sent by an app after the
+    system sheet succeeds.
+
+    Attributes:
+        identity_token: The identity token Apple returned to the app.
+        nonce: The raw nonce whose SHA-256 the app sent to Apple.
+        full_name: The name Apple returned, first authorization only.
+    """
+
+    identity_token: str = Field(description="Identity token from Apple")
+    nonce: str = Field(
+        min_length=16,
+        max_length=255,
+        description="Raw nonce whose SHA-256 was sent to Apple",
+    )
+    full_name: str | None = Field(
+        default=None,
+        max_length=255,
+        description="Name Apple returned on the first authorization",
+    )
+
+
 class WSTicketResponse(BaseSchema):
     """WebSocket authentication ticket response.
 

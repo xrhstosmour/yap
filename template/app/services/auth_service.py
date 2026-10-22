@@ -88,6 +88,12 @@ class UserInactiveError(AuthenticationError):
     pass
 
 
+class OAuthProviderUnavailableError(AuthenticationError):
+    """Social sign-in is not configured, or the provider cannot be reached."""
+
+    pass
+
+
 class AuthService:
     """Service for authentication operations.
 
@@ -818,27 +824,63 @@ class AuthService:
         if not google_id or not email:
             raise AuthenticationError("Invalid Google userinfo response")
 
+        return await self._login_with_oauth_identity(
+            OAuthProvider.GOOGLE, google_id, email, full_name
+        )
+
+    async def _login_with_oauth_identity(
+        self,
+        provider: str,
+        provider_user_id: str,
+        email: str | None,
+        full_name: str | None,
+    ) -> LoginResponse:
+        """Find or create the account behind a verified provider identity.
+
+        The provider has already proven the identity, this only maps it
+        to a local account: the linked one, else the one with the same
+        email, linked on the way, else a new verified one.
+
+        Args:
+            provider: `OAuthProvider` value of the identity.
+            provider_user_id: The provider's stable subject ID.
+            email: Verified email from the provider, `None` when it sent
+                none, which only works for an identity already linked.
+            full_name: Display name for a new account, if the provider
+                gave one.
+
+        Returns:
+            LoginResponse with tokens, or a 2FA challenge if the account
+            has 2FA enabled.
+
+        Raises:
+            AuthenticationError: If the identity is unlinked and has no
+                email to link or register with.
+            UserInactiveError: If the account is inactive.
+        """
         # Find existing linked account by provider subject ID.
         oauth_account = await self.oauth_account_repository.get_by_provider(
-            OAuthProvider.GOOGLE, google_id
+            provider, provider_user_id
         )
 
         if oauth_account:
             user: User | None = oauth_account.user
+        elif not email:
+            raise AuthenticationError(f"No email in the {provider} identity.")
         else:
             user = await self.user_repository.get_by_email(email)
             if user:
-                # Link Google to an existing password-based account.
+                # Link the provider to an existing password-based account.
                 await self.oauth_account_repository.create_link(
                     user_id=user.id,
-                    provider=OAuthProvider.GOOGLE,
-                    provider_user_id=google_id,
+                    provider=provider,
+                    provider_user_id=provider_user_id,
                     provider_email=email,
                     tenant_id=user.tenant_id,
                 )
-                logger.info("google_account_linked", user_id=str(user.id))
+                logger.info(f"{provider}_account_linked", user_id=str(user.id))
             else:
-                # Register a new account for first-time Google login.
+                # Register a new account for a first-time provider login.
                 # NOTE: OAuth users are created without a tenant_id.
                 # Projects requiring multi-tenancy should assign a tenant
                 # during OAuth registration (e.g. via invitation or subdomain).
@@ -854,18 +896,193 @@ class AuthService:
                 )
                 await self.oauth_account_repository.create_link(
                     user_id=user.id,
-                    provider=OAuthProvider.GOOGLE,
-                    provider_user_id=google_id,
+                    provider=provider,
+                    provider_user_id=provider_user_id,
                     provider_email=email,
                     tenant_id=user.tenant_id,
                 )
-                logger.info("google_user_created", user_id=str(user.id))
+                logger.info(f"{provider}_user_created", user_id=str(user.id))
 
         if not user or not user.is_active:
             raise UserInactiveError("User account is inactive.")
 
-        logger.info("google_login_success", user_id=str(user.id))
+        logger.info(f"{provider}_login_success", user_id=str(user.id))
         return await self.issue_login_response(user)
+
+    async def apple_native_login(
+        self, identity_token: str, nonce: str, full_name: str | None = None
+    ) -> LoginResponse:
+        """Authenticate or register a user from a native Sign in with Apple.
+
+        The app runs the system sheet itself and sends the identity token
+        Apple gave it, so there is no code to exchange and no key needed.
+
+        Args:
+            identity_token: The identity token from the system sheet.
+            nonce: The raw nonce whose SHA-256 the app sent to Apple.
+            full_name: The name Apple handed the app, only ever on the
+                first authorization, so it is only used for a new account.
+
+        Returns:
+            LoginResponse with tokens, or a 2FA challenge if the account
+            has 2FA enabled.
+
+        Raises:
+            OAuthProviderUnavailableError: If `APPLE_BUNDLE_ID` is unset or
+                Apple's keys cannot be fetched.
+            AuthenticationError: If the token does not verify.
+            UserInactiveError: If the account is inactive.
+        """
+        if not settings.APPLE_BUNDLE_ID:
+            raise OAuthProviderUnavailableError("Sign in with Apple is not configured.")
+
+        claims = await self._verify_apple_identity_token(
+            identity_token, settings.APPLE_BUNDLE_ID, nonce
+        )
+        return await self._login_with_apple_claims(claims, full_name)
+
+    async def get_apple_auth_url(self, redirect_uri: str) -> str:
+        """Build the Sign in with Apple authorization URL for the web flow.
+
+        Apple only sends the name and email to a `form_post` callback,
+        so `redirect_uri` has to accept a form POST and hand the code and
+        state on to `POST /auth/apple/callback`.
+
+        Args:
+            redirect_uri: URL Apple posts the result to, registered on the
+                Services ID.
+
+        Returns:
+            Full Apple authorization URL with state embedded.
+
+        Raises:
+            OAuthProviderUnavailableError: If the web flow is not configured.
+        """
+        from urllib.parse import urlencode
+
+        from app.core.security import create_apple_oauth_state
+
+        if not settings.APPLE_CLIENT_ID or not settings.APPLE_PRIVATE_KEY:
+            raise OAuthProviderUnavailableError("Sign in with Apple is not configured.")
+
+        state = await create_apple_oauth_state(redirect_uri)
+        parameters = {
+            "client_id": settings.APPLE_CLIENT_ID,
+            "redirect_uri": redirect_uri,
+            "response_type": "code",
+            "response_mode": "form_post",
+            "scope": "name email",
+            "state": state,
+        }
+        return f"https://appleid.apple.com/auth/authorize?{urlencode(parameters)}"
+
+    async def apple_login(
+        self,
+        code: str,
+        state: str,
+        redirect_uri: str,
+        full_name: str | None = None,
+    ) -> LoginResponse:
+        """Authenticate or register a user via the Apple web flow.
+
+        Validates the CSRF state, exchanges the code with a signed client
+        secret, verifies the identity token Apple returns, then finds or
+        creates the account as `google_login` does.
+
+        Args:
+            code: Authorization code Apple posted to the callback.
+            state: CSRF state token from the authorization URL.
+            redirect_uri: Must exactly match the authorization request.
+            full_name: The name Apple posted, first authorization only.
+
+        Returns:
+            LoginResponse with tokens, or a 2FA challenge if the account
+            has 2FA enabled.
+
+        Raises:
+            OAuthProviderUnavailableError: If the web flow is not configured
+                or Apple cannot be reached.
+            AuthenticationError: If the state, code or token is invalid.
+            UserInactiveError: If the account is inactive.
+        """
+        import httpx
+
+        from app.core.security import APPLE_ISSUER
+        from app.core.security import create_apple_client_secret
+        from app.core.security import verify_apple_oauth_state
+
+        if not settings.APPLE_CLIENT_ID or not settings.APPLE_PRIVATE_KEY:
+            raise OAuthProviderUnavailableError("Sign in with Apple is not configured.")
+
+        expected_redirect_uri = await verify_apple_oauth_state(state)
+        if not expected_redirect_uri:
+            raise AuthenticationError("Invalid or expired OAuth state.")
+        if redirect_uri != expected_redirect_uri:
+            raise AuthenticationError("OAuth redirect URI mismatch.")
+
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                token_response = await client.post(
+                    f"{APPLE_ISSUER}/auth/token",
+                    data={
+                        "client_id": settings.APPLE_CLIENT_ID,
+                        "client_secret": create_apple_client_secret(),
+                        "code": code,
+                        "grant_type": "authorization_code",
+                        "redirect_uri": redirect_uri,
+                    },
+                )
+        except httpx.HTTPError as exc:
+            logger.warning("apple_token_exchange_unreachable", error=str(exc))
+            raise OAuthProviderUnavailableError("Apple cannot be reached.") from exc
+
+        if token_response.status_code != 200:
+            logger.warning(
+                "apple_token_exchange_failed",
+                status=token_response.status_code,
+            )
+            raise AuthenticationError("Apple token exchange failed.")
+
+        identity_token = token_response.json().get("id_token")
+        if not identity_token:
+            raise AuthenticationError("No identity token in Apple response.")
+
+        claims = await self._verify_apple_identity_token(
+            identity_token, settings.APPLE_CLIENT_ID
+        )
+        return await self._login_with_apple_claims(claims, full_name)
+
+    async def _verify_apple_identity_token(
+        self, identity_token: str, audience: str, nonce: str | None = None
+    ) -> dict[str, Any]:
+        """Verify an Apple identity token, mapping failures to service errors."""
+        import httpx
+
+        from app.core.security import verify_apple_identity_token
+
+        try:
+            return await verify_apple_identity_token(identity_token, audience, nonce)
+        except httpx.HTTPError as exc:
+            logger.warning("apple_keys_unreachable", error=str(exc))
+            raise OAuthProviderUnavailableError("Apple cannot be reached.") from exc
+        except InvalidTokenError as exc:
+            logger.info("apple_identity_token_rejected", reason=str(exc))
+            raise AuthenticationError("Invalid Apple identity token.") from exc
+
+    async def _login_with_apple_claims(
+        self, claims: dict[str, Any], full_name: str | None
+    ) -> LoginResponse:
+        """Sign in the account behind verified Apple identity token claims."""
+        from app.models.oauth_account import OAuthProvider
+
+        email: str | None = claims.get("email")
+        # Apple sends the flag as a boolean or as the string "true".
+        if email and str(claims.get("email_verified")).lower() != "true":
+            raise AuthenticationError("Apple account email is not verified.")
+
+        return await self._login_with_oauth_identity(
+            OAuthProvider.APPLE, claims["sub"], email, full_name
+        )
 
     async def send_magic_link(self, email: str) -> None:
         """Queue a passwordless login link email if the account exists.
