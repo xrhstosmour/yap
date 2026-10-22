@@ -21,7 +21,7 @@ from fastapi import WebSocketDisconnect
 from app.core.cache import get_redis
 from app.core.logging import get_logger
 from app.dependencies import CurrentUserWS
-from app.dependencies import SuperuserUserWS
+from app.dependencies import PlatformAdminUserWS
 
 router = APIRouter(prefix="/ws", tags=["WebSocket"])
 logger = get_logger("api.ws")
@@ -56,7 +56,9 @@ def _get_metrics() -> dict:
 
 
 @router.websocket("/metrics")
-async def metrics_stream(websocket: WebSocket, _current_user: SuperuserUserWS) -> None:
+async def metrics_stream(
+    websocket: WebSocket, _current_user: PlatformAdminUserWS
+) -> None:
     """Stream live system metrics every 2 seconds.
 
     Requires an authenticated superuser (see ``get_current_superuser_ws``)

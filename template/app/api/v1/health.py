@@ -22,8 +22,8 @@ from app.core.connection_budget import current_demand
 from app.core.logging import get_logger
 from app.core.settings import settings
 from app.database import async_engine
+from app.dependencies import PlatformAdminUser
 from app.dependencies import SessionDependency
-from app.dependencies import SuperuserUser
 from app.schemas.base import HealthResponse
 from app.schemas.base import MessageResponse
 
@@ -171,7 +171,7 @@ async def liveness_check() -> MessageResponse:
     description="Get database pool and cache statistics for monitoring. Admin only.",
 )
 async def get_metrics(
-    current_user: SuperuserUser,
+    current_user: PlatformAdminUser,
     session: SessionDependency,
     redis_client: RedisDependency,
 ) -> MetricsResponse:
@@ -240,7 +240,7 @@ def _inspect_workers() -> tuple[dict | None, dict | None, dict | None]:
     summary="Worker status",
     description="Get Celery worker statistics for monitoring. Admin only.",
 )
-async def get_worker_stats(current_user: SuperuserUser) -> WorkerStats:
+async def get_worker_stats(current_user: PlatformAdminUser) -> WorkerStats:
     """Get Celery worker monitoring stats (admin only).
 
     Returns active/scheduled task counts and active queue names.

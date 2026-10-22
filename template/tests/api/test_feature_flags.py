@@ -10,6 +10,7 @@ import pytest
 from httpx import ASGITransport
 from httpx import AsyncClient
 
+from app.core import SYSTEM_TENANT_ID
 from app.main import app
 from app.models.user import User
 from app.models.user import UserRole
@@ -104,6 +105,7 @@ async def test_crud_feature_flag_as_admin(client: AsyncClient, session) -> None:
         email="admin-flag@example.com",
         hashed_password="hash",
         role=UserRole.SUPERUSER,
+        tenant_id=SYSTEM_TENANT_ID,
         is_active=True,
     )
     session.add(admin)
@@ -168,6 +170,7 @@ async def test_get_feature_flag_not_found(client: AsyncClient, session) -> None:
         email="admin-flag-404@example.com",
         hashed_password="hash",
         role=UserRole.SUPERUSER,
+        tenant_id=SYSTEM_TENANT_ID,
         is_active=True,
     )
     session.add(admin)
@@ -191,6 +194,7 @@ async def test_update_feature_flag_not_found(client: AsyncClient, session) -> No
         email="admin-flag-update-404@example.com",
         hashed_password="hash",
         role=UserRole.SUPERUSER,
+        tenant_id=SYSTEM_TENANT_ID,
         is_active=True,
     )
     session.add(admin)
@@ -215,6 +219,7 @@ async def test_toggle_feature_flag_not_found(client: AsyncClient, session) -> No
         email="admin-flag-toggle-404@example.com",
         hashed_password="hash",
         role=UserRole.SUPERUSER,
+        tenant_id=SYSTEM_TENANT_ID,
         is_active=True,
     )
     session.add(admin)
@@ -239,6 +244,7 @@ async def test_delete_feature_flag_not_found(client: AsyncClient, session) -> No
         email="admin-flag-delete-404@example.com",
         hashed_password="hash",
         role=UserRole.SUPERUSER,
+        tenant_id=SYSTEM_TENANT_ID,
         is_active=True,
     )
     session.add(admin)
@@ -264,6 +270,7 @@ async def test_duplicate_feature_flag_name_rejected(
         email="admin-flag-dup@example.com",
         hashed_password="hash",
         role=UserRole.SUPERUSER,
+        tenant_id=SYSTEM_TENANT_ID,
         is_active=True,
     )
     session.add(admin)
@@ -285,3 +292,34 @@ async def test_duplicate_feature_flag_name_rejected(
 
     assert response.status_code == 400
     assert "already exists" in response.json()["detail"]
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("override_get_async_session")
+async def test_a_tenant_superuser_cannot_touch_deployment_wide_flags(
+    client: AsyncClient, session: Any
+) -> None:
+    """Flags apply to every tenant, so one tenant's superuser is refused."""
+    from app.models.tenant import Tenant
+    from app.services.auth_service import AuthService
+
+    tenant = Tenant(name="Tenant Co", slug="tenant-co-flags")
+    session.add(tenant)
+    await session.commit()
+    admin = User(
+        email="tenant-admin-flag@example.com",
+        hashed_password="hash",
+        role=UserRole.SUPERUSER,
+        is_active=True,
+        tenant_id=tenant.id,
+    )
+    session.add(admin)
+    await session.commit()
+    tokens = AuthService(session).create_tokens(admin)
+
+    response = await client.post(
+        "/api/v1/feature-flags/anything/toggle",
+        headers={"Authorization": f"Bearer {tokens.access_token}"},
+    )
+
+    assert response.status_code == 403

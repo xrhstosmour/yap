@@ -17,8 +17,8 @@ from fastapi.requests import Request
 from app.core.logging import get_logger
 from app.core.pagination import PAGINATION_HEADERS_SPEC
 from app.core.pagination import PaginatedResponse
+from app.dependencies import PlatformAdminUser
 from app.dependencies import SessionDependency
-from app.dependencies import SuperuserUser
 from app.schemas.base import PaginationParameters
 from app.schemas.feature_flag import FeatureFlagCreate
 from app.schemas.feature_flag import FeatureFlagListResponse
@@ -42,7 +42,7 @@ _FLAG_NOT_FOUND = "Feature flag not found"
 )
 async def list_feature_flags(
     parameters: Annotated[PaginationParameters, Query()],
-    current_user: SuperuserUser,
+    current_user: PlatformAdminUser,
     session: SessionDependency,
     request: Request,
 ) -> PaginatedResponse:
@@ -86,7 +86,7 @@ async def list_feature_flags(
 )
 async def create_feature_flag(
     data: FeatureFlagCreate,
-    current_user: SuperuserUser,
+    current_user: PlatformAdminUser,
     session: SessionDependency,
 ) -> FeatureFlagResponse:
     """Create a new feature flag (admin only)."""
@@ -109,7 +109,7 @@ async def create_feature_flag(
 )
 async def get_feature_flag(
     name: str,
-    current_user: SuperuserUser,
+    current_user: PlatformAdminUser,
     session: SessionDependency,
 ) -> FeatureFlagResponse:
     """Get a feature flag by name (admin only)."""
@@ -133,7 +133,7 @@ async def get_feature_flag(
 async def update_feature_flag(
     name: str,
     data: FeatureFlagUpdate,
-    current_user: SuperuserUser,
+    current_user: PlatformAdminUser,
     session: SessionDependency,
 ) -> FeatureFlagResponse:
     """Update a feature flag (admin only)."""
@@ -157,7 +157,7 @@ async def update_feature_flag(
 async def toggle_feature_flag(
     name: str,
     data: FeatureFlagToggle,
-    current_user: SuperuserUser,
+    current_user: PlatformAdminUser,
     session: SessionDependency,
 ) -> FeatureFlagResponse:
     """Toggle a feature flag's state (admin only)."""
@@ -181,7 +181,7 @@ async def toggle_feature_flag(
 )
 async def delete_feature_flag(
     name: str,
-    current_user: SuperuserUser,
+    current_user: PlatformAdminUser,
     session: SessionDependency,
 ) -> None:
     """Delete a feature flag (admin only)."""

@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from httpx import ASGITransport
 from httpx import AsyncClient
 
+from app.core import SYSTEM_TENANT_ID
 from app.core.settings import settings
 from app.main import app
 from app.models.user import User
@@ -92,6 +93,7 @@ async def test_metrics_endpoint_returns_stats_for_superuser(
         email="admin-metrics@example.com",
         hashed_password="hash",
         role=UserRole.SUPERUSER,
+        tenant_id=SYSTEM_TENANT_ID,
         is_active=True,
     )
     session.add(admin)
@@ -125,6 +127,7 @@ async def test_metrics_reports_configured_redis_max_connections(
         email="admin-metrics-max-conn@example.com",
         hashed_password="hash",
         role=UserRole.SUPERUSER,
+        tenant_id=SYSTEM_TENANT_ID,
         is_active=True,
     )
     session.add(admin)
@@ -219,6 +222,7 @@ async def test_workers_endpoint_returns_stats_for_superuser(
         email="admin-workers@example.com",
         hashed_password="hash",
         role=UserRole.SUPERUSER,
+        tenant_id=SYSTEM_TENANT_ID,
         is_active=True,
     )
     session.add(admin)
@@ -268,6 +272,7 @@ async def test_workers_endpoint_reports_503_when_no_worker_replies(
         email="admin-workers-silent@example.com",
         hashed_password="hash",
         role=UserRole.SUPERUSER,
+        tenant_id=SYSTEM_TENANT_ID,
         is_active=True,
     )
     session.add(admin)
@@ -296,6 +301,7 @@ async def test_workers_endpoint_reports_503_when_the_broker_is_unreachable(
         email="admin-workers-broken@example.com",
         hashed_password="hash",
         role=UserRole.SUPERUSER,
+        tenant_id=SYSTEM_TENANT_ID,
         is_active=True,
     )
     session.add(admin)
@@ -334,6 +340,7 @@ async def test_workers_endpoint_does_not_block_the_event_loop(
         email="admin-workers-loop@example.com",
         hashed_password="hash",
         role=UserRole.SUPERUSER,
+        tenant_id=SYSTEM_TENANT_ID,
         is_active=True,
     )
     session.add(admin)

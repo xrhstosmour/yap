@@ -34,8 +34,8 @@ from app.core.security import is_token_blacklisted
 from app.core.settings import settings
 from app.core.tenant import system_context
 from app.dependencies import SessionDependency
+from app.dependencies import is_platform_admin
 from app.models.user import User
-from app.models.user import UserRole
 from app.repositories.user_repository import UserRepository
 
 #: The signed-in administrator.
@@ -159,7 +159,7 @@ async def current_administrator(
     # Cross-tenant, see `router.list_users`.
     with system_context():
         user = await UserRepository(session).get(user_id)
-    if user is None or not user.is_active or user.role != UserRole.SUPERUSER:
+    if user is None or not user.is_active or not is_platform_admin(user):
         raise NotSignedInError
     # A changed password or a sign-out everywhere moves the version on,
     # and that has to end this session too.

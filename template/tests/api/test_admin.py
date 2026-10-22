@@ -17,6 +17,7 @@ from httpx import AsyncClient
 
 from app.admin.session import CSRF_COOKIE
 from app.admin.session import SESSION_COOKIE
+from app.core import SYSTEM_TENANT_ID
 from app.core.security import generate_password_hash
 from app.main import app
 from app.models.tenant import Tenant
@@ -49,16 +50,22 @@ async def _account(
     slug: str,
     role: UserRole = UserRole.SUPERUSER,
     is_active: bool = True,
+    is_platform: bool = True,
 ) -> User:
-    """Create a tenant and one account in it."""
+    """Create a tenant and one account in it.
+
+    A superuser goes in the system tenant unless `is_platform` is off,
+    since only a platform administrator may use the surface.
+    """
     tenant = Tenant(name="Test", slug=slug)
     session.add(tenant)
     await session.flush()
+    is_administrator = role == UserRole.SUPERUSER and is_platform
     user = User(
         email=email,
         hashed_password=generate_password_hash(PASSWORD),
         full_name="Someone",
-        tenant_id=tenant.id,
+        tenant_id=SYSTEM_TENANT_ID if is_administrator else tenant.id,
         role=role,
         is_active=is_active,
     )
@@ -92,6 +99,26 @@ class TestSigningIn:
 
         assert client.cookies.get(SESSION_COOKIE)
         assert client.cookies.get(CSRF_COOKIE)
+
+    @pytest.mark.anyio
+    async def test_a_tenant_superuser_is_refused(
+        self, client: AsyncClient, session
+    ) -> None:
+        """Their own tenant's superuser, not the platform's, gets no session."""
+        await _account(
+            session,
+            "admin-tenant@example.com",
+            "admin-tenant",
+            is_platform=False,
+        )
+
+        response = await client.post(
+            "/admin/login",
+            data={"email": "admin-tenant@example.com", "password": PASSWORD},
+        )
+
+        assert response.status_code == 401
+        assert not client.cookies.get(SESSION_COOKIE)
 
     @pytest.mark.anyio
     async def test_an_ordinary_user_is_refused(
