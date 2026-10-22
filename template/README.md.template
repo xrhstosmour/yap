@@ -14,7 +14,7 @@
 - **TOTP 2FA**: Time-based one-time passwords with encrypted secrets, recovery codes, rate limiting, and replay prevention
 - **Email Verification**: Redis-backed single-use tokens (24h TTL)
 - **Password Reset**: Redis-backed single-use tokens (1h TTL), invalidates all sessions on reset
-- **Google OAuth**: Multi-provider OAuth 2.0 login (Google, Apple, Microsoft via `OAuthProvider` enum)
+- **Social login**: Google OAuth 2.0 and Sign in with Apple, native and web, extensible to Microsoft via the `OAuthProvider` enum
 - **Soft Deletes**: Recoverable data via `deleted_at` timestamps
 - **Graveyard**: Centralized tombstone tracking for all deletions
 - **Audit Logging**: Complete trail of all user and system actions with GDPR compliance

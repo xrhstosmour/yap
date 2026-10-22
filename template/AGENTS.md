@@ -10,7 +10,9 @@ background tasks, and comprehensive security features.
 - TOTP 2FA with encrypted secrets, recovery codes, replay prevention.
 - WebAuthn passkeys.
 - Magic link (passwordless) login via email.
-- Google OAuth 2.0 (extensible to Apple, Microsoft via `OAuthProvider` enum).
+- Google OAuth 2.0, and Sign in with Apple, native (`POST /auth/apple/native`,
+  identity token and nonce from the app) and web (`GET /auth/apple`). Extensible
+  to Microsoft via the `OAuthProvider` enum.
 - API key authentication (SHA-256-hashed, prefix-based scoping).
 - `token_version` column invalidates all JWTs on password change or admin revoke.
 
