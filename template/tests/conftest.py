@@ -244,6 +244,7 @@ def override_settings_fixture() -> Settings:
         POSTGRESQL_PASSWORD="test-password",
         FIRST_SUPERUSER_PASSWORD="test-password",
         RABBITMQ_PASSWORD="test-password",
+        REDIS_PASSWORD="test",
         CRYPTO_KEY="dGVzdC1rZXktMzItYnl0ZXMtbG9uZw==",
     )
 
