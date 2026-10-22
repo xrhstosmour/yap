@@ -114,6 +114,24 @@ ALGORITHM = settings.ALGORITHM
 _JWT_BLACKLIST_PREFIX = "jwt_blacklist"
 
 
+def _database_claim() -> dict[str, str]:
+    """The claim naming the database a token was issued against.
+
+    Both databases sign with the same `SECRET_KEY`, and the additional one
+    is often seeded from production with the same user IDs, so a token from
+    one would otherwise be accepted by the other. Only tokens issued against
+    the additional database carry it, so every main database token stays
+    exactly as it was.
+    """
+    # Imported here, `app.database` imports the core package this is part of.
+    from app.database import ADDITIONAL_DATABASE_MODE
+    from app.database import database_mode_variable
+
+    if database_mode_variable.get() == ADDITIONAL_DATABASE_MODE:
+        return {"db": ADDITIONAL_DATABASE_MODE}
+    return {}
+
+
 def create_access_token(
     subject: str | UUID,
     expires_delta: timedelta | None = None,
@@ -147,6 +165,7 @@ def create_access_token(
         "type": "access",
         "iat": datetime.now(UTC),
         "jti": secrets.token_urlsafe(16),
+        **_database_claim(),
     }
 
     if additional_claims:
@@ -184,6 +203,7 @@ def create_refresh_token(
         "type": "refresh",
         "iat": datetime.now(UTC),
         "jti": secrets.token_urlsafe(16),
+        **_database_claim(),
     }
 
     if additional_claims:
@@ -206,9 +226,15 @@ def decode_token(token: str) -> dict[str, Any]:
 
     Raises:
         jwt.ExpiredSignatureError: If token has expired
-        jwt.InvalidTokenError: If token is invalid
+        jwt.InvalidTokenError: If token is invalid, or was issued against
+            the other database than this request is routed to
     """
-    return jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
+    payload: dict[str, Any] = jwt.decode(
+        token, settings.SECRET_KEY, algorithms=[ALGORITHM]
+    )
+    if payload.get("db", "") != _database_claim().get("db", ""):
+        raise jwt.InvalidTokenError("Token was issued for another database")
+    return payload
 
 
 async def blacklist_token(token_identifier: str, expires_at: datetime) -> None:

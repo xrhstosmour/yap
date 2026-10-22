@@ -96,6 +96,55 @@ class TestTokenCreation:
         assert len(token) > 0
 
 
+class TestTokensNameTheirDatabase:
+    """A token from one database is not accepted by the other."""
+
+    def test_a_main_database_token_carries_no_claim(self) -> None:
+        """Every token issued before this, and from main, stays as it was."""
+        from app.core.security import create_access_token
+        from app.core.security import decode_token
+
+        payload = decode_token(create_access_token("user"))
+
+        assert "db" not in payload
+
+    def test_an_additional_database_token_is_refused_by_main(self) -> None:
+        """Seeded from production, the same user ID exists in both."""
+        import jwt
+
+        from app.core.security import create_access_token
+        from app.core.security import decode_token
+        from app.database import ADDITIONAL_DATABASE_MODE
+        from app.database import database_mode_variable
+
+        token_mode = database_mode_variable.set(ADDITIONAL_DATABASE_MODE)
+        try:
+            token = create_access_token("user")
+            assert decode_token(token)["db"] == ADDITIONAL_DATABASE_MODE
+        finally:
+            database_mode_variable.reset(token_mode)
+
+        with pytest.raises(jwt.InvalidTokenError, match="another database"):
+            decode_token(token)
+
+    def test_a_main_database_token_is_refused_by_additional(self) -> None:
+        """The other way round, a production token cannot open the preview."""
+        import jwt
+
+        from app.core.security import create_refresh_token
+        from app.core.security import decode_token
+        from app.database import ADDITIONAL_DATABASE_MODE
+        from app.database import database_mode_variable
+
+        token = create_refresh_token("user")
+        token_mode = database_mode_variable.set(ADDITIONAL_DATABASE_MODE)
+        try:
+            with pytest.raises(jwt.InvalidTokenError, match="another database"):
+                decode_token(token)
+        finally:
+            database_mode_variable.reset(token_mode)
+
+
 class TestTokenDecoding:
     """Tests for JWT token decoding."""
 
