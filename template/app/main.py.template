@@ -28,6 +28,7 @@ from sentry_sdk.types import Event
 from sentry_sdk.types import Hint
 from starlette.middleware.gzip import GZipMiddleware
 
+from app import database
 from app.admin.network import AdminNetworkMiddleware
 from app.admin.router import router as admin_router
 from app.admin.session import NotSignedInError
@@ -258,6 +259,13 @@ def create_app() -> FastAPI:
         if mode and mode != ADDITIONAL_DATABASE_MODE:
             return Response(
                 content=f"Unknown database mode: {mode}",
+                status_code=400,
+            )
+        # Refused here rather than left to `get_async_session()`, whose
+        # `RuntimeError` reached anyone who sent the header as a 500.
+        if mode and database.additional_async_session_factory is None:
+            return Response(
+                content="The additional database is not configured",
                 status_code=400,
             )
         token = database_mode_variable.set(mode)

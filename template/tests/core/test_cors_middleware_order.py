@@ -28,3 +28,16 @@ class TestCorsWrapsEarlyReturns:
 
         assert response.status_code == 400
         assert response.headers.get("access-control-allow-origin") == origin
+
+
+class TestUnconfiguredAdditionalDatabase:
+    """Asking for a database that is not there is the caller's mistake."""
+
+    def test_the_header_is_refused_with_a_400(self) -> None:
+        """It used to reach `get_async_session()` and come back as a 500."""
+        client = TestClient(app, raise_server_exceptions=False)
+
+        response = client.get("/", headers={"X-Database-Mode": "additional"})
+
+        assert response.status_code == 400
+        assert "not configured" in response.text
