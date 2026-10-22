@@ -338,3 +338,86 @@ class TestSearchMixin:
                 query_str="anything",
                 fields=["nonexistent_field"],
             )
+
+    @pytest.mark.anyio
+    async def test_a_page_past_the_end_still_counts_the_matches(
+        self, monkeypatch: pytest.MonkeyPatch, session
+    ) -> None:
+        """No row is left to carry the total, so it is counted on its own."""
+        monkeypatch.setattr(
+            "app.repositories.mixins.search.build_fts_condition",
+            lambda *_args, **_kwargs: literal(True),
+        )
+        monkeypatch.setattr(
+            "app.repositories.mixins.search.fts_rank_expr",
+            lambda *_args, **_kwargs: literal(0),
+        )
+        session.add_all(
+            User(email=f"past-{index}@example.com", hashed_password="hash")
+            for index in range(3)
+        )
+        await session.commit()
+
+        repository = RepositoryUnderTest(session)
+        with system_context():
+            records, total = await repository.search_fts(
+                query_str="user", fields=["full_name"], skip=10, limit=2
+            )
+
+        assert records == []
+        assert total == 3
+
+
+class TestSearchUsesTheIndexes:
+    """The search expressions must match the expression indexes on users."""
+
+    @pytest.fixture
+    def anyio_backend(self) -> str:
+        """Provide asyncio backend for anyio-marked tests.
+
+        Returns:
+            The backend name.
+        """
+        return "asyncio"
+
+    @staticmethod
+    async def _plan(session, condition) -> str:  # noqa: ANN001
+        """Explain a users query on `condition`, sequential scans discouraged.
+
+        On a near-empty test table the planner would scan anyway, so this
+        asks whether an index can serve the query at all.
+        """
+        from sqlalchemy import select
+        from sqlalchemy import text
+        from sqlalchemy.dialects import postgresql
+
+        await session.execute(text("SET LOCAL enable_seqscan = off"))
+        statement = select(User.id).where(condition)
+        # A named paramstyle leaves `%` alone, `text()` escapes it once for
+        # the driver. Compiling for the driver as well escaped it twice.
+        compiled = statement.compile(
+            dialect=postgresql.dialect(paramstyle="named"),
+            compile_kwargs={"literal_binds": True},
+        )
+        result = await session.execute(text(f"EXPLAIN {compiled}"))
+        return "\n".join(row[0] for row in result)
+
+    @pytest.mark.anyio
+    async def test_trigram_search_uses_the_trigram_index(self, session) -> None:
+        """`unaccent()` in the query used to rule the index out."""
+        from app.core.search import build_trigram_condition
+
+        plan = await self._plan(session, build_trigram_condition(User.full_name, "αλι"))
+
+        assert "ix_users_full_name_trgm" in plan
+
+    @pytest.mark.anyio
+    async def test_full_text_search_uses_its_index(self, session) -> None:
+        """Nothing indexed the full-text expression before."""
+        from app.core.search import build_fts_condition
+
+        plan = await self._plan(
+            session, build_fts_condition(User.full_name, "αλίκη", "simple")
+        )
+
+        assert "ix_users_full_name_fts" in plan
