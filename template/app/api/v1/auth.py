@@ -2,7 +2,7 @@
 
 This module provides authentication endpoints including
 login, registration, token refresh, email verification,
-password reset, and Google OAuth.
+password reset, Google OAuth and Sign in with Apple.
 """
 
 from __future__ import annotations
@@ -27,6 +27,9 @@ from app.core.ws_ticket import create_ws_ticket
 from app.dependencies import AccessTokenDependency
 from app.dependencies import CurrentUser
 from app.dependencies import SessionDependency
+from app.schemas.auth import AppleAuthUrlResponse
+from app.schemas.auth import AppleCallbackRequest
+from app.schemas.auth import AppleNativeLoginRequest
 from app.schemas.auth import GoogleAuthUrlResponse
 from app.schemas.auth import GoogleCallbackRequest
 from app.schemas.auth import LoginResponse
@@ -60,6 +63,7 @@ from app.services.auth_service import AuthService
 from app.services.auth_service import EmailAlreadyExistsError
 from app.services.auth_service import InvalidCredentialsError
 from app.services.auth_service import MinimumAgeNotConfirmedError
+from app.services.auth_service import OAuthProviderUnavailableError
 from app.services.auth_service import UserInactiveError
 from app.services.auth_service import UsernameAlreadyExistsError
 from app.services.auth_service import UserNotFoundError
@@ -920,3 +924,90 @@ async def google_callback(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
+
+
+def _apple_login_error(exc: AuthenticationError) -> HTTPException:
+    """Map an Apple sign-in failure to its HTTP status."""
+    if isinstance(exc, OAuthProviderUnavailableError):
+        status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    elif isinstance(exc, UserInactiveError):
+        status_code = status.HTTP_403_FORBIDDEN
+    else:
+        status_code = status.HTTP_400_BAD_REQUEST
+    return HTTPException(status_code=status_code, detail=str(exc))
+
+
+@router.post(
+    "/apple/native",
+    response_model=LoginResponse,
+    summary="Native Sign in with Apple",
+    description="Exchange an identity token from the iOS system sheet for tokens.",
+    dependencies=[Depends(check_auth_rate_limit)],
+)
+async def apple_native_login(
+    data: AppleNativeLoginRequest,
+    session: SessionDependency,
+) -> LoginResponse:
+    """Sign in with the identity token an app got from Apple.
+
+    Returns 400 if the token does not verify, 403 if the account is
+    inactive, and 503 if `APPLE_BUNDLE_ID` is unset or Apple's keys
+    cannot be fetched.
+    """
+    service = AuthService(session)
+    try:
+        return await service.apple_native_login(
+            data.identity_token, data.nonce, data.full_name
+        )
+    except AuthenticationError as exc:
+        raise _apple_login_error(exc) from exc
+
+
+@router.get(
+    "/apple",
+    response_model=AppleAuthUrlResponse,
+    summary="Initiate Sign in with Apple",
+    description="Get the Apple authorization URL to start the web flow.",
+    dependencies=[Depends(check_auth_rate_limit)],
+)
+async def apple_auth(
+    session: SessionDependency,
+    redirect_uri: Annotated[
+        str, Query(description="URI Apple should post the result to")
+    ],
+) -> AppleAuthUrlResponse:
+    """Get the Sign in with Apple authorization URL.
+
+    Returns 503 if the web flow is not configured.
+    """
+    service = AuthService(session)
+    try:
+        return AppleAuthUrlResponse(url=await service.get_apple_auth_url(redirect_uri))
+    except AuthenticationError as exc:
+        raise _apple_login_error(exc) from exc
+
+
+@router.post(
+    "/apple/callback",
+    response_model=LoginResponse,
+    summary="Sign in with Apple callback",
+    description="Exchange an Apple authorization code for tokens.",
+    dependencies=[Depends(check_auth_rate_limit)],
+)
+async def apple_callback(
+    data: AppleCallbackRequest,
+    session: SessionDependency,
+) -> LoginResponse:
+    """Complete the Apple web flow.
+
+    Returns 400 if the state, code or token is invalid, 403 if the
+    account is inactive, and 503 if the web flow is not configured or
+    Apple cannot be reached.
+    """
+    service = AuthService(session)
+    try:
+        return await service.apple_login(
+            data.code, data.state, data.redirect_uri, data.full_name
+        )
+    except AuthenticationError as exc:
+        raise _apple_login_error(exc) from exc

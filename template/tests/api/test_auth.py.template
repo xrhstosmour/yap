@@ -979,6 +979,118 @@ class TestGoogleOAuth:
         assert "Invalid or expired" in response.json()["detail"]
 
 
+class TestAppleSignIn:
+    """Tests for the Sign in with Apple endpoints."""
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_native_unconfigured_returns_503(self, client: AsyncClient) -> None:
+        """POST /auth/apple/native should return 503 without a bundle ID."""
+        response = await client.post(
+            "/api/v1/auth/apple/native",
+            json={"identity_token": "token", "nonce": "a-nonce-of-sixteen+"},
+        )
+
+        assert response.status_code == 503
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_native_invalid_token_returns_400(
+        self,
+        client: AsyncClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """POST /auth/apple/native with a token that fails should return 400."""
+        import jwt
+
+        monkeypatch.setattr(
+            "app.services.auth_service.settings.APPLE_BUNDLE_ID", "com.example.app"
+        )
+        monkeypatch.setattr(
+            "app.core.security.verify_apple_identity_token",
+            AsyncMock(side_effect=jwt.InvalidTokenError("bad")),
+        )
+
+        response = await client.post(
+            "/api/v1/auth/apple/native",
+            json={"identity_token": "token", "nonce": "a-nonce-of-sixteen+"},
+        )
+
+        assert response.status_code == 400
+        assert "Invalid Apple identity token" in response.json()["detail"]
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_native_signs_in(
+        self,
+        client: AsyncClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """POST /auth/apple/native with a verified token returns tokens."""
+        monkeypatch.setattr(
+            "app.services.auth_service.settings.APPLE_BUNDLE_ID", "com.example.app"
+        )
+        monkeypatch.setattr(
+            "app.core.security.verify_apple_identity_token",
+            AsyncMock(
+                return_value={
+                    "sub": "001234.apple-subject",
+                    "email": "apple@{{ project_slug }}.com",
+                    "email_verified": True,
+                }
+            ),
+        )
+
+        response = await client.post(
+            "/api/v1/auth/apple/native",
+            json={
+                "identity_token": "token",
+                "nonce": "a-nonce-of-sixteen+",
+                "full_name": "Apple User",
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json()["access_token"]
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_web_unconfigured_returns_503(self, client: AsyncClient) -> None:
+        """GET /auth/apple should return 503 without a Services ID and key."""
+        response = await client.get(
+            "/api/v1/auth/apple",
+            params={"redirect_uri": "https://app.example.com/auth/apple"},
+        )
+
+        assert response.status_code == 503
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_callback_invalid_state_returns_400(
+        self,
+        client: AsyncClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """POST /auth/apple/callback with an unknown state should return 400."""
+        monkeypatch.setattr(
+            "app.services.auth_service.settings.APPLE_CLIENT_ID", "com.example.web"
+        )
+        monkeypatch.setattr(
+            "app.services.auth_service.settings.APPLE_PRIVATE_KEY", "test-key"
+        )
+        monkeypatch.setattr(
+            "app.core.security.verify_apple_oauth_state",
+            AsyncMock(return_value=None),
+        )
+
+        response = await client.post(
+            "/api/v1/auth/apple/callback",
+            json={
+                "code": "code",
+                "state": "unknown",
+                "redirect_uri": "https://app.example.com/auth/apple",
+            },
+        )
+
+        assert response.status_code == 400
+        assert "Invalid or expired" in response.json()["detail"]
+
+
 class TestAuthRateLimit:
     """Tests for the per-IP rate limit on unauthenticated `/auth/*` endpoints.
 
@@ -1093,6 +1205,20 @@ class TestAuthRateLimit:
                     "state": "csrf-state",
                     "redirect_uri": "https://app.example.com/callback",
                 },
+            )
+
+        assert response.status_code == 429
+        assert response.headers["retry-after"] == "30"
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_apple_native_rate_limited_returns_429(
+        self, client: AsyncClient, session
+    ) -> None:
+        """POST /auth/apple/native should return 429 once the IP limit is exceeded."""
+        with self._simulate_denied():
+            response = await client.post(
+                "/api/v1/auth/apple/native",
+                json={"identity_token": "token", "nonce": "a-nonce-of-sixteen+"},
             )
 
         assert response.status_code == 429

@@ -8,7 +8,9 @@ from unittest.mock import MagicMock
 from unittest.mock import patch
 from uuid import uuid7
 
+import httpx
 import pytest
+from jwt import InvalidTokenError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,6 +30,7 @@ from app.services.auth_service import AuthService
 from app.services.auth_service import EmailAlreadyExistsError
 from app.services.auth_service import InvalidCredentialsError
 from app.services.auth_service import MinimumAgeNotConfirmedError
+from app.services.auth_service import OAuthProviderUnavailableError
 from app.services.auth_service import UserInactiveError
 from app.services.auth_service import UsernameAlreadyExistsError
 from app.services.auth_service import UserNotFoundError
@@ -1071,6 +1074,275 @@ class TestGoogleLogin:
         ):
             with pytest.raises(UserInactiveError):
                 await auth_service.google_login("code", "state", "http://cb")
+
+
+APPLE_CLAIMS = {
+    "sub": "001234.apple-subject",
+    "email": "apple@example.com",
+    "email_verified": "true",
+}
+
+
+def _verified_apple(claims: dict[str, Any] | None = None) -> Any:  # noqa: ANN401
+    """Patch Apple token verification to accept with `claims`."""
+    return patch(
+        "app.core.security.verify_apple_identity_token",
+        AsyncMock(return_value=APPLE_CLAIMS if claims is None else claims),
+    )
+
+
+@pytest.fixture
+def apple_native(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Configure the native Apple flow."""
+    monkeypatch.setattr(
+        "app.services.auth_service.settings.APPLE_BUNDLE_ID", "com.example.app"
+    )
+
+
+@pytest.fixture
+def apple_web(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Configure the Apple web flow."""
+    monkeypatch.setattr(
+        "app.services.auth_service.settings.APPLE_CLIENT_ID", "com.example.web"
+    )
+    monkeypatch.setattr(
+        "app.services.auth_service.settings.APPLE_PRIVATE_KEY", "test-private-key"
+    )
+
+
+class TestAppleNativeLogin:
+    """Tests for AuthService.apple_native_login."""
+
+    @pytest.mark.asyncio
+    async def test_not_configured(self, session: AsyncSession) -> None:
+        """Without a bundle ID the flow is unavailable, not a bad request."""
+        with pytest.raises(OAuthProviderUnavailableError):
+            await _auth_service(session).apple_native_login("token", "nonce")
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("apple_native")
+    async def test_new_user_is_registered_and_linked(
+        self, session: AsyncSession
+    ) -> None:
+        """A first Apple sign-in creates a verified account with Apple's name."""
+        auth_service = _auth_service(session)
+
+        with _verified_apple() as verify:
+            tokens = await auth_service.apple_native_login(
+                "token", "nonce", "Apple User"
+            )
+
+        verify.assert_awaited_once_with("token", "com.example.app", "nonce")
+        assert tokens.access_token
+        user = await auth_service.user_repository.get_by_email("apple@example.com")
+        assert user is not None
+        assert (user.full_name, user.is_verified) == ("Apple User", True)
+        link = await auth_service.oauth_account_repository.get_by_provider(
+            "apple", "001234.apple-subject"
+        )
+        assert link is not None
+        assert link.user_id == user.id
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("apple_native")
+    async def test_existing_account_is_linked_by_email(
+        self, session: AsyncSession
+    ) -> None:
+        """An account with the same email gets Apple linked to it."""
+        auth_service = _auth_service(session)
+        existing = await auth_service.register(
+            RegisterRequest(email="apple@example.com", password="password123")
+        )
+
+        with _verified_apple():
+            await auth_service.apple_native_login("token", "nonce")
+
+        link = await auth_service.oauth_account_repository.get_by_provider(
+            "apple", "001234.apple-subject"
+        )
+        assert link is not None
+        assert link.user_id == existing.id
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("apple_native")
+    async def test_linked_identity_signs_in_without_an_email(
+        self, session: AsyncSession
+    ) -> None:
+        """A later token without an email still reaches the linked account."""
+        auth_service = _auth_service(session)
+        with _verified_apple():
+            await auth_service.apple_native_login("token", "nonce")
+
+        with _verified_apple({"sub": "001234.apple-subject"}):
+            tokens = await auth_service.apple_native_login("token", "nonce")
+
+        user = await auth_service.user_repository.get_by_email("apple@example.com")
+        assert user is not None
+        assert decode_token(tokens.access_token)["sub"] == str(user.id)
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("apple_native")
+    async def test_unlinked_identity_without_an_email_is_refused(
+        self, session: AsyncSession
+    ) -> None:
+        """No link and no email leaves nothing to sign in to."""
+        with _verified_apple({"sub": "001234.apple-subject"}):
+            with pytest.raises(AuthenticationError, match="No email"):
+                await _auth_service(session).apple_native_login("token", "nonce")
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("apple_native")
+    async def test_unverified_email_is_refused(self, session: AsyncSession) -> None:
+        """An email Apple has not verified cannot claim an account."""
+        claims = {**APPLE_CLAIMS, "email_verified": "false"}
+
+        with _verified_apple(claims):
+            with pytest.raises(AuthenticationError, match="not verified"):
+                await _auth_service(session).apple_native_login("token", "nonce")
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("apple_native")
+    async def test_invalid_token_is_an_authentication_error(
+        self, session: AsyncSession
+    ) -> None:
+        """A token that fails verification is a bad request, not an outage."""
+        with patch(
+            "app.core.security.verify_apple_identity_token",
+            AsyncMock(side_effect=InvalidTokenError("bad")),
+        ):
+            with pytest.raises(AuthenticationError) as raised:
+                await _auth_service(session).apple_native_login("token", "nonce")
+
+        assert not isinstance(raised.value, OAuthProviderUnavailableError)
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("apple_native")
+    async def test_apple_unreachable_is_unavailable(
+        self, session: AsyncSession
+    ) -> None:
+        """Failing to fetch Apple's keys is surfaced as an outage."""
+        with patch(
+            "app.core.security.verify_apple_identity_token",
+            AsyncMock(side_effect=httpx.ConnectError("down")),
+        ):
+            with pytest.raises(OAuthProviderUnavailableError):
+                await _auth_service(session).apple_native_login("token", "nonce")
+
+
+class TestAppleWebLogin:
+    """Tests for AuthService.get_apple_auth_url and apple_login."""
+
+    @staticmethod
+    def _apple_token_endpoint(status_code: int = 200, body: Any = None) -> Any:  # noqa: ANN401
+        response = MagicMock()
+        response.status_code = status_code
+        response.json.return_value = {"id_token": "token"} if body is None else body
+        client = MagicMock()
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock()
+        client.post = AsyncMock(return_value=response)
+        return patch("httpx.AsyncClient", MagicMock(return_value=client))
+
+    @staticmethod
+    def _state(redirect_uri: str | None = "https://app.example.com/cb") -> Any:  # noqa: ANN401
+        return patch(
+            "app.core.security.verify_apple_oauth_state",
+            AsyncMock(return_value=redirect_uri),
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("apple_web")
+    async def test_auth_url(self, session: AsyncSession) -> None:
+        """The URL asks for a form post with the name and email."""
+        with patch(
+            "app.core.security.create_apple_oauth_state",
+            AsyncMock(return_value="state-token"),
+        ):
+            url = await _auth_service(session).get_apple_auth_url(
+                "https://app.example.com/cb"
+            )
+
+        assert url.startswith("https://appleid.apple.com/auth/authorize?")
+        assert "client_id=com.example.web" in url
+        assert "response_mode=form_post" in url
+        assert "scope=name+email" in url
+        assert "state=state-token" in url
+
+    @pytest.mark.asyncio
+    async def test_not_configured(self, session: AsyncSession) -> None:
+        """Without a Services ID and key both web steps are unavailable."""
+        auth_service = _auth_service(session)
+
+        with pytest.raises(OAuthProviderUnavailableError):
+            await auth_service.get_apple_auth_url("https://app.example.com/cb")
+        with pytest.raises(OAuthProviderUnavailableError):
+            await auth_service.apple_login(
+                "code", "state", "https://app.example.com/cb"
+            )
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("apple_web")
+    @pytest.mark.parametrize(
+        "stored_redirect_uri",
+        [None, "https://elsewhere.example.com/cb"],
+        ids=["unknown state", "another redirect"],
+    )
+    async def test_state_must_match(
+        self, session: AsyncSession, stored_redirect_uri: str | None
+    ) -> None:
+        """A state that is unknown or bound elsewhere is refused."""
+        with self._state(stored_redirect_uri):
+            with pytest.raises(AuthenticationError):
+                await _auth_service(session).apple_login(
+                    "code", "state", "https://app.example.com/cb"
+                )
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("apple_web")
+    @pytest.mark.parametrize(
+        ("status_code", "body"),
+        [(400, {"error": "invalid_grant"}), (200, {})],
+        ids=["refused", "no identity token"],
+    )
+    async def test_failed_exchange_is_refused(
+        self, session: AsyncSession, status_code: int, body: dict[str, Any]
+    ) -> None:
+        """A refused code or an answer without a token signs nobody in."""
+        with (
+            self._state(),
+            self._apple_token_endpoint(status_code, body),
+            patch("app.core.security.create_apple_client_secret", return_value="s"),
+        ):
+            with pytest.raises(AuthenticationError) as raised:
+                await _auth_service(session).apple_login(
+                    "code", "state", "https://app.example.com/cb"
+                )
+
+        assert not isinstance(raised.value, OAuthProviderUnavailableError)
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("apple_web")
+    async def test_exchanged_token_is_verified_for_the_services_id(
+        self, session: AsyncSession
+    ) -> None:
+        """The web flow's token is checked against the Services ID."""
+        auth_service = _auth_service(session)
+
+        with (
+            self._state(),
+            self._apple_token_endpoint(),
+            patch("app.core.security.create_apple_client_secret", return_value="s"),
+            _verified_apple() as verify,
+        ):
+            tokens = await auth_service.apple_login(
+                "code", "state", "https://app.example.com/cb", "Web User"
+            )
+
+        verify.assert_awaited_once_with("token", "com.example.web", None)
+        assert tokens.access_token
+        user = await auth_service.user_repository.get_by_email("apple@example.com")
+        assert user is not None
+        assert user.full_name == "Web User"
 
 
 class TestMagicLink:
