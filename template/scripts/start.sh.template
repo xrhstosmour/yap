@@ -24,11 +24,16 @@ if [ ! -f .env ]; then
     exit 1
 fi
 
-# shellcheck source=/dev/null
-set -a; . ./.env; set +a
+# Read the one value this script needs rather than sourcing `.env`. Sourcing
+# runs it as shell code, so an unquoted value with a space, a full name like
+# `Jane Doe`, ran its second word as a command and stopped here. Compose and
+# the app read `.env` themselves.
+POSTGRESQL_USER="$(grep "^POSTGRESQL_USER=" .env | head -1 | cut -d= -f2- | tr -d '"' || true)"
 
 # The compose service names only resolve inside the Docker network. From the
-# host, reach the published ports on loopback instead.
+# host, reach the published ports on loopback instead. The app reads
+# `POSTGRESQL_SERVER`, `POSTGRESQL_HOST` is what other containers dial.
+export POSTGRESQL_SERVER=127.0.0.1
 export POSTGRESQL_HOST=127.0.0.1
 export REDIS_HOST=127.0.0.1
 
