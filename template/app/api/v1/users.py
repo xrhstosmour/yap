@@ -11,8 +11,8 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter
-from fastapi import Depends
 from fastapi import HTTPException
+from fastapi import Query
 from fastapi import status
 from fastapi.requests import Request
 from fastapi.responses import Response
@@ -44,7 +44,7 @@ logger = get_logger("api.users")
     description="List all users with pagination and filtering. Admin only.",
 )
 async def list_users(
-    parameters: Annotated[UserListParameters, Depends()],
+    parameters: Annotated[UserListParameters, Query()],
     current_user: SuperuserUser,
     session: SessionDependency,
     request: Request,

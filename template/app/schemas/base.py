@@ -67,6 +67,12 @@ class PaginationParameters(BaseModel):
         sort_order: Sort direction (asc/desc)
     """
 
+    # Declared as `Query()` models, so an unknown name is a 422 rather than
+    # quietly ignored. A misspelt filter would otherwise return the whole
+    # unfiltered list. Parameters declared beside the model are still
+    # allowed.
+    model_config = ConfigDict(extra="forbid")
+
     skip: int = Field(default=0, ge=0, description="Number of records to skip")
     limit: int = Field(default=20, ge=1, le=100, description="Max records to return")
     sort_by: str | None = Field(default=None, description="Field to sort by")
@@ -85,6 +91,9 @@ class CursorParameters(BaseModel):
         cursor: The cursor from the previous page, absent on the first.
         limit: Maximum number of records to return.
     """
+
+    # See `PaginationParameters`.
+    model_config = ConfigDict(extra="forbid")
 
     cursor: str | None = Field(
         default=None, description="Cursor from the previous page"

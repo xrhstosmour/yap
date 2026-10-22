@@ -9,8 +9,8 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter
-from fastapi import Depends
 from fastapi import HTTPException
+from fastapi import Query
 from fastapi import status
 from fastapi.requests import Request
 
@@ -41,7 +41,7 @@ _FLAG_NOT_FOUND = "Feature flag not found"
     description="List all feature flags with pagination. Admin only.",
 )
 async def list_feature_flags(
-    parameters: Annotated[PaginationParameters, Depends()],
+    parameters: Annotated[PaginationParameters, Query()],
     current_user: SuperuserUser,
     session: SessionDependency,
     request: Request,

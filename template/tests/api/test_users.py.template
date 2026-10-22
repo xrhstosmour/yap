@@ -104,6 +104,23 @@ class TestUsersList:
         assert response.status_code == 422
 
     @pytest.mark.usefixtures("override_get_async_session")
+    async def test_unknown_parameter_is_rejected(
+        self, client: AsyncClient, session: AsyncSession
+    ) -> None:
+        """A misspelt filter is a bad request, not the whole list."""
+        auth_service = _auth_service(session)
+        superuser = await _create_superuser(auth_service)
+        token = create_access_token(subject=superuser.id)
+
+        response = await client.get(
+            "/api/v1/users",
+            params={"rol": UserRole.SUPERUSER.value},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 422
+
+    @pytest.mark.usefixtures("override_get_async_session")
     async def test_known_role_still_filters(
         self, client: AsyncClient, session: AsyncSession
     ) -> None:
