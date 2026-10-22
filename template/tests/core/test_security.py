@@ -27,8 +27,10 @@ from app.core.security import decode_token
 from app.core.security import generate_api_key
 from app.core.security import generate_api_key_id
 from app.core.security import generate_password_hash
+from app.core.security import is_legacy_api_key_hash
 from app.core.security import is_token_blacklisted
 from app.core.security import mask_api_key
+from app.core.security import verify_api_key
 from app.core.security import verify_email_verification_token
 from app.core.security import verify_magic_link_token
 from app.core.security import verify_password
@@ -206,6 +208,19 @@ class TestAPIKeyGeneration:
         assert isinstance(hashed_key, str)
         assert full_key.startswith("sk_")
         assert len(full_key) == 35
+
+    def test_the_stored_hash_verifies_only_its_own_key(self) -> None:
+        """The hash is SHA-256, checked without bcrypt."""
+        full_key, hashed_key = generate_api_key()
+
+        assert hashed_key.startswith("sha256:")
+        assert not is_legacy_api_key_hash(hashed_key)
+        assert verify_api_key(full_key, hashed_key)
+        assert not verify_api_key(full_key + "x", hashed_key)
+
+    def test_a_bcrypt_hash_is_legacy(self) -> None:
+        """Keys made before SHA-256 are told apart by their prefix."""
+        assert is_legacy_api_key_hash(generate_password_hash("sk_old"))
 
     def test_generate_api_key_id_returns_id(self) -> None:
         """API key ID should be generated."""

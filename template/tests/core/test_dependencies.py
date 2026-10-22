@@ -21,7 +21,7 @@ from fastapi import status
 from jwt import ExpiredSignatureError
 from jwt import InvalidTokenError
 
-from app.core.security import DUMMY_PASSWORD_HASH
+from app.core.security import DUMMY_API_KEY_HASH
 from app.dependencies import get_api_key_auth
 from app.dependencies import get_current_superuser
 from app.dependencies import get_current_user
@@ -573,7 +573,7 @@ class TestGetApiKeyAuth:
                 return_value=None,
             ),
             patch(
-                "app.services.api_key_service.verify_password", return_value=False
+                "app.services.api_key_service.verify_api_key", return_value=False
             ) as mock_verify,
         ):
             result = await get_api_key_auth(
@@ -582,7 +582,7 @@ class TestGetApiKeyAuth:
             )
 
         assert result is None
-        mock_verify.assert_called_once_with("some_secret", DUMMY_PASSWORD_HASH)
+        mock_verify.assert_called_once_with("some_secret", DUMMY_API_KEY_HASH)
 
     @pytest.mark.asyncio
     async def test_valid_key_stamps_last_used_at(self) -> None:

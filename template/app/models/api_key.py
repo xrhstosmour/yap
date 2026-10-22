@@ -33,7 +33,7 @@ class APIKey(BaseModel, table=True):
     Attributes:
         id: UUID primary key
         key_id: Public identifier for the key (shown in UI)
-        key_hash: Bcrypt hash of the full key (stored securely)
+        key_hash: SHA-256 hash of the full key, or bcrypt for an older one
         key_prefix: First 8 chars for identification
         name: Human-readable name for the key
         description: Description of the key's purpose
@@ -145,7 +145,13 @@ class APIKey(BaseModel, table=True):
         """
         if self.expires_at is None:
             return False
-        return datetime.now(UTC) > self.expires_at
+        # The column is a naive `timestamp`, stored in UTC, so a key read
+        # back from the database compared an aware time with a naive one and
+        # raised `TypeError` instead of answering.
+        expires_at = self.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=UTC)
+        return datetime.now(UTC) > expires_at
 
     def is_valid(self) -> bool:
         """Check if the API key is valid for use.
