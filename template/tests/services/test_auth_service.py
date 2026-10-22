@@ -1344,6 +1344,140 @@ class TestAppleWebLogin:
         assert user is not None
         assert user.full_name == "Web User"
 
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("apple_web")
+    async def test_keeps_the_refresh_token_for_the_services_id(
+        self, session: AsyncSession
+    ) -> None:
+        """The token account deletion revokes is kept with its client."""
+        auth_service = _auth_service(session)
+
+        with (
+            self._state(),
+            self._apple_token_endpoint(
+                body={"id_token": "token", "refresh_token": "web-refresh"}
+            ),
+            patch("app.core.security.create_apple_client_secret", return_value="s"),
+            _verified_apple(),
+        ):
+            await auth_service.apple_login(
+                "code", "state", "https://app.example.com/cb"
+            )
+
+        link = await auth_service.oauth_account_repository.get_by_provider(
+            "apple", "001234.apple-subject"
+        )
+        assert link is not None
+        assert (link.refresh_token, link.refresh_token_client_id) == (
+            "web-refresh",
+            "com.example.web",
+        )
+
+
+@pytest.fixture
+def apple_native_with_key(monkeypatch: pytest.MonkeyPatch, apple_native: None) -> None:
+    """Configure the native Apple flow with a key to exchange codes with."""
+    monkeypatch.setattr(
+        "app.services.auth_service.settings.APPLE_PRIVATE_KEY", "test-private-key"
+    )
+
+
+class TestAppleNativeRefreshToken:
+    """The app's authorization code, exchanged for the token to revoke."""
+
+    @staticmethod
+    async def _link(auth_service: AuthService) -> Any:  # noqa: ANN401
+        return await auth_service.oauth_account_repository.get_by_provider(
+            "apple", "001234.apple-subject"
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("apple_native_with_key")
+    async def test_the_code_is_exchanged_for_the_bundle_and_kept(
+        self, session: AsyncSession
+    ) -> None:
+        auth_service = _auth_service(session)
+
+        with (
+            TestAppleWebLogin._apple_token_endpoint(
+                body={"id_token": "exchanged", "refresh_token": "app-refresh"}
+            ) as client_class,
+            patch("app.core.security.create_apple_client_secret", return_value="s"),
+            _verified_apple(),
+        ):
+            await auth_service.apple_native_login(
+                "token", "nonce", authorization_code="code"
+            )
+
+        sent = client_class.return_value.post.call_args.kwargs["data"]
+        link = await self._link(auth_service)
+        assert sent["client_id"] == "com.example.app"
+        assert "redirect_uri" not in sent
+        assert (link.refresh_token, link.refresh_token_client_id) == (
+            "app-refresh",
+            "com.example.app",
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("apple_native_with_key")
+    async def test_a_code_for_another_account_is_not_kept(
+        self, session: AsyncSession
+    ) -> None:
+        auth_service = _auth_service(session)
+
+        with (
+            TestAppleWebLogin._apple_token_endpoint(
+                body={"id_token": "exchanged", "refresh_token": "theirs"}
+            ),
+            patch("app.core.security.create_apple_client_secret", return_value="s"),
+            patch(
+                "app.core.security.verify_apple_identity_token",
+                AsyncMock(side_effect=[APPLE_CLAIMS, {"sub": "someone.else"}]),
+            ),
+        ):
+            tokens = await auth_service.apple_native_login(
+                "token", "nonce", authorization_code="code"
+            )
+
+        link = await self._link(auth_service)
+        assert tokens.access_token
+        assert link.refresh_token is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("apple_native_with_key")
+    async def test_a_refused_code_still_signs_in(self, session: AsyncSession) -> None:
+        auth_service = _auth_service(session)
+
+        with (
+            TestAppleWebLogin._apple_token_endpoint(400, {"error": "invalid_grant"}),
+            patch("app.core.security.create_apple_client_secret", return_value="s"),
+            _verified_apple(),
+        ):
+            tokens = await auth_service.apple_native_login(
+                "token", "nonce", authorization_code="code"
+            )
+
+        link = await self._link(auth_service)
+        assert tokens.access_token
+        assert link.refresh_token is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("apple_native")
+    async def test_without_a_key_the_code_is_not_exchanged(
+        self, session: AsyncSession
+    ) -> None:
+        auth_service = _auth_service(session)
+
+        with (
+            TestAppleWebLogin._apple_token_endpoint() as client_class,
+            _verified_apple(),
+        ):
+            await auth_service.apple_native_login(
+                "token", "nonce", authorization_code="code"
+            )
+
+        client_class.return_value.post.assert_not_called()
+
 
 class TestMagicLink:
     """Tests for AuthService.send_magic_link and verify_magic_link."""

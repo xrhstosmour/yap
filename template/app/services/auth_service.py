@@ -910,18 +910,26 @@ class AuthService:
         return await self.issue_login_response(user)
 
     async def apple_native_login(
-        self, identity_token: str, nonce: str, full_name: str | None = None
+        self,
+        identity_token: str,
+        nonce: str,
+        full_name: str | None = None,
+        authorization_code: str | None = None,
     ) -> LoginResponse:
         """Authenticate or register a user from a native Sign in with Apple.
 
         The app runs the system sheet itself and sends the identity token
-        Apple gave it, so there is no code to exchange and no key needed.
+        Apple gave it, which alone proves the identity. The authorization
+        code that came with it, when sent and a key is configured, is
+        exchanged for the refresh token account deletion revokes. A failed
+        exchange is logged and does not stop the sign in.
 
         Args:
             identity_token: The identity token from the system sheet.
             nonce: The raw nonce whose SHA-256 the app sent to Apple.
             full_name: The name Apple handed the app, only ever on the
                 first authorization, so it is only used for a new account.
+            authorization_code: The code from the system sheet, if sent.
 
         Returns:
             LoginResponse with tokens, or a 2FA challenge if the account
@@ -939,7 +947,43 @@ class AuthService:
         claims = await self._verify_apple_identity_token(
             identity_token, settings.APPLE_BUNDLE_ID, nonce
         )
-        return await self._login_with_apple_claims(claims, full_name)
+        refresh_token = None
+        if authorization_code and settings.APPLE_PRIVATE_KEY:
+            refresh_token = await self._apple_native_refresh_token(
+                authorization_code, claims["sub"]
+            )
+        return await self._login_with_apple_claims(
+            claims, full_name, refresh_token, settings.APPLE_BUNDLE_ID
+        )
+
+    async def _apple_native_refresh_token(
+        self, authorization_code: str, subject: str
+    ) -> str | None:
+        """Exchange an app's authorization code for its refresh token.
+
+        Only a token for the same Apple account as the verified identity
+        token is kept, so nobody can attach another person's authorization
+        to their account, and have it revoked with theirs.
+
+        Returns:
+            The refresh token, or `None` if the exchange failed or named
+            another account.
+        """
+        try:
+            body = await self._exchange_apple_code(
+                authorization_code, settings.APPLE_BUNDLE_ID
+            )
+            claims = await self._verify_apple_identity_token(
+                body.get("id_token") or "", settings.APPLE_BUNDLE_ID
+            )
+        except (AuthenticationError, OAuthProviderUnavailableError) as exc:
+            logger.warning("apple_native_code_exchange_failed", reason=str(exc))
+            return None
+        if claims.get("sub") != subject:
+            logger.warning("apple_native_code_for_another_account")
+            return None
+        refresh_token: str | None = body.get("refresh_token")
+        return refresh_token
 
     async def get_apple_auth_url(self, redirect_uri: str) -> str:
         """Build the Sign in with Apple authorization URL for the web flow.
@@ -1005,10 +1049,6 @@ class AuthService:
             AuthenticationError: If the state, code or token is invalid.
             UserInactiveError: If the account is inactive.
         """
-        import httpx
-
-        from app.core.security import APPLE_ISSUER
-        from app.core.security import create_apple_client_secret
         from app.core.security import verify_apple_oauth_state
 
         if not settings.APPLE_CLIENT_ID or not settings.APPLE_PRIVATE_KEY:
@@ -1020,17 +1060,56 @@ class AuthService:
         if redirect_uri != expected_redirect_uri:
             raise AuthenticationError("OAuth redirect URI mismatch.")
 
+        body = await self._exchange_apple_code(
+            code, settings.APPLE_CLIENT_ID, redirect_uri
+        )
+        identity_token = body.get("id_token")
+        if not identity_token:
+            raise AuthenticationError("No identity token in Apple response.")
+
+        claims = await self._verify_apple_identity_token(
+            identity_token, settings.APPLE_CLIENT_ID
+        )
+        return await self._login_with_apple_claims(
+            claims, full_name, body.get("refresh_token"), settings.APPLE_CLIENT_ID
+        )
+
+    async def _exchange_apple_code(
+        self, code: str, client_id: str, redirect_uri: str | None = None
+    ) -> dict[str, Any]:
+        """Exchange an Apple authorization code at Apple's token endpoint.
+
+        Args:
+            code: The authorization code.
+            client_id: The client the code was issued to, the Services ID
+                for the web flow, the bundle ID for the app.
+            redirect_uri: The web flow's redirect URI, which Apple checks,
+                `None` for a code from the app.
+
+        Returns:
+            Apple's response, with `id_token` and `refresh_token`.
+
+        Raises:
+            OAuthProviderUnavailableError: If Apple cannot be reached.
+            AuthenticationError: If Apple refuses the code.
+        """
+        import httpx
+
+        from app.core.security import APPLE_ISSUER
+        from app.core.security import create_apple_client_secret
+
+        data = {
+            "client_id": client_id,
+            "client_secret": create_apple_client_secret(client_id),
+            "code": code,
+            "grant_type": "authorization_code",
+        }
+        if redirect_uri:
+            data["redirect_uri"] = redirect_uri
         try:
             async with httpx.AsyncClient(timeout=10) as client:
                 token_response = await client.post(
-                    f"{APPLE_ISSUER}/auth/token",
-                    data={
-                        "client_id": settings.APPLE_CLIENT_ID,
-                        "client_secret": create_apple_client_secret(),
-                        "code": code,
-                        "grant_type": "authorization_code",
-                        "redirect_uri": redirect_uri,
-                    },
+                    f"{APPLE_ISSUER}/auth/token", data=data
                 )
         except httpx.HTTPError as exc:
             logger.warning("apple_token_exchange_unreachable", error=str(exc))
@@ -1042,15 +1121,8 @@ class AuthService:
                 status=token_response.status_code,
             )
             raise AuthenticationError("Apple token exchange failed.")
-
-        identity_token = token_response.json().get("id_token")
-        if not identity_token:
-            raise AuthenticationError("No identity token in Apple response.")
-
-        claims = await self._verify_apple_identity_token(
-            identity_token, settings.APPLE_CLIENT_ID
-        )
-        return await self._login_with_apple_claims(claims, full_name)
+        body: dict[str, Any] = token_response.json()
+        return body
 
     async def _verify_apple_identity_token(
         self, identity_token: str, audience: str, nonce: str | None = None
@@ -1070,9 +1142,17 @@ class AuthService:
             raise AuthenticationError("Invalid Apple identity token.") from exc
 
     async def _login_with_apple_claims(
-        self, claims: dict[str, Any], full_name: str | None
+        self,
+        claims: dict[str, Any],
+        full_name: str | None,
+        refresh_token: str | None = None,
+        client_id: str | None = None,
     ) -> LoginResponse:
-        """Sign in the account behind verified Apple identity token claims."""
+        """Sign in the account behind verified Apple identity token claims.
+
+        A refresh token, when there is one, replaces the one kept on the
+        link, the newest authorization being the one to revoke.
+        """
         from app.models.oauth_account import OAuthProvider
 
         email: str | None = claims.get("email")
@@ -1080,9 +1160,20 @@ class AuthService:
         if email and str(claims.get("email_verified")).lower() != "true":
             raise AuthenticationError("Apple account email is not verified.")
 
-        return await self._login_with_oauth_identity(
+        response = await self._login_with_oauth_identity(
             OAuthProvider.APPLE, claims["sub"], email, full_name
         )
+        if refresh_token:
+            account = await self.oauth_account_repository.get_by_provider(
+                OAuthProvider.APPLE, claims["sub"]
+            )
+            if account:
+                # Set on the loaded row, the repository's `update` wants a
+                # tenant context a sign in does not have yet.
+                account.refresh_token = refresh_token
+                account.refresh_token_client_id = client_id
+                await self.session.flush()
+        return response
 
     async def send_magic_link(self, email: str) -> None:
         """Queue a passwordless login link email if the account exists.

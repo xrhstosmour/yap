@@ -234,6 +234,9 @@ class AppleNativeLoginRequest(BaseSchema):
         identity_token: The identity token Apple returned to the app.
         nonce: The raw nonce whose SHA-256 the app sent to Apple.
         full_name: The name Apple returned, first authorization only.
+        authorization_code: The authorization code Apple returned with the
+            token, exchanged for the refresh token that account deletion
+            revokes.
     """
 
     identity_token: str = Field(description="Identity token from Apple")
@@ -246,6 +249,11 @@ class AppleNativeLoginRequest(BaseSchema):
         default=None,
         max_length=255,
         description="Name Apple returned on the first authorization",
+    )
+    authorization_code: str | None = Field(
+        default=None,
+        max_length=1024,
+        description="Authorization code Apple returned with the token",
     )
 
 

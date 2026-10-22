@@ -16,6 +16,7 @@ from sqlalchemy.orm import relationship
 from sqlmodel import Field
 from sqlmodel import Relationship
 
+from app.core.encryption import EncryptedString
 from app.models.base import BaseModel
 
 if TYPE_CHECKING:
@@ -41,6 +42,10 @@ class OAuthAccount(BaseModel, table=True):
         provider: OAuth provider name (e.g. "google", "apple").
         provider_user_id: Subject/sub identifier from the provider.
         provider_email: Email address returned by the provider.
+        refresh_token: The provider's refresh token, kept to revoke the
+            authorization when the account is deleted. Encrypted at rest.
+        refresh_token_client_id: The client ID the refresh token was
+            issued to, which the revocation has to name.
     """
 
     __tablename__ = "oauth_accounts"  # pyright: ignore[reportAssignmentType]
@@ -77,6 +82,16 @@ class OAuthAccount(BaseModel, table=True):
     )
 
     provider_email: str | None = Field(
+        default=None,
+        max_length=255,
+    )
+
+    refresh_token: str | None = Field(
+        default=None,
+        sa_type=EncryptedString(1024),  # type: ignore[call-overload]
+    )
+
+    refresh_token_client_id: str | None = Field(
         default=None,
         max_length=255,
     )

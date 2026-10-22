@@ -712,12 +712,15 @@ async def verify_apple_oauth_state(state: str) -> str | None:
     return await _consume_oauth_state(_APPLE_OAUTH_STATE_PREFIX, state)
 
 
-def create_apple_client_secret() -> str:
+def create_apple_client_secret(client_id: str | None = None) -> str:
     """Sign the short-lived client secret Apple's token endpoint expects.
 
     Apple has no static client secret, it takes a JWT signed with the
-    `.p8` key from the developer account, naming the team and the
-    Services ID.
+    `.p8` key from the developer account, naming the team and the client.
+
+    Args:
+        client_id: The client the secret speaks for, the app's bundle ID
+            for a code from the app. Defaults to the web Services ID.
 
     Returns:
         ES256 JWT valid for five minutes.
@@ -729,12 +732,40 @@ def create_apple_client_secret() -> str:
             "iat": issued_at,
             "exp": issued_at + 300,
             "aud": APPLE_ISSUER,
-            "sub": settings.APPLE_CLIENT_ID,
+            "sub": client_id or settings.APPLE_CLIENT_ID,
         },
         settings.APPLE_PRIVATE_KEY,
         algorithm="ES256",
         headers={"kid": settings.APPLE_KEY_ID},
     )
+
+
+async def revoke_apple_token(refresh_token: str, client_id: str) -> None:
+    """Revoke an Apple refresh token, ending the app's authorization.
+
+    Apple expects this when an account made with Sign in with Apple is
+    deleted, the person's Apple ID then no longer lists the app.
+
+    Args:
+        refresh_token: The refresh token from the code exchange.
+        client_id: The client the token was issued to.
+
+    Raises:
+        httpx.HTTPError: If Apple cannot be reached or refuses the token.
+    """
+    import httpx
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        response = await client.post(
+            f"{APPLE_ISSUER}/auth/revoke",
+            data={
+                "client_id": client_id,
+                "client_secret": create_apple_client_secret(client_id),
+                "token": refresh_token,
+                "token_type_hint": "refresh_token",
+            },
+        )
+    response.raise_for_status()
 
 
 async def _apple_signing_key(key_id: str) -> jwt.PyJWK | None:

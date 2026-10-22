@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
+import httpx
 import jwt
 import pytest
 from cryptography.hazmat.primitives import serialization
@@ -18,6 +19,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from app.core import security
 from app.core.security import APPLE_ISSUER
 from app.core.security import create_apple_client_secret
+from app.core.security import revoke_apple_token
 from app.core.security import verify_apple_identity_token
 
 BUNDLE_ID = "com.example.app"
@@ -210,3 +212,67 @@ class TestCreateAppleClientSecret:
         assert jwt.get_unverified_header(secret)["kid"] == "KEY1234567"
         assert (claims["iss"], claims["sub"]) == ("TEAM123456", "com.example.web")
         assert claims["exp"] - claims["iat"] <= 300
+
+    def test_speaks_for_the_client_it_is_given(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A code from the app is exchanged and revoked as the bundle ID."""
+        private_key = ec.generate_private_key(ec.SECP256R1())
+        pem = private_key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        ).decode()
+        monkeypatch.setattr(security.settings, "APPLE_PRIVATE_KEY", pem)
+        monkeypatch.setattr(security.settings, "APPLE_CLIENT_ID", "com.example.web")
+
+        secret = create_apple_client_secret("com.example.app")
+        claims = jwt.decode(
+            secret,
+            private_key.public_key(),
+            algorithms=["ES256"],
+            audience=APPLE_ISSUER,
+        )
+
+        assert claims["sub"] == "com.example.app"
+
+
+def _apple_revoking(status_code: int) -> MagicMock:
+    """Patch `httpx.AsyncClient` to answer the revoke request."""
+    request = httpx.Request("POST", f"{APPLE_ISSUER}/auth/revoke")
+    response = httpx.Response(status_code, request=request)
+    client = MagicMock()
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock()
+    client.post = AsyncMock(return_value=response)
+    return MagicMock(return_value=client)
+
+
+class TestRevokeAppleToken:
+    """Tests for `revoke_apple_token`."""
+
+    async def test_revokes_the_refresh_token_as_its_client(self) -> None:
+        client_class = _apple_revoking(200)
+
+        with (
+            patch("httpx.AsyncClient", client_class),
+            patch.object(security, "create_apple_client_secret", return_value="s"),
+        ):
+            await revoke_apple_token("refresh", "com.example.app")
+
+        call = client_class.return_value.post.call_args
+        assert call.args == (f"{APPLE_ISSUER}/auth/revoke",)
+        assert call.kwargs["data"] == {
+            "client_id": "com.example.app",
+            "client_secret": "s",
+            "token": "refresh",
+            "token_type_hint": "refresh_token",
+        }
+
+    async def test_a_refusal_is_raised(self) -> None:
+        with (
+            patch("httpx.AsyncClient", _apple_revoking(400)),
+            patch.object(security, "create_apple_client_secret", return_value="s"),
+            pytest.raises(httpx.HTTPStatusError),
+        ):
+            await revoke_apple_token("refresh", "com.example.app")
