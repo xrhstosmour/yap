@@ -301,6 +301,13 @@ async def get_download_url(
     client = _s3_client()
     bucket = bucket or settings.STORAGE_BUCKET
     parameters: dict[str, Any] = {"Bucket": bucket, "Key": object_key}
+    if mimetype is not None:
+        # The verified type from the row, not whatever `ContentType` the
+        # last write to this key stored. Keys are content hashes, so two
+        # uploads of the same bytes declared as different types share one
+        # object, and the later write would otherwise decide how a browser
+        # renders a URL whose disposition was chosen for the other type.
+        parameters["ResponseContentType"] = mimetype
     if mimetype is not None and mimetype not in INLINE_SAFE_MIMETYPES:
         parameters["ResponseContentDisposition"] = _attachment_disposition(filename)
 
