@@ -19,6 +19,7 @@ from app.core.search import build_fts_condition
 from app.core.search import build_trigram_condition
 from app.core.search import choose_mode
 from app.core.search import fts_rank_expr
+from app.core.search import trigram_rank_expr
 
 
 class SearchMixin:
@@ -129,7 +130,7 @@ class SearchMixin:
         query = (
             select(self.model, func.count().over())
             .where(search_filter)
-            .order_by(rank_expr.desc())
+            .order_by(rank_expr.desc(), self.model.id)
         )
         count_query = select(func.count()).select_from(self.model).where(search_filter)
 
@@ -182,7 +183,21 @@ class SearchMixin:
 
         search_filter = or_(*conditions)
 
-        query = select(self.model, func.count().over()).where(search_filter)
+        # Best match first, across fields. `greatest()` skips the score of
+        # a NULL column, and the ID keeps equal scores in the same order on
+        # every page.
+        rank_expr = func.greatest(
+            *(
+                trigram_rank_expr(getattr(self.model, field), query_str)
+                for field in fields
+                if hasattr(self.model, field)
+            )
+        )
+        query = (
+            select(self.model, func.count().over())
+            .where(search_filter)
+            .order_by(rank_expr.desc(), self.model.id)
+        )
         count_query = select(func.count()).select_from(self.model).where(search_filter)
 
         query = self._apply_tenant_filter(query)
