@@ -367,6 +367,34 @@ class TestSearchMixin:
         assert records == []
         assert total == 3
 
+    @pytest.mark.anyio
+    async def test_trigram_results_come_best_match_first(self, session) -> None:
+        """Rows used to come back in whatever order the table held them."""
+        session.add_all(
+            [
+                User(
+                    email="partial@example.com",
+                    hashed_password="hash",
+                    full_name="Αλικάκη",
+                ),
+                User(
+                    email="exact@example.com",
+                    hashed_password="hash",
+                    full_name="Αλίκη",
+                ),
+            ]
+        )
+        await session.commit()
+
+        repository = RepositoryUnderTest(session)
+        with system_context():
+            records, total = await repository.search_trigram(
+                query_str="αλίκη", fields=["full_name"]
+            )
+
+        assert [record.full_name for record in records] == ["Αλίκη", "Αλικάκη"]
+        assert total == 2
+
 
 class TestSearchUsesTheIndexes:
     """The search expressions must match the expression indexes on users."""

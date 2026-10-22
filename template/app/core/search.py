@@ -266,6 +266,30 @@ def fts_rank_expr(column_expr, query_str: str, language: str | None = None) -> A
     )
 
 
+def trigram_rank_expr(column_expr, query_str: str) -> Any:  # noqa: ANN401
+    """Build a trigram relevance ranking expression.
+
+    The better of the two measures `build_trigram_condition()` matches on,
+    so a row matched on one word ranks by how well that word matched.
+
+    Args:
+        column_expr: SQLAlchemy column or SQL expression to rank.
+        query_str: User-provided search query.
+
+    Returns:
+        SQLAlchemy expression equivalent to
+        `greatest(similarity(immutable_unaccent(column_expr), immutable_unaccent(query_str)),
+        word_similarity(immutable_unaccent(query_str), immutable_unaccent(column_expr)))`.
+    """
+    query_str = normalise_query(query_str)
+    unaccented_column = _unaccent(column_expr)
+    unaccented_query = _unaccent(query_str)
+    return func.greatest(
+        func.similarity(unaccented_column, unaccented_query),
+        func.word_similarity(unaccented_query, unaccented_column),
+    )
+
+
 def choose_mode(query_str: str, min_fts_length: int = 3) -> tuple[SearchMode, str]:
     """Choose search mode based on normalized query length.
 
