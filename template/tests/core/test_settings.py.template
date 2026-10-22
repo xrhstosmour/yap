@@ -217,6 +217,7 @@ class TestPerformanceTuningDefaults:
         assert settings.CELERY_CLEANUP_AUDIT_LOGS_HOUR == 3
         assert settings.CELERY_CACHE_WARM_HOUR == 6
         assert settings.CELERY_PURGE_GRAVEYARD_HOUR == 4
+        assert settings.CELERY_PURGE_OUTBOX_HOUR == 5
 
     def test_database_pool_timeout_accepts_override(self) -> None:
         """DATABASE_POOL_TIMEOUT can be overridden via settings."""

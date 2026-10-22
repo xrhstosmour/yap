@@ -64,13 +64,14 @@ def test_celery_app_includes_all_task_modules() -> None:
 
 
 def test_celery_beat_schedule_has_all_entries() -> None:
-    """Beat schedule must define all four periodic tasks."""
+    """Beat schedule must define every periodic task."""
     from app.celery_app import celery_app
 
     expected = {
         "cleanup-old-audit-logs",
         "cache-warm",
         "purge-graveyard",
+        "purge-outbox",
         "process-outbox",
     }
     assert expected.issubset(set(celery_app.conf.beat_schedule))

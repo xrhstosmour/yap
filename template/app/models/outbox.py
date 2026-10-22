@@ -29,6 +29,7 @@ from uuid import uuid7
 
 from sqlalchemy import JSON
 from sqlalchemy import Index
+from sqlalchemy import delete
 from sqlmodel import Field
 from sqlmodel import select
 
@@ -177,3 +178,32 @@ class Outbox:
             .with_for_update(skip_locked=True)
         )
         return list(result.scalars().all())
+
+    async def purge_published(self, before: datetime, limit: int = 10_000) -> int:
+        """Delete published events created before a cutoff, a chunk at a time.
+
+        Published rows were never deleted, so the table, and the
+        `(status, created_at)` index the dispatcher reads, grew with every
+        event ever sent. Filtering on `created_at` rather than
+        `published_at` keeps the delete on that index. Dead events are kept,
+        someone has to look at why they never went out.
+
+        Args:
+            before: Events created before this are deleted.
+            limit: Most rows deleted in one call, so one transaction never
+                holds locks on the whole backlog.
+
+        Returns:
+            How many rows were deleted, fewer than `limit` once none remain.
+        """
+        chunk = (
+            select(OutboxEvent.id)
+            .where(OutboxEvent.status == "published")  # type: ignore[arg-type]
+            .where(OutboxEvent.created_at < before)  # type: ignore[arg-type]
+            .limit(limit)
+            .with_for_update(skip_locked=True)
+        )
+        result = await self.session.execute(
+            delete(OutboxEvent).where(OutboxEvent.id.in_(chunk.scalar_subquery()))  # type: ignore[attr-defined]
+        )
+        return int(result.rowcount or 0)

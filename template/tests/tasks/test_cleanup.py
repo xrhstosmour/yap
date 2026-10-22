@@ -1,4 +1,4 @@
-"""Tests for the generate_reports() Celery task."""
+"""Tests for the cleanup Celery tasks."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
+from unittest.mock import patch
 
 import pytest
 
@@ -21,6 +22,7 @@ if isinstance(sys.modules.get("app.tasks.cleanup"), MagicMock):
     del sys.modules["app.tasks.cleanup"]
 
 from app.tasks.cleanup import generate_reports  # noqa: E402
+from app.tasks.cleanup import purge_outbox  # noqa: E402
 
 
 class _FakeCountResult:
@@ -88,3 +90,24 @@ def test_generate_reports_defaults_missing_count_to_zero(
 
     assert result.successful()
     assert result.result["new_users"] == 0
+
+
+def test_purge_outbox_commits_each_chunk_until_one_comes_back_short(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A large first run neither holds one long transaction nor stops early."""
+    mock_session = AsyncMock()
+
+    @asynccontextmanager
+    async def _factory() -> Any:
+        yield mock_session
+
+    monkeypatch.setattr("app.database.celery_session_factory", _factory)
+    purge = AsyncMock(side_effect=[10_000, 10_000, 3])
+
+    with patch("app.models.outbox.Outbox.purge_published", purge):
+        result = purge_outbox.apply(kwargs={"retention_days": 7})
+
+    assert result.result["purged_count"] == 20_003
+    assert purge.await_count == 3
+    assert mock_session.commit.await_count == 3

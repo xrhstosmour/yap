@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC
+from datetime import datetime
+from datetime import timedelta
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -347,3 +350,56 @@ class TestDeliveryGuarantee:
 
         assert "at-least-once" in documentation
         assert "idempotent" in documentation
+
+
+class TestPurgePublished:
+    """Published events past the window go, everything else stays."""
+
+    @pytest.mark.anyio
+    async def test_only_old_published_events_are_deleted(
+        self, session: AsyncSession
+    ) -> None:
+        """Pending and dead events still need delivering or a look."""
+        outbox = Outbox(session)
+        long_ago = datetime.now(UTC) - timedelta(days=30)
+        kept = {}
+        for name, status, created_at in (
+            ("old_published", "published", long_ago),
+            ("new_published", "published", datetime.now(UTC)),
+            ("old_pending", "pending", long_ago),
+            ("old_dead", "dead", long_ago),
+        ):
+            event = await outbox.publish(name, {}, tenant_id=None)
+            event.status = status
+            event.created_at = created_at
+            kept[name] = event.id
+        await session.flush()
+
+        deleted = await outbox.purge_published(datetime.now(UTC) - timedelta(days=7))
+
+        remaining = set(
+            (
+                await session.execute(
+                    select(OutboxEvent.event_type).where(
+                        OutboxEvent.id.in_(kept.values())  # type: ignore[attr-defined]
+                    )
+                )
+            ).scalars()
+        )
+        assert deleted == 1
+        assert remaining == {"new_published", "old_pending", "old_dead"}
+
+    @pytest.mark.anyio
+    async def test_it_deletes_at_most_the_limit(self, session: AsyncSession) -> None:
+        """The caller commits between chunks and stops on a short one."""
+        outbox = Outbox(session)
+        long_ago = datetime.now(UTC) - timedelta(days=30)
+        for _ in range(3):
+            event = await outbox.publish("old", {}, tenant_id=None)
+            event.status = "published"
+            event.created_at = long_ago
+        await session.flush()
+        before = datetime.now(UTC) - timedelta(days=7)
+
+        assert await outbox.purge_published(before, limit=2) == 2
+        assert await outbox.purge_published(before, limit=2) == 1

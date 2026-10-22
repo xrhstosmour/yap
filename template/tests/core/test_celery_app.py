@@ -23,6 +23,7 @@ _mock_settings.CELERY_RESULT_EXPIRES_SECONDS = 86400
 _mock_settings.CELERY_CLEANUP_AUDIT_LOGS_HOUR = 3
 _mock_settings.CELERY_CACHE_WARM_HOUR = 6
 _mock_settings.CELERY_PURGE_GRAVEYARD_HOUR = 4
+_mock_settings.CELERY_PURGE_OUTBOX_HOUR = 5
 
 _stub_modules = {
     "app.tasks.email": MagicMock(),
@@ -178,6 +179,12 @@ class TestBeatSchedule:
         assert entry["task"] == "app.tasks.cleanup.purge_graveyard"
         assert "schedule" in entry
         assert entry["schedule"].hour == {_mock_settings.CELERY_PURGE_GRAVEYARD_HOUR}
+
+    def test_purge_outbox_scheduled(self) -> None:
+        """Published outbox events are deleted daily."""
+        entry = celery_app.conf.beat_schedule["purge-outbox"]
+        assert entry["task"] == "app.tasks.cleanup.purge_outbox"
+        assert entry["schedule"].hour == {_mock_settings.CELERY_PURGE_OUTBOX_HOUR}
 
     def test_process_outbox_scheduled(self) -> None:
         """The process-outbox periodic task should be configured."""
