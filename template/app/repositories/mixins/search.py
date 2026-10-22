@@ -47,6 +47,38 @@ class SearchMixin:
         conditions = self._filter_conditions(filters)
         return query.where(and_(*conditions)) if conditions else query
 
+    async def _fetch_page(
+        self,
+        query,  # noqa: ANN001
+        count_query,  # noqa: ANN001
+        skip: int,
+        limit: int,
+    ) -> tuple[list[Any], int]:
+        """Read a page of matches and the total from a single query.
+
+        The total rides along on every row as `count(*) OVER ()`, so the
+        matches are found once. A separate count query searched the table a
+        second time for every page. Only a page past the end, which has no
+        row to carry the total, still runs `count_query`.
+
+        Args:
+            query: A select of the model and `count(*) OVER ()`.
+            count_query: The same search as a plain count.
+            skip: Number of matching rows to skip.
+            limit: Maximum number of rows to return.
+
+        Returns:
+            Tuple containing matched records and total count.
+        """
+        result = await self.session.execute(query.offset(skip).limit(limit))
+        rows = result.all()
+        if rows:
+            return [row[0] for row in rows], rows[0][1]
+        if not skip:
+            return [], 0
+        count_result = await self.session.execute(count_query)
+        return [], count_result.scalar() or 0
+
     async def search_fts(
         self,
         query_str: str,
@@ -94,7 +126,11 @@ class SearchMixin:
         ]
         rank_expr = sum(rank_values[1:], rank_values[0])
 
-        query = select(self.model).where(search_filter).order_by(rank_expr.desc())
+        query = (
+            select(self.model, func.count().over())
+            .where(search_filter)
+            .order_by(rank_expr.desc())
+        )
         count_query = select(func.count()).select_from(self.model).where(search_filter)
 
         query = self._apply_tenant_filter(query)
@@ -104,14 +140,7 @@ class SearchMixin:
         query = self._apply_search_filters(query, filters)
         count_query = self._apply_search_filters(count_query, filters)
 
-        count_result = await self.session.execute(count_query)
-        total = count_result.scalar() or 0
-
-        query = query.offset(skip).limit(limit)
-        result = await self.session.execute(query)
-        records = result.scalars().all()
-
-        return list(records), total
+        return await self._fetch_page(query, count_query, skip, limit)
 
     async def search_trigram(
         self,
@@ -153,7 +182,7 @@ class SearchMixin:
 
         search_filter = or_(*conditions)
 
-        query = select(self.model).where(search_filter)
+        query = select(self.model, func.count().over()).where(search_filter)
         count_query = select(func.count()).select_from(self.model).where(search_filter)
 
         query = self._apply_tenant_filter(query)
@@ -163,14 +192,7 @@ class SearchMixin:
         query = self._apply_search_filters(query, filters)
         count_query = self._apply_search_filters(count_query, filters)
 
-        count_result = await self.session.execute(count_query)
-        total = count_result.scalar() or 0
-
-        query = query.offset(skip).limit(limit)
-        result = await self.session.execute(query)
-        records = result.scalars().all()
-
-        return list(records), total
+        return await self._fetch_page(query, count_query, skip, limit)
 
     async def search_combined(
         self,

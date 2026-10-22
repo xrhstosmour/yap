@@ -339,6 +339,34 @@ class TestSearchMixin:
                 fields=["nonexistent_field"],
             )
 
+    @pytest.mark.anyio
+    async def test_a_page_past_the_end_still_counts_the_matches(
+        self, monkeypatch: pytest.MonkeyPatch, session
+    ) -> None:
+        """No row is left to carry the total, so it is counted on its own."""
+        monkeypatch.setattr(
+            "app.repositories.mixins.search.build_fts_condition",
+            lambda *_args, **_kwargs: literal(True),
+        )
+        monkeypatch.setattr(
+            "app.repositories.mixins.search.fts_rank_expr",
+            lambda *_args, **_kwargs: literal(0),
+        )
+        session.add_all(
+            User(email=f"past-{index}@example.com", hashed_password="hash")
+            for index in range(3)
+        )
+        await session.commit()
+
+        repository = RepositoryUnderTest(session)
+        with system_context():
+            records, total = await repository.search_fts(
+                query_str="user", fields=["full_name"], skip=10, limit=2
+            )
+
+        assert records == []
+        assert total == 3
+
 
 class TestSearchUsesTheIndexes:
     """The search expressions must match the expression indexes on users."""
