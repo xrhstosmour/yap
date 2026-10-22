@@ -58,6 +58,37 @@ class TestStartScript:
         assert result.returncode == 2
         assert "Unknown argument" in result.stderr
 
+    def test_a_name_with_a_space_does_not_stop_it(self) -> None:
+        """An unquoted `Jane Doe` in `.env` is not shell code to run."""
+        scratch = PROJECT_DIR / ".pytest_cache" / "start_with_spaces"
+        shutil.rmtree(scratch, ignore_errors=True)
+        (scratch / "scripts").mkdir(parents=True)
+        (scratch / "bin").mkdir()
+        shutil.copy(START, scratch / "scripts" / "start.sh")
+        (scratch / ".env").write_text(
+            "POSTGRESQL_USER=appuser\nFIRST_SUPERUSER_FULL_NAME=Jane Doe\n"
+        )
+        calls = scratch / "calls"
+        for name in ("docker", "uv"):
+            stub = scratch / "bin" / name
+            stub.write_text(f'#!/bin/sh\necho "{name} $*" >> "{calls}"\n')
+            stub.chmod(0o755)
+
+        result = subprocess.run(
+            ["bash", str(scratch / "scripts" / "start.sh")],
+            capture_output=True,
+            text=True,
+            cwd=scratch,
+            env={"PATH": f"{scratch / 'bin'}:/usr/bin:/bin", "HOME": str(scratch)},
+        )
+        recorded = calls.read_text() if calls.exists() else ""
+        shutil.rmtree(scratch, ignore_errors=True)
+
+        assert result.returncode == 0, result.stderr
+        assert "command not found" not in result.stderr
+        assert "pg_isready -q -U appuser" in recorded
+        assert "uv run fastapi dev" in recorded
+
     def test_a_missing_environment_file_points_at_setup(self) -> None:
         """Running the wrong script first is the common mistake."""
         scratch = PROJECT_DIR / ".pytest_cache" / "start_without_env"
