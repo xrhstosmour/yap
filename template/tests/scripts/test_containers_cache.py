@@ -182,3 +182,70 @@ class TestCacheIsVerified:
         monkeypatch.setattr(module, "REPO_COMMIT", head)
 
         assert module.cache_is_current(str(current)) is True
+
+
+def _head(path: Path) -> str:
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+
+def _two_commits(path: Path) -> tuple[str, str]:
+    """A checkout with two commits, returning both, oldest first.
+
+    Args:
+        path: Directory to make the checkout in.
+
+    Returns:
+        The first commit and the second, which HEAD is on.
+    """
+    path.mkdir()
+    for command in _throwaway_repository("first"):
+        subprocess.run(command, cwd=path, check=True)
+    first = _head(path)
+    subprocess.run(
+        ["git", "commit", "-q", "--allow-empty", "-m", "second"],
+        cwd=path,
+        check=True,
+    )
+    return first, _head(path)
+
+
+class TestAdjacentCheckoutIsVerified:
+    """A checkout beside the project is used only if it includes the pin."""
+
+    def test_a_directory_that_is_not_a_checkout_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        copied = tmp_path / "containers"
+        copied.mkdir()
+
+        assert _assemble().sibling_includes_pin(str(copied)) is False
+
+    def test_a_checkout_behind_the_pin_is_rejected(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        checkout = tmp_path / "containers"
+        first, second = _two_commits(checkout)
+        subprocess.run(["git", "checkout", "-q", first], cwd=checkout, check=True)
+        module = _assemble()
+        monkeypatch.setattr(module, "REPO_COMMIT", second)
+
+        assert module.sibling_includes_pin(str(checkout)) is False
+
+    @pytest.mark.parametrize("pinned", ["first", "second"])
+    def test_a_checkout_on_or_ahead_of_the_pin_is_accepted(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pinned: str
+    ) -> None:
+        checkout = tmp_path / "containers"
+        first, second = _two_commits(checkout)
+        module = _assemble()
+        monkeypatch.setattr(
+            module, "REPO_COMMIT", first if pinned == "first" else second
+        )
+
+        assert module.sibling_includes_pin(str(checkout)) is True

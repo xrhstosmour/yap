@@ -65,6 +65,32 @@ def cache_is_current(path: str) -> bool:
     return result.returncode == 0 and result.stdout.strip() == REPO_COMMIT
 
 
+
+def sibling_includes_pin(path: str) -> bool:
+    """Report whether a local containers checkout includes `REPO_COMMIT`.
+
+    A checkout beside the project is used in place of the pinned clone, so
+    unpushed containers work can be tried out. One that is behind the pin
+    silently vendored older services, downgraded images included. Ahead of
+    the pin, or on it, is fine. Nothing in the checkout is changed.
+
+    Args:
+        path: Directory to check.
+
+    Returns:
+        True when `path` is a git checkout whose HEAD contains `REPO_COMMIT`.
+    """
+    if not os.path.isdir(os.path.join(path, ".git")):
+        return False
+
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", REPO_COMMIT, "HEAD"],
+        cwd=path,
+        capture_output=True,
+        check=False,
+    )
+    return result.returncode == 0
+
 # Matched against the vendored compose files to namespace them per project.
 # Anchored and quote-aware so they only ever touch the exact keys intended.
 CONTAINER_NAME_PATTERN = re.compile(r'^(\s*)container_name:\s*"([^"]+)"\s*$')
@@ -364,11 +390,18 @@ def main() -> None:
     services = read_services(containers_directory)
     project_slug = read_project_slug()
 
-    # Find the containers repo: check adjacent path first, then the per-user
-    # cache, then clone fresh if neither is usable.
+    # Find the containers repo: an adjacent checkout that includes the pin
+    # first, then the per-user cache, then clone fresh if neither is usable.
     cache = cache_directory()
     containers_root = os.path.abspath("../containers")
-    if os.path.isdir(containers_root):
+    adjacent = os.path.isdir(containers_root)
+    if adjacent and not sibling_includes_pin(containers_root):
+        print(
+            f"Warning: {containers_root} does not include {REPO_COMMIT[:7]}, "
+            "using the pinned commit instead. Pull it to use it again."
+        )
+        adjacent = False
+    if adjacent:
         print(f"Using containers repo at {containers_root}")
     elif cache_is_current(cache):
         print(f"Using cached containers repo at {cache}")
