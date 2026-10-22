@@ -22,6 +22,7 @@ class TestSettingsValidation:
             POSTGRESQL_PASSWORD="test",
             FIRST_SUPERUSER_PASSWORD="test",
             RABBITMQ_PASSWORD="test",
+            REDIS_PASSWORD="test",
             CRYPTO_KEY="dGVzdC1rZXktMzItYnl0ZXMtbG9uZw==",
             GOOGLE_CLIENT_SECRET="test-secret",
             SMTP_PASSWORD="test-pass",
@@ -46,6 +47,7 @@ class TestSettingsValidation:
             POSTGRESQL_PASSWORD="test",
             FIRST_SUPERUSER_PASSWORD="test",
             RABBITMQ_PASSWORD="test",
+            REDIS_PASSWORD="test",
             CRYPTO_KEY="dGVzdC1rZXktMzItYnl0ZXMtbG9uZw==",
             GOOGLE_CLIENT_SECRET="test-secret",
             SMTP_HOST="smtp.example.com",
@@ -102,6 +104,7 @@ class TestSettingsValidation:
             SECRET_KEY="test-key",
             FIRST_SUPERUSER_PASSWORD="test",
             RABBITMQ_PASSWORD="test",
+            REDIS_PASSWORD="test",
             CRYPTO_KEY="dGVzdC1rZXktMzItYnl0ZXMtbG9uZw==",
         )
 
@@ -148,6 +151,7 @@ class TestSettingsValidation:
             POSTGRESQL_PASSWORD="test",
             FIRST_SUPERUSER_PASSWORD="test",
             RABBITMQ_PASSWORD="test",
+            REDIS_PASSWORD="test",
             CRYPTO_KEY="dGVzdC1rZXktMzItYnl0ZXMtbG9uZw==",
         )
 
@@ -179,6 +183,7 @@ class TestPerformanceTuningDefaults:
             POSTGRESQL_PASSWORD="test",
             FIRST_SUPERUSER_PASSWORD="test",
             RABBITMQ_PASSWORD="test",
+            REDIS_PASSWORD="test",
             CRYPTO_KEY="dGVzdC1rZXktMzItYnl0ZXMtbG9uZw==",
             GOOGLE_CLIENT_SECRET="test-secret",
             SMTP_PASSWORD="test-pass",
@@ -198,6 +203,7 @@ class TestPerformanceTuningDefaults:
             POSTGRESQL_PASSWORD="test",
             FIRST_SUPERUSER_PASSWORD="test",
             RABBITMQ_PASSWORD="test",
+            REDIS_PASSWORD="test",
             CRYPTO_KEY="dGVzdC1rZXktMzItYnl0ZXMtbG9uZw==",
             GOOGLE_CLIENT_SECRET="test-secret",
             SMTP_PASSWORD="test-pass",
@@ -223,6 +229,7 @@ class TestPerformanceTuningDefaults:
             POSTGRESQL_PASSWORD="test",
             FIRST_SUPERUSER_PASSWORD="test",
             RABBITMQ_PASSWORD="test",
+            REDIS_PASSWORD="test",
             CRYPTO_KEY="dGVzdC1rZXktMzItYnl0ZXMtbG9uZw==",
             GOOGLE_CLIENT_SECRET="test-secret",
             SMTP_PASSWORD="test-pass",
@@ -245,6 +252,22 @@ class TestSettingsValidationProduction:
                 _env_file=None,
                 ENVIRONMENT="production",
                 SECRET_KEY="",
+            )
+
+    def test_production_raises_on_empty_redis_password(self) -> None:
+        """An open Redis would let anyone on its network clear revocations."""
+        from app.core.settings import Settings
+
+        with pytest.raises(ValueError, match="REDIS_PASSWORD is not set"):
+            Settings(
+                _env_file=None,
+                ENVIRONMENT="production",
+                SECRET_KEY="a-real-secret-key-value-0123456789",
+                POSTGRESQL_PASSWORD="a-real-password",
+                FIRST_SUPERUSER_PASSWORD="a-real-password",
+                RABBITMQ_PASSWORD="a-real-password",
+                CRYPTO_KEY="dGVzdC1rZXktMzItYnl0ZXMtbG9uZw==",
+                REDIS_PASSWORD="",
             )
 
     def test_staging_raises_on_empty_secret_key(self) -> None:
@@ -286,6 +309,7 @@ class TestAppAssociation:
             POSTGRESQL_PASSWORD="test",
             FIRST_SUPERUSER_PASSWORD="test",
             RABBITMQ_PASSWORD="test",
+            REDIS_PASSWORD="test",
             CRYPTO_KEY="dGVzdC1rZXktMzItYnl0ZXMtbG9uZw==",
             **values,
         )

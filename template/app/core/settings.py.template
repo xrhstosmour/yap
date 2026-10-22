@@ -537,6 +537,9 @@ class Settings(BaseSettings):
         self._check_secret("POSTGRESQL_PASSWORD", self.POSTGRESQL_PASSWORD)
         self._check_secret("FIRST_SUPERUSER_PASSWORD", self.FIRST_SUPERUSER_PASSWORD)
         self._check_secret("RABBITMQ_PASSWORD", self.RABBITMQ_PASSWORD)
+        # Redis holds the token blacklist, WebSocket tickets, second-factor
+        # challenges and rate limits, so an open one undoes all of them.
+        self._check_secret("REDIS_PASSWORD", self.REDIS_PASSWORD)
         self._check_secret("CRYPTO_KEY", self.CRYPTO_KEY)
 
         if self.GOOGLE_CLIENT_ID:
