@@ -18,13 +18,13 @@ import re
 from typing import TYPE_CHECKING
 
 from fastapi.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.middleware.base import RequestResponseEndpoint
+from starlette.datastructures import Headers
 
 if TYPE_CHECKING:
-    from starlette.requests import Request
-    from starlette.responses import Response
     from starlette.types import ASGIApp
+    from starlette.types import Receive
+    from starlette.types import Scope
+    from starlette.types import Send
 
 CLIENT_VERSION_HEADER = "X-Client-Version"
 
@@ -43,7 +43,7 @@ def parse_version(text: str) -> tuple[int, int, int] | None:
     return int(major), int(minor), int(patch)
 
 
-class ClientVersionMiddleware(BaseHTTPMiddleware):
+class ClientVersionMiddleware:
     """Answer 426 to a client that says it is older than `minimum`."""
 
     def __init__(self, app: ASGIApp, minimum: str, path_prefix: str) -> None:
@@ -58,7 +58,7 @@ class ClientVersionMiddleware(BaseHTTPMiddleware):
         Raises:
             ValueError: If `minimum` is set and is not `major.minor.patch`.
         """
-        super().__init__(app)
+        self.app = app
         self.minimum_text = minimum.strip()
         self.minimum = parse_version(self.minimum_text) if self.minimum_text else None
         if self.minimum_text and self.minimum is None:
@@ -66,18 +66,22 @@ class ClientVersionMiddleware(BaseHTTPMiddleware):
             raise ValueError(message)
         self.path_prefix = path_prefix
 
-    async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint
-    ) -> Response:
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         """Refuse an old client before any work is done for it."""
-        if self.minimum is not None and request.url.path.startswith(self.path_prefix):
-            sent = parse_version(request.headers.get(CLIENT_VERSION_HEADER, ""))
+        if (
+            scope["type"] == "http"
+            and self.minimum is not None
+            and scope["path"].startswith(self.path_prefix)
+        ):
+            sent = parse_version(Headers(scope=scope).get(CLIENT_VERSION_HEADER, ""))
             if sent is not None and sent < self.minimum:
-                return JSONResponse(
+                response = JSONResponse(
                     status_code=426,
                     content={
                         "detail": "This version of the app is no longer supported.",
                         "minimum_client_version": self.minimum_text,
                     },
                 )
-        return await call_next(request)
+                await response(scope, receive, send)
+                return
+        await self.app(scope, receive, send)

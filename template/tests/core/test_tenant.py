@@ -215,7 +215,7 @@ def test_system_context_independent_of_tenant_context() -> None:
 
 
 class TestTenantContextIsScopedToOneRequest:
-    """`tenant_middleware` in `main.py` looks dead and is not.
+    """`TenantContextMiddleware` looks dead and is not.
 
     `request.state.tenant_id` is set by `get_current_user`, a dependency,
     which runs downstream of every middleware. So the value the middleware
@@ -239,26 +239,15 @@ class TestTenantContextIsScopedToOneRequest:
         Returns:
             The configured application.
         """
-        from collections.abc import Awaitable
-        from collections.abc import Callable
-
         from fastapi import Depends
         from fastapi import FastAPI
-        from fastapi import Request
-        from fastapi import Response
+
+        from app.api.middleware import TenantContextMiddleware
 
         application = FastAPI()
 
         if with_middleware:
-
-            @application.middleware("http")
-            async def tenant_middleware(
-                request: Request,
-                call_next: Callable[[Request], Awaitable[Response]],
-            ) -> Response:
-                tenant_id = getattr(request.state, "tenant_id", None)
-                with tenant_context(tenant_id):
-                    return await call_next(request)
+            application.add_middleware(TenantContextMiddleware)
 
         # Mirrors what `get_current_user` does. Async on purpose: a sync
         # dependency runs in a threadpool with its own context, which would
