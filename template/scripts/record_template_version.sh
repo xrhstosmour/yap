@@ -20,6 +20,24 @@ if [ ! -f "$VERSION_FILE" ]; then
     exit 0
 fi
 
+# Copier already rendered the commit the project was generated from. Keep
+# it when GitHub has that commit: replacing it with the remote's newest one
+# makes the next `synchronize.sh` treat every template change in between as
+# already applied, and drop them without a conflict. A render from a local
+# clone with uncommitted changes records a commit Copier made on the fly,
+# which exists nowhere, so that one, and an unreachable GitHub, still fall
+# back to the remote HEAD below.
+rendered=$(sed -n 's/^_commit: *//p' "$VERSION_FILE" | head -1)
+# `git describe` output, `<tag>-<count>-g<sha>`, names its commit last.
+rendered="${rendered##*-g}"
+if [ -n "$rendered" ] && curl -fsS -o /dev/null --max-time 10 \
+    "https://api.github.com/repos/xrhstosmour/yap/commits/${rendered}" 2>/dev/null; then
+    echo "[INFO] '$VERSION_FILE' keeps the rendered 'YAP' commit '${rendered}'."
+    sed -i.bak "s|^_commit: .*|_commit: ${rendered}|" "$VERSION_FILE"
+    rm -f "${VERSION_FILE}.bak"
+    exit 0
+fi
+
 sha=$(git ls-remote "https://github.com/xrhstosmour/yap.git" HEAD 2>/dev/null | cut -f1) || sha=""
 
 if [ -z "$sha" ]; then
