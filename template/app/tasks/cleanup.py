@@ -191,3 +191,61 @@ def generate_reports(self) -> dict:
     except Exception as e:
         logger.error("report_generation_failed", task_id=self.request.id, error=str(e))
         raise
+
+
+@celery_app.task(bind=True, name="app.tasks.cleanup.purge_outbox")
+def purge_outbox(self, retention_days: int = 7) -> dict:
+    """Delete published outbox events older than the retention window.
+
+    Commits after every chunk, so a large first run neither holds one long
+    transaction nor loses its progress if it is interrupted.
+
+    Args:
+        retention_days: Days a published event is kept, for tracing a
+            delivery after the fact.
+
+    Returns:
+        Result dictionary with count of purged events
+    """
+    logger.info(
+        "outbox_purge_started",
+        task_id=self.request.id,
+        retention_days=retention_days,
+    )
+
+    try:
+        import asyncio
+        from datetime import UTC
+        from datetime import datetime
+        from datetime import timedelta
+
+        from app.database import celery_session_factory
+        from app.models.outbox import Outbox
+
+        chunk_size = 10_000
+
+        async def _run() -> int:
+            before = datetime.now(UTC) - timedelta(days=retention_days)
+            total = 0
+            async with celery_session_factory() as session:
+                outbox = Outbox(session)
+                while True:
+                    count = await outbox.purge_published(before, limit=chunk_size)
+                    await session.commit()
+                    total += count
+                    if count < chunk_size:
+                        return total
+
+        count = asyncio.run(_run())
+
+        logger.info("outbox_purge_completed", task_id=self.request.id, count=count)
+
+        return {
+            "status": "completed",
+            "purged_count": count,
+            "task_id": self.request.id,
+        }
+
+    except Exception as e:
+        logger.error("outbox_purge_failed", task_id=self.request.id, error=str(e))
+        raise

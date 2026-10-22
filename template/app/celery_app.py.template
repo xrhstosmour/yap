@@ -94,6 +94,10 @@ celery_app.conf.beat_schedule = {
         "task": "app.tasks.cleanup.purge_graveyard",
         "schedule": crontab(hour=settings.CELERY_PURGE_GRAVEYARD_HOUR, minute=0),
     },
+    "purge-outbox": {
+        "task": "app.tasks.cleanup.purge_outbox",
+        "schedule": crontab(hour=settings.CELERY_PURGE_OUTBOX_HOUR, minute=0),
+    },
     "process-outbox": {
         "task": "app.tasks.outbox.process_outbox",
         "schedule": 10.0,
