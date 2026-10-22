@@ -206,6 +206,35 @@ async def get_current_superuser(current_user: CurrentUser) -> User:
 SuperuserUser = Annotated[User, Depends(get_current_superuser)]
 
 
+def is_platform_admin(user: User) -> bool:
+    """Whether a user may act on the whole deployment rather than a tenant.
+
+    A `SUPERUSER` is scoped to their own tenant. Only one whose own
+    `tenant_id` is exactly `SYSTEM_TENANT_ID` administers the platform:
+    deployment-wide feature flags, metrics and the `/admin` surface. A
+    `None` `tenant_id` is deliberately not coalesced, so it reads as "not a
+    platform admin" rather than being promoted to the system tenant.
+    """
+    return user.role == UserRole.SUPERUSER and user.tenant_id == SYSTEM_TENANT_ID
+
+
+async def get_platform_admin(current_user: SuperuserUser) -> User:
+    """Get the current user if they administer the whole platform.
+
+    Raises:
+        HTTPException: If the superuser belongs to any tenant but the system one.
+    """
+    if not is_platform_admin(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions",
+        )
+    return current_user
+
+
+PlatformAdminUser = Annotated[User, Depends(get_platform_admin)]
+
+
 async def get_current_user_ws(
     session: SessionDependency,
     ticket: Annotated[str | None, Query()] = None,
@@ -298,6 +327,22 @@ async def get_current_superuser_ws(current_user: CurrentUserWS) -> User:
 
 
 SuperuserUserWS = Annotated[User, Depends(get_current_superuser_ws)]
+
+
+async def get_platform_admin_ws(current_user: SuperuserUserWS) -> User:
+    """Get the current WebSocket user if they administer the whole platform.
+
+    See `is_platform_admin`.
+    """
+    if not is_platform_admin(current_user):
+        raise WebSocketException(
+            code=status.WS_1008_POLICY_VIOLATION,
+            reason="Not enough permissions",
+        )
+    return current_user
+
+
+PlatformAdminUserWS = Annotated[User, Depends(get_platform_admin_ws)]
 
 
 async def get_api_key_auth(

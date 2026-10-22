@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
+from uuid import UUID
 from uuid import uuid4
 
 import pytest
@@ -17,6 +18,7 @@ from starlette.testclient import WebSocketDisconnect
 
 from app.api.v1.websocket import broadcast_notification
 from app.api.v1.websocket import router as ws_router
+from app.core import SYSTEM_TENANT_ID
 from app.database import get_async_session
 from app.dependencies import UserRepository
 from app.models.user import User
@@ -25,7 +27,12 @@ from app.models.user import UserRole
 TEST_TICKET = "test-ticket"  # noqa: S105
 
 
-def _make_user(*, role: UserRole = UserRole.USER, is_active: bool = True) -> User:
+def _make_user(
+    *,
+    role: UserRole = UserRole.USER,
+    is_active: bool = True,
+    tenant_id: UUID | None = None,
+) -> User:
     """Build an in-memory `User` for stubbing the auth dependency."""
     return User(
         id=uuid4(),
@@ -33,7 +40,7 @@ def _make_user(*, role: UserRole = UserRole.USER, is_active: bool = True) -> Use
         hashed_password="hashed",
         is_active=is_active,
         role=role,
-        tenant_id=None,
+        tenant_id=tenant_id,
     )
 
 
@@ -213,7 +220,7 @@ class TestMetricsWebSocket:
         self, ws_client: TestClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A superuser ticket should be accepted and stream metrics."""
-        user = _make_user(role=UserRole.SUPERUSER)
+        user = _make_user(role=UserRole.SUPERUSER, tenant_id=SYSTEM_TENANT_ID)
         _stub_user_repository(monkeypatch, user)
         _stub_ws_ticket(monkeypatch, user.id)
 

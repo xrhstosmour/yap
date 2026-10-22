@@ -31,8 +31,8 @@ from app.core.rate_limit import check_auth_rate_limit
 from app.core.settings import settings
 from app.core.tenant import system_context
 from app.dependencies import SessionDependency
+from app.dependencies import is_platform_admin
 from app.models.user import User
-from app.models.user import UserRole
 from app.repositories.user_repository import UserRepository
 from app.services.auth_service import AuthenticationError
 from app.services.auth_service import AuthService
@@ -107,7 +107,7 @@ async def sign_in(
     """
     try:
         user = await AuthService(session).authenticate(email, password)
-        if user.role != UserRole.SUPERUSER:
+        if not is_platform_admin(user):
             raise PermissionError
     except (AuthenticationError, PermissionError):
         logger.warning("admin_sign_in_refused")
@@ -166,7 +166,7 @@ async def confirm_second_factor(
         logger.warning("admin_second_factor_refused")
         return _refused(request, status.HTTP_401_UNAUTHORIZED)
     # Checked again: the challenge outlives a role change made meanwhile.
-    if not user.is_active or user.role != UserRole.SUPERUSER:
+    if not user.is_active or not is_platform_admin(user):
         return _refused(request, status.HTTP_401_UNAUTHORIZED)
     return _signed_in(user)
 
