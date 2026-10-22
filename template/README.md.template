@@ -121,6 +121,9 @@ You need:
 # Synchronize with upstream YAP template changes.
 ./scripts/synchronize.sh
 
+# The same, turning a generation option on or off.
+./scripts/synchronize.sh --data include_flower=true
+
 # Start dev server, with services and migrations.
 ./scripts/start.sh
 
@@ -197,8 +200,8 @@ single container with a fixed name for that reason, do not scale it.
 Switch to **RedBeat** when you need more than one, for example beat on
 Kubernetes with `replicas > 1`, or a rolling deploy where the old and new beat
 overlap. RedBeat holds a Redis lock so only one instance fires, and keeps the
-schedule in Redis so it can be changed without a restart. To turn it on,
-re-run `scripts/synchronize.sh` and answer yes to `include_redbeat`. That adds
+schedule in Redis so it can be changed without a restart. To turn it on, run
+`./scripts/synchronize.sh --data include_redbeat=true`. That adds
 the `celery-redbeat` dependency, points beat at `redbeat.RedBeatScheduler` and
 sets `redbeat_redis_url`. It is deliberately not installed otherwise, importing
 it registers a `beat_init` hook that expects the RedBeat scheduler and logs an

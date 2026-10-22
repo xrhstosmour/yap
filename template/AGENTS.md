@@ -174,6 +174,8 @@ uv run celery -A app.celery_app beat --loglevel=info
 ./scripts/setup.sh
 # Requires clean git status and `copier` installed.
 ./scripts/synchronize.sh
+# Change a generation option on the way, any `copier.yml` question.
+./scripts/synchronize.sh --data include_redbeat=true
 ```
 
 `YAP_SYNC=1 ./scripts/setup.sh` skips Docker/migrations/seeding, only ensure `.env` exists. Automatically set by `synchronize.sh`.

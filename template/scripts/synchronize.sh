@@ -45,6 +45,41 @@ read_env_scalar() {
     fi
 }
 
+usage() {
+    cat <<'USAGE'
+Usage: ./scripts/synchronize.sh [--data key=value]...
+
+Update the project to the latest 'YAP' template. Every answer is read back
+from the project's own files, so a sync keeps the options it was generated
+with. Pass --data to change one, for example to turn RedBeat on:
+
+  ./scripts/synchronize.sh --data include_redbeat=true
+USAGE
+}
+
+# Answers to change on this run, handed to `copier update` as `--data`.
+copier_data=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --data)
+            [ $# -ge 2 ] || error "--data needs a key=value argument"
+            case "$2" in
+                [a-z]*=*) copier_data+=(--data "$2") ;;
+                *) error "--data takes key=value, got '$2'" ;;
+            esac
+            shift 2
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            usage
+            error "Unknown argument '$1'"
+            ;;
+    esac
+done
+
 PROJECT_DIR="$(pwd)"
 
 echo ""
@@ -284,8 +319,10 @@ PY
 export YAP_SYNC=1
 info "Running copier update..."
 (
+    # The `+` form expands to nothing for an empty array, which a plain
+    # "${copier_data[@]}" under `set -u` rejects on the Bash 3 macOS ships.
     copier update --trust --conflict inline --defaults --vcs-ref "$_target" \
-        --answers-file "$ANSWERS_FILE" 2>&1 || exit 2
+        --answers-file "$ANSWERS_FILE" ${copier_data[@]+"${copier_data[@]}"} 2>&1 || exit 2
 
     # Check for unresolved merge conflicts from copier update.
     if grep -rq "^<<<<<<< \|^>>>>>>> " --include="*.py" --include="*.yml" --include="*.yaml" --include="*.sh" --include="*.toml" . 2>/dev/null; then
