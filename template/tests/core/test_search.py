@@ -90,7 +90,30 @@ class TestBuildTrigramCondition:
         # leaves the term alone and the assertion reads plainly.
         expr = build_trigram_condition(column("full_name"), "αλι")
         compiled = str(expr.compile(compile_kwargs={"literal_binds": True}))
-        assert "word_similarity(unaccent('αλι'), unaccent(full_name))" in compiled
+        assert (
+            "word_similarity(public.immutable_unaccent('αλι'), "
+            "public.immutable_unaccent(full_name))"
+        ) in compiled
+
+    def test_the_default_thresholds_add_the_indexable_operators(self) -> None:
+        """Only `%` and `<%` can use the trigram index, the functions cannot."""
+        expr = build_trigram_condition(column("full_name"), "αλι")
+        compiled = str(expr.compile(compile_kwargs={"literal_binds": True}))
+        assert (
+            "public.immutable_unaccent(full_name) % public.immutable_unaccent('αλι')"
+        ) in compiled
+        assert (
+            "public.immutable_unaccent('αλι') <% public.immutable_unaccent(full_name)"
+        ) in compiled
+
+    def test_a_looser_threshold_leaves_the_operators_out(self) -> None:
+        """They compare against the server's stricter default and would drop rows."""
+        expr = build_trigram_condition(
+            column("full_name"), "αλι", threshold=0.1, word_threshold=0.2
+        )
+        compiled = str(expr.compile(compile_kwargs={"literal_binds": True}))
+        assert " % " not in compiled
+        assert "<%" not in compiled
 
     def test_word_threshold_appears_in_expression(self) -> None:
         """Ensure the word threshold is configurable.

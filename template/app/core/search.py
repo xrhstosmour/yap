@@ -10,8 +10,10 @@ automatic unaccent normalisation on search columns, and configurable
 FTS language via settings.
 
 These helpers are database-level only, no stored tsvector columns
-required. Add stored tsvector columns in your own migrations for
-high-volume production tables.
+required. Columns are unaccented with `public.immutable_unaccent()`, not
+`unaccent()`, because only an immutable function can appear in an index:
+an expression index on `immutable_unaccent(column)` serves these queries,
+while `unaccent()` in the query left every search a sequential scan.
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any
 
+from sqlmodel import and_
 from sqlmodel import func
 from sqlmodel import or_
 from sqlmodel import text
@@ -48,6 +51,24 @@ __all__ = [
     "choose_mode",
     "normalise_query",
 ]
+
+
+# Default `pg_trgm.similarity_threshold` and `word_similarity_threshold`,
+# which the indexable `%` and `<%` operators compare against.
+_TRIGRAM_OPERATOR_THRESHOLD = 0.3
+_WORD_OPERATOR_THRESHOLD = 0.6
+
+
+def _unaccent(expression: Any) -> Any:  # noqa: ANN401
+    """Unaccent through the immutable wrapper the search indexes are built on.
+
+    Args:
+        expression: Column, SQL expression or plain string.
+
+    Returns:
+        `public.immutable_unaccent(expression)`.
+    """
+    return func.public.immutable_unaccent(expression)
 
 
 def normalise_query(query_str: str) -> str:
@@ -91,7 +112,7 @@ def build_fts_condition(
 ) -> Any:  # noqa: ANN401
     """Build a PostgreSQL full-text search filter expression.
 
-    Applies `unaccent()` to the column so diacritics in stored text
+    Applies `immutable_unaccent()` to the column so diacritics in stored text
     do not block matches (`"Ταβέρνα"` matches `"taverna"`). The
     query is also normalised via Greeklish-to-Greek transliteration.
 
@@ -103,7 +124,7 @@ def build_fts_condition(
 
     Returns:
         SQLAlchemy expression equivalent to
-        `to_tsvector(language, unaccent(column_expr))
+        `to_tsvector(language, immutable_unaccent(column_expr))
         @@ plainto_tsquery(language, query_str)`.
     """
     if language is None:
@@ -119,7 +140,7 @@ def build_fts_condition(
     assert language in VALID_FTS_LANGUAGES  # noqa: S101
     query_str = normalise_query(query_str)
     language_expr: Any = text(f"'{language}'")
-    return func.to_tsvector(language_expr, func.unaccent(column_expr)).op("@@")(
+    return func.to_tsvector(language_expr, _unaccent(column_expr)).op("@@")(
         func.plainto_tsquery(language_expr, query_str)
     )
 
@@ -132,7 +153,7 @@ def build_trigram_condition(
 ) -> Any:  # noqa: ANN401
     """Build a trigram similarity threshold expression.
 
-    Applies `unaccent()` to both the column and the query so that
+    Applies `immutable_unaccent()` to both the column and the query so that
     diacritic differences do not block similarity matches.
 
     Matches on either measure, because the two fail in opposite
@@ -157,8 +178,8 @@ def build_trigram_condition(
 
     Returns:
         SQLAlchemy expression equivalent to
-        `similarity(unaccent(column_expr), unaccent(query_str)) >= threshold
-        OR word_similarity(unaccent(query_str), unaccent(column_expr))
+        `similarity(immutable_unaccent(column_expr), immutable_unaccent(query_str)) >= threshold
+        OR word_similarity(immutable_unaccent(query_str), immutable_unaccent(column_expr))
         >= word_threshold`.
 
     Note:
@@ -168,12 +189,20 @@ def build_trigram_condition(
         value matches a word of the query, which is almost never true.
     """
     query_str = normalise_query(query_str)
-    unaccented_column = func.unaccent(column_expr)
-    unaccented_query = func.unaccent(query_str)
-    return or_(
-        func.similarity(unaccented_column, unaccented_query) >= threshold,
-        func.word_similarity(unaccented_query, unaccented_column) >= word_threshold,
-    )
+    unaccented_column = _unaccent(column_expr)
+    unaccented_query = _unaccent(query_str)
+    whole = func.similarity(unaccented_column, unaccented_query) >= threshold
+    word = func.word_similarity(unaccented_query, unaccented_column) >= word_threshold
+    # The function calls above can never use an index, the `%` and `<%`
+    # operators can. They compare against the server's thresholds rather
+    # than these arguments, so they are added only where they cannot drop
+    # a row the exact check would keep, a stricter threshold than the
+    # server's, and the exact check then narrows what they let through.
+    if threshold >= _TRIGRAM_OPERATOR_THRESHOLD:
+        whole = and_(unaccented_column.op("%")(unaccented_query), whole)
+    if word_threshold >= _WORD_OPERATOR_THRESHOLD:
+        word = and_(unaccented_query.op("<%")(unaccented_column), word)
+    return or_(whole, word)
 
 
 def build_ilike_condition(column_expr, query_str: str) -> Any:  # noqa: ANN401
@@ -204,7 +233,7 @@ def build_ilike_condition(column_expr, query_str: str) -> Any:  # noqa: ANN401
 def fts_rank_expr(column_expr, query_str: str, language: str | None = None) -> Any:  # noqa: ANN401
     """Build a PostgreSQL FTS relevance ranking expression.
 
-    Applies `unaccent()` to the column for consistency with
+    Applies `immutable_unaccent()` to the column for consistency with
     `build_fts_condition()`.
 
     Args:
@@ -215,7 +244,7 @@ def fts_rank_expr(column_expr, query_str: str, language: str | None = None) -> A
 
     Returns:
         SQLAlchemy expression equivalent to
-        `ts_rank(to_tsvector(language, unaccent(column_expr)),
+        `ts_rank(to_tsvector(language, immutable_unaccent(column_expr)),
         plainto_tsquery(language, query_str))`.
     """
     if language is None:
@@ -232,7 +261,7 @@ def fts_rank_expr(column_expr, query_str: str, language: str | None = None) -> A
     query_str = normalise_query(query_str)
     language_expr: Any = text(f"'{language}'")
     return func.ts_rank(
-        func.to_tsvector(language_expr, func.unaccent(column_expr)),
+        func.to_tsvector(language_expr, _unaccent(column_expr)),
         func.plainto_tsquery(language_expr, query_str),
     )
 
