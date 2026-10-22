@@ -18,37 +18,23 @@ info "Setting up project in ${PROJECT_DIR}"
 # Prerequisites check.
 command -v python3 >/dev/null 2>&1 || error "python3 is required! Install from https://www.python.org/downloads/"
 
-# Install uv if missing.
+# Install uv if missing, from a pinned release rather than whatever the
+# unversioned installer serves on the day.
+UV_VERSION="0.11.2"
 if ! command -v uv >/dev/null 2>&1; then
-    info "Installing uv..."
-    curl -LsSf https://astral.sh/uv/install.sh | sh
+    info "Installing uv ${UV_VERSION}..."
+    curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | sh
     export PATH="$HOME/.local/bin:$PATH"
 fi
 
-# Install Docker if missing.
+# Docker is not installed from here. The only route that needed no package
+# manager piped an unpinned script into a root shell during `copier copy`,
+# and servers get it from `deploy/cloud-init.yaml` instead.
 if ! command -v docker >/dev/null 2>&1; then
-    info "Docker not found. Attempting install..."
-    case "$OSTYPE" in
-        darwin*)
-            if command -v brew >/dev/null 2>&1; then
-                brew install --cask docker
-            fi
-            ;;
-        linux*)
-            curl -fsSL https://get.docker.com | sh 2>/dev/null || true
-            ;;
-        msys*)
-            if command -v winget >/dev/null 2>&1; then
-                winget install Docker.DockerDesktop
-            fi
-            ;;
-    esac
-    if ! command -v docker >/dev/null 2>&1; then
-        if [ "${YAP_SYNC:-0}" = "1" ]; then
-            warn "Docker not found; continuing in sync mode."
-        else
-            error "Docker is required!"
-        fi
+    if [ "${YAP_SYNC:-0}" = "1" ]; then
+        warn "Docker not found; continuing in sync mode."
+    else
+        error "Docker is required! Install it from https://docs.docker.com/get-started/get-docker/ and run ./scripts/setup.sh again."
     fi
 fi
 
