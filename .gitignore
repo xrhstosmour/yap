@@ -50,3 +50,6 @@ Thumbs.db
 # Keys
 *.pem
 *.key
+
+# Backups, from editors or `sed -i.bak`, which can hold a copy of `.env`.
+*.bak

@@ -216,6 +216,8 @@ _exclude:
   - .vscode
   - .idea
   - "*.DS_Store"
+  # Editor and `sed -i.bak` leftovers, which can hold a copy of `.env`.
+  - "*.bak"
   - uv.lock
 
 _tasks:
