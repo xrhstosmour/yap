@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import io
 from collections.abc import Generator
 from unittest.mock import ANY
 from unittest.mock import MagicMock
 from unittest.mock import patch
 from uuid import UUID
 
+import PIL.Image
 import pytest
 from botocore.exceptions import ClientError
 from botocore.signers import generate_presigned_url as boto_generate_presigned_url
@@ -21,6 +23,7 @@ from app.core.storage import delete_object
 from app.core.storage import download_object
 from app.core.storage import get_download_url
 from app.core.storage import is_thumbnailable
+from app.core.storage import strip_image_metadata
 from app.core.storage import upload_file
 from app.core.storage import upload_object
 from app.core.tenant import tenant_context
@@ -510,6 +513,46 @@ class TestBuildThumbnail:
             pytest.raises(PIL.Image.DecompressionBombWarning),
         ):
             _build_thumbnail(b"big-image-data", "image/png")
+
+
+def _photo(exif: PIL.Image.Exif | None = None, size: tuple[int, int] = (4, 2)) -> bytes:
+    """A small JPEG, with the given EXIF written into it."""
+    output = io.BytesIO()
+    image = PIL.Image.new("RGB", size, "red")
+    image.save(output, format="JPEG", exif=exif or PIL.Image.Exif())
+    return output.getvalue()
+
+
+def _located_exif() -> PIL.Image.Exif:
+    """EXIF the way a phone writes it: a location and a rotated sensor."""
+    exif = PIL.Image.Exif()
+    # Orientation 6, the sensor was turned a quarter clockwise.
+    exif[0x0112] = 6
+    # GPS IFD: north 37 degrees 58 minutes, east 23 degrees 43 minutes.
+    exif[0x8825] = {1: "N", 2: (37.0, 58.0, 0.0), 3: "E", 4: (23.0, 43.0, 0.0)}
+    return exif
+
+
+class TestStripImageMetadata:
+    """Tests for strip_image_metadata()."""
+
+    def test_drops_the_location_and_keeps_the_photo_upright(self) -> None:
+        stripped = PIL.Image.open(
+            io.BytesIO(strip_image_metadata(_photo(_located_exif())))
+        )
+
+        assert dict(stripped.getexif()) == {}
+        assert stripped.size == (2, 4)
+
+    def test_returns_a_photo_without_metadata_untouched(self) -> None:
+        photo = _photo()
+
+        assert strip_image_metadata(photo) is photo
+
+    def test_returns_content_it_cannot_read_untouched(self) -> None:
+        content = b"<svg xmlns='http://www.w3.org/2000/svg'/>"
+
+        assert strip_image_metadata(content) is content
 
 
 class TestUploadObject:

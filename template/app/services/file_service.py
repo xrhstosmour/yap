@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import os
 from collections.abc import Sequence
@@ -16,6 +17,7 @@ from app.core.settings import settings
 from app.core.storage import delete_object
 from app.core.storage import get_download_url
 from app.core.storage import is_thumbnailable
+from app.core.storage import strip_image_metadata
 from app.core.storage import upload_file
 from app.models.file import File
 from app.models.user import User
@@ -142,6 +144,23 @@ class FileService:
             raise FileTypeMismatchError(
                 f"File content does not match declared type '{mimetype}'."
             )
+
+        # Before the hash, so the stored bytes and the dedup key agree.
+        if is_thumbnailable(mimetype):
+            import PIL.Image
+
+            try:
+                stripped = await asyncio.to_thread(strip_image_metadata, content)
+            except (
+                PIL.Image.DecompressionBombError,
+                PIL.Image.DecompressionBombWarning,
+            ) as error:
+                raise FileTooLargeError(
+                    "The image has too many pixels to accept."
+                ) from error
+            if stripped is not content:
+                content = stripped
+                content_hash = hashlib.sha256(content).hexdigest()
 
         # Fast-path dedup check to skip the storage upload for the common
         # case. Scoped to this uploader, not just the tenant: a colleague's
