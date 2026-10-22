@@ -27,6 +27,7 @@ from starlette.middleware.gzip import GZipMiddleware
 from app.admin.network import AdminNetworkMiddleware
 from app.admin.router import router as admin_router
 from app.admin.session import NotSignedInError
+from app.api.body_limit import RequestBodyLimitMiddleware
 from app.api.client_version import ClientVersionMiddleware
 from app.api.idempotency import IdempotencyMiddleware
 from app.api.middleware import DatabaseModeMiddleware
@@ -244,6 +245,14 @@ def create_app() -> FastAPI:
     # Scopes the tenant context to one request, see the class for why it
     # is not the no-op it looks like.
     app.add_middleware(TenantContextMiddleware)
+
+    # Caps request bodies at the largest upload plus room for the multipart
+    # framing, before anything reads them. Inside the logging layer, so a
+    # refused request is still logged.
+    app.add_middleware(
+        RequestBodyLimitMiddleware,
+        maximum=settings.STORAGE_MAX_FILE_SIZE + 1_048_576,
+    )
 
     # Request logging middleware.
     app.add_middleware(RequestLoggingMiddleware)
