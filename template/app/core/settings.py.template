@@ -337,6 +337,7 @@ class Settings(BaseSettings):
     CELERY_CACHE_WARM_HOUR: int = 6
     CELERY_PURGE_GRAVEYARD_HOUR: int = 4
     CELERY_PURGE_OUTBOX_HOUR: int = 5
+    CELERY_CLEANUP_API_KEYS_HOUR: int = 2
 
     # Superuser (created on first startup).
     FIRST_SUPERUSER_EMAIL: EmailStr = "admin@{{ project_slug }}.com"

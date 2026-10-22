@@ -24,6 +24,7 @@ _mock_settings.CELERY_CLEANUP_AUDIT_LOGS_HOUR = 3
 _mock_settings.CELERY_CACHE_WARM_HOUR = 6
 _mock_settings.CELERY_PURGE_GRAVEYARD_HOUR = 4
 _mock_settings.CELERY_PURGE_OUTBOX_HOUR = 5
+_mock_settings.CELERY_CLEANUP_API_KEYS_HOUR = 2
 
 _stub_modules = {
     "app.tasks.email": MagicMock(),
@@ -185,6 +186,12 @@ class TestBeatSchedule:
         entry = celery_app.conf.beat_schedule["purge-outbox"]
         assert entry["task"] == "app.tasks.cleanup.purge_outbox"
         assert entry["schedule"].hour == {_mock_settings.CELERY_PURGE_OUTBOX_HOUR}
+
+    def test_cleanup_expired_api_keys_scheduled(self) -> None:
+        """Expired API keys are deactivated daily."""
+        entry = celery_app.conf.beat_schedule["cleanup-expired-api-keys"]
+        assert entry["task"] == "app.tasks.cleanup.cleanup_expired_api_keys"
+        assert entry["schedule"].hour == {_mock_settings.CELERY_CLEANUP_API_KEYS_HOUR}
 
     def test_process_outbox_scheduled(self) -> None:
         """The process-outbox periodic task should be configured."""

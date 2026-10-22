@@ -98,6 +98,10 @@ celery_app.conf.beat_schedule = {
         "task": "app.tasks.cleanup.purge_outbox",
         "schedule": crontab(hour=settings.CELERY_PURGE_OUTBOX_HOUR, minute=0),
     },
+    "cleanup-expired-api-keys": {
+        "task": "app.tasks.cleanup.cleanup_expired_api_keys",
+        "schedule": crontab(hour=settings.CELERY_CLEANUP_API_KEYS_HOUR, minute=0),
+    },
     "process-outbox": {
         "task": "app.tasks.outbox.process_outbox",
         "schedule": 10.0,
