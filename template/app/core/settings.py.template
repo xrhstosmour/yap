@@ -110,6 +110,13 @@ class Settings(BaseSettings):
         RATE_LIMIT_PER_MINUTE_API_KEY: Rate limit per API key
         RATE_LIMIT_PER_MINUTE_AUTH: Rate limit per client IP on unauthenticated
             auth endpoints (login, register, forgot-password, magic-link)
+        RATE_LIMIT_GLOBAL_ENABLED: Turn the limit in front of every route on or off
+        RATE_LIMIT_GLOBAL_ANONYMOUS_PER_MINUTE: Allowance per client IP
+        RATE_LIMIT_GLOBAL_AUTHENTICATED_PER_MINUTE: Allowance per signed-in user
+        RATE_LIMIT_GLOBAL_API_KEY_PER_MINUTE: Allowance per API key
+        ABUSE_FAILURE_THRESHOLD: 404, 405 and 422 answers per caller that trigger a block
+        ABUSE_FAILURE_WINDOW_SECONDS: Window those answers are counted in
+        ABUSE_BLOCK_SECONDS: How long a blocked caller is refused
     """
 
     model_config = SettingsConfigDict(
@@ -300,6 +307,19 @@ class Settings(BaseSettings):
     RATE_LIMIT_PER_MINUTE: int = 60
     RATE_LIMIT_PER_MINUTE_API_KEY: int = 300
     RATE_LIMIT_PER_MINUTE_AUTH: int = 10
+
+    # Global abuse limits, in front of every route, see
+    # `app.api.global_rate_limit`. A valid access token is counted by user,
+    # an `X-API-Key` by a hash of its value, anything else by client IP. A caller with
+    # `ABUSE_FAILURE_THRESHOLD` 404, 405 or 422 answers within
+    # `ABUSE_FAILURE_WINDOW_SECONDS` is refused for `ABUSE_BLOCK_SECONDS`.
+    RATE_LIMIT_GLOBAL_ENABLED: bool = True
+    RATE_LIMIT_GLOBAL_ANONYMOUS_PER_MINUTE: int = 300
+    RATE_LIMIT_GLOBAL_AUTHENTICATED_PER_MINUTE: int = 600
+    RATE_LIMIT_GLOBAL_API_KEY_PER_MINUTE: int = 300
+    ABUSE_FAILURE_THRESHOLD: int = 30
+    ABUSE_FAILURE_WINDOW_SECONDS: int = 60
+    ABUSE_BLOCK_SECONDS: int = 300
 
     # SSL certificate for Celery broker TLS verification.
     SSL_CERTIFICATE_PATH: str = ""

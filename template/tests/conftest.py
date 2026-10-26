@@ -211,6 +211,10 @@ def disable_token_blacklist_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "app.services.auth_service.claim_token_for_rotation", _claim_succeeds
     )
+    # The global limiter reads this flag per request, tests of it turn it back on.
+    monkeypatch.setattr(
+        "app.api.global_rate_limit.settings.RATE_LIMIT_GLOBAL_ENABLED", False
+    )
     # Revoking mailed links reaches Redis too, tests that care for it patch
     # their own.
     monkeypatch.setattr("app.services.auth_service.purge_user_tokens", _noop_blacklist)

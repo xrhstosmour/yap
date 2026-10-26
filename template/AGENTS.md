@@ -67,6 +67,15 @@ background tasks, and comprehensive security features.
   instead of recomputing in parallel.
 - Circuit breaker for external service calls (`pybreaker`).
 - Rate limiting per user and per API key (Redis sliding window).
+- A global limit in front of every route (`GlobalRateLimitMiddleware`): 600 requests a
+  minute for a valid, not revoked access token, keyed by user, 300 for an `X-API-Key`,
+  keyed by a hash of the whole value without verifying it, 300 for anyone else, keyed by
+  client IP (IPv6 by its /64). A caller collecting 30 answers of 404, 405 or 422 in a
+  minute is refused for five minutes under that same key, counted after the response is
+  sent. Probes (`/api/v1/live`, `/ready`, `/health`), OPTIONS, WebSockets and `/admin`
+  are exempt. Counters live under their own hash tagged Redis keys, so Redis Cluster
+  works, and fail open, every Redis step is cut off after one second.
+  Tune all of it through `RATE_LIMIT_GLOBAL_*` and `ABUSE_*`.
 - Resilient container startup with retries.
 
 ### Compliance

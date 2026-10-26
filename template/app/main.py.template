@@ -29,6 +29,7 @@ from app.admin.router import router as admin_router
 from app.admin.session import NotSignedInError
 from app.api.body_limit import RequestBodyLimitMiddleware
 from app.api.client_version import ClientVersionMiddleware
+from app.api.global_rate_limit import GlobalRateLimitMiddleware
 from app.api.idempotency import IdempotencyMiddleware
 from app.api.middleware import DatabaseModeMiddleware
 from app.api.middleware import RequestLoggingMiddleware
@@ -253,6 +254,11 @@ def create_app() -> FastAPI:
         RequestBodyLimitMiddleware,
         maximum=settings.STORAGE_MAX_FILE_SIZE + 1_048_576,
     )
+
+    # Ceiling on what one caller can ask of any route, and a block for IPs
+    # that probe. Registered just before the logging layer, so a 429 is
+    # logged and, with CORS outside both, carries CORS headers.
+    app.add_middleware(GlobalRateLimitMiddleware)
 
     # Request logging middleware.
     app.add_middleware(RequestLoggingMiddleware)
