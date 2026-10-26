@@ -211,6 +211,10 @@ def disable_token_blacklist_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "app.services.auth_service.claim_token_for_rotation", _claim_succeeds
     )
+    # Revoking mailed links reaches Redis too, tests that care for it patch
+    # their own.
+    monkeypatch.setattr("app.services.auth_service.purge_user_tokens", _noop_blacklist)
+    monkeypatch.setattr("app.services.user_service.purge_user_tokens", _noop_blacklist)
 
 
 @pytest.fixture(name="override_get_redis", autouse=True)

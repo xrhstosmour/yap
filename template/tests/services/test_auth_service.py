@@ -693,6 +693,39 @@ class TestResetPassword:
         assert authenticated.id == user.id
 
     @pytest.mark.asyncio
+    async def test_weak_password_does_not_consume_the_token(
+        self, session: AsyncSession
+    ) -> None:
+        """A rejected password must leave the one-time link usable."""
+        auth_service = _auth_service(session)
+        consume = AsyncMock(return_value=uuid7())
+
+        with patch("app.core.security.verify_password_reset_token", consume):
+            with pytest.raises(ValueError, match="at least 8"):
+                await auth_service.reset_password("valid-token", "short")
+
+        consume.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_reset_revokes_mailed_links(self, session: AsyncSession) -> None:
+        """A link mailed before the reset must not outlive it."""
+        auth_service = _auth_service(session)
+        user = await auth_service.register(
+            RegisterRequest(email="passkeys@example.com", password="oldpassword1")
+        )
+
+        with (
+            patch(
+                "app.core.security.verify_password_reset_token",
+                AsyncMock(return_value=user.id),
+            ),
+            patch("app.services.auth_service.purge_user_tokens", AsyncMock()) as purge,
+        ):
+            await auth_service.reset_password("valid-token", "newpassword2")
+
+        purge.assert_awaited_once_with(user.id)
+
+    @pytest.mark.asyncio
     async def test_reset_password_invalid_token(self, session: AsyncSession) -> None:
         """Invalid or expired token should raise AuthenticationError."""
         auth_service = _auth_service(session)

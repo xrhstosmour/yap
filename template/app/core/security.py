@@ -479,9 +479,72 @@ async def _check_token_rate_limit(
 
 
 # Single-use Redis-backed token configuration.
+#
+# Each token lives at `{prefix}:{token}`. A second key, `{prefix}:user:{id}`,
+# points back at the user's live token, so issuing a new one deletes the one
+# it replaces and `purge_user_tokens` can revoke them all. A token is URL-safe
+# base64 and never contains a colon, so the two key shapes cannot collide.
 
 # Email verification.
 _EMAIL_VERIFICATION_PREFIX = "email_verification"
+
+# Password reset.
+_PASSWORD_RESET_PREFIX = "password_reset"
+
+# Magic link (passwordless login).
+_MAGIC_LINK_PREFIX = "magic_link"
+
+_USER_TOKEN_PREFIXES = (
+    _EMAIL_VERIFICATION_PREFIX,
+    _PASSWORD_RESET_PREFIX,
+    _MAGIC_LINK_PREFIX,
+)
+
+
+async def _store_user_token(
+    redis_client, prefix: str, user_id: UUID, ttl_seconds: int, value: str
+) -> str:
+    """Store a fresh token for a user, deleting the one it replaces.
+
+    Args:
+        redis_client: Redis client instance.
+        prefix: Token purpose prefix.
+        user_id: Owner of the token.
+        ttl_seconds: Lifetime of the token and of its index key.
+        value: What the token resolves to.
+
+    Returns:
+        Opaque URL-safe token string (32 bytes, base64url encoded).
+    """
+    index_key = f"{prefix}:user:{user_id}"
+    previous: str | None = await redis_client.getdel(index_key)
+    if previous:
+        await redis_client.delete(f"{prefix}:{previous}")
+
+    token = secrets.token_urlsafe(32)
+    await redis_client.setex(f"{prefix}:{token}", ttl_seconds, value)
+    await redis_client.setex(index_key, ttl_seconds, token)
+    return token
+
+
+async def purge_user_tokens(user_id: UUID) -> None:
+    """Revoke every outstanding email verification, reset and magic link token.
+
+    Called when a credential or the email address changes, so a link
+    mailed before the change cannot be used after it. A Redis outage
+    raises rather than being swallowed, the caller's transaction then
+    rolls back and the change is not half applied.
+
+    Args:
+        user_id: User whose tokens are revoked.
+    """
+    from app.core.cache import get_redis
+
+    redis = await get_redis()
+    for prefix in _USER_TOKEN_PREFIXES:
+        previous: str | None = await redis.getdel(f"{prefix}:user:{user_id}")
+        if previous:
+            await redis.delete(f"{prefix}:{previous}")
 
 
 async def create_email_verification_token(user_id: UUID) -> str:
@@ -489,7 +552,8 @@ async def create_email_verification_token(user_id: UUID) -> str:
 
     Generates a cryptographically secure random token and stores a
     mapping of token → user_id with a 24-hour TTL. The token is
-    consumed (deleted) on first successful verification.
+    consumed (deleted) on first successful verification. A newer token
+    replaces the previous one.
 
     Args:
         user_id: UUID of the user whose email is being verified.
@@ -505,10 +569,13 @@ async def create_email_verification_token(user_id: UUID) -> str:
     redis = await get_redis()
     await _check_token_rate_limit(redis, "email_verification", str(user_id), 60)
 
-    token = secrets.token_urlsafe(32)
-    key = f"{_EMAIL_VERIFICATION_PREFIX}:{token}"
-    await redis.setex(key, settings.EMAIL_VERIFICATION_TOKEN_TTL_SECONDS, str(user_id))
-    return token
+    return await _store_user_token(
+        redis,
+        _EMAIL_VERIFICATION_PREFIX,
+        user_id,
+        settings.EMAIL_VERIFICATION_TOKEN_TTL_SECONDS,
+        str(user_id),
+    )
 
 
 async def verify_email_verification_token(token: str) -> UUID | None:
@@ -537,16 +604,13 @@ async def verify_email_verification_token(token: str) -> UUID | None:
     return UUID(user_id_str)
 
 
-# Password reset.
-_PASSWORD_RESET_PREFIX = "password_reset"
-
-
 async def create_password_reset_token(user_id: UUID) -> str:
     """Create a single-use password reset token stored in Redis.
 
     Generates a cryptographically secure random token and stores a
     mapping of token → user_id with a 1-hour TTL. The token is
-    consumed (deleted) when the password is successfully reset.
+    consumed (deleted) when the password is successfully reset. A newer
+    token replaces the previous one.
 
     Args:
         user_id: UUID of the user requesting a password reset.
@@ -562,10 +626,13 @@ async def create_password_reset_token(user_id: UUID) -> str:
     redis = await get_redis()
     await _check_token_rate_limit(redis, "password_reset", str(user_id), 60)
 
-    token = secrets.token_urlsafe(32)
-    key = f"{_PASSWORD_RESET_PREFIX}:{token}"
-    await redis.setex(key, settings.PASSWORD_RESET_TOKEN_TTL_SECONDS, str(user_id))
-    return token
+    return await _store_user_token(
+        redis,
+        _PASSWORD_RESET_PREFIX,
+        user_id,
+        settings.PASSWORD_RESET_TOKEN_TTL_SECONDS,
+        str(user_id),
+    )
 
 
 async def verify_password_reset_token(token: str) -> UUID | None:
@@ -930,15 +997,12 @@ def generate_recovery_codes(count: int = 10) -> list[str]:
     return list(codes)
 
 
-# Magic link (passwordless login).
-_MAGIC_LINK_PREFIX = "magic_link"
-
-
 async def create_magic_link_token(user_id: UUID) -> str:
     """Create a single-use magic link token stored in Redis.
 
     The token expires after ``MAGIC_LINK_TOKEN_TTL_SECONDS`` and is
-    consumed (deleted) on first successful verification.
+    consumed (deleted) on first successful verification. A newer token
+    replaces the previous one.
 
     Args:
         user_id: UUID of the user requesting a login link.
@@ -954,10 +1018,13 @@ async def create_magic_link_token(user_id: UUID) -> str:
     redis = await get_redis()
     await _check_token_rate_limit(redis, "magic_link", str(user_id), 30)
 
-    token = secrets.token_urlsafe(32)
-    key = f"{_MAGIC_LINK_PREFIX}:{token}"
-    await redis.setex(key, settings.MAGIC_LINK_TOKEN_TTL_SECONDS, str(user_id))
-    return token
+    return await _store_user_token(
+        redis,
+        _MAGIC_LINK_PREFIX,
+        user_id,
+        settings.MAGIC_LINK_TOKEN_TTL_SECONDS,
+        str(user_id),
+    )
 
 
 async def verify_magic_link_token(token: str) -> UUID | None:

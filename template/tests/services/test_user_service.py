@@ -491,6 +491,26 @@ class TestUpdateProfile:
         )
 
     @pytest.mark.asyncio
+    async def test_new_password_revokes_mailed_links(
+        self, mock_user_service: UserService
+    ) -> None:
+        """A reset link mailed before a password change must die with it."""
+        user = _make_user_mock()
+        mock_user_service.user_repository.update = AsyncMock(return_value=user)
+        mock_user_service.user_repository.get = AsyncMock(return_value=user)
+
+        data = UserUpdateMe.model_construct(
+            new_password="new-password-1", current_password="correct-password"
+        )
+        with (
+            patch("app.services.user_service.verify_password", return_value=True),
+            patch("app.services.user_service.purge_user_tokens", AsyncMock()) as purge,
+        ):
+            await mock_user_service.update_profile(user, data)
+
+        purge.assert_awaited_once_with(user.id)
+
+    @pytest.mark.asyncio
     async def test_update_both_fields(self, mock_user_service: UserService) -> None:
         """Should update both full_name and email simultaneously."""
         user = _make_user_mock(full_name="Old", email="old@example.com")

@@ -28,6 +28,7 @@ from app.core.security import create_refresh_token
 from app.core.security import decode_token
 from app.core.security import generate_password_hash
 from app.core.security import is_token_blacklisted
+from app.core.security import purge_user_tokens
 from app.core.security import verify_password
 from app.core.settings import settings
 from app.core.tenant import system_context
@@ -172,6 +173,10 @@ class AuthService:
     ) -> None:
         """Hash a new password and invalidate all outstanding tokens.
 
+        Sessions are invalidated through `token_version`, and the reset,
+        magic link and verification links mailed earlier are revoked, so
+        none of them outlives the credential it was issued against.
+
         Args:
             user: User whose password is being changed.
             new_password: New plain-text password.
@@ -184,6 +189,7 @@ class AuthService:
                 "token_version": User.token_version + 1,
             },
         )
+        await purge_user_tokens(user.id)
 
     async def _send_token_email(
         self,
@@ -690,6 +696,10 @@ class AuthService:
         """
         from app.core.security import verify_password_reset_token
 
+        # Checked before the token is consumed, a weak password must not
+        # burn the only link the person has.
+        self._validate_password_strength(new_password)
+
         user_id = await verify_password_reset_token(token)
         if not user_id:
             raise AuthenticationError("Invalid or expired password reset token.")
@@ -702,7 +712,6 @@ class AuthService:
             if not user:
                 raise UserNotFoundError("User not found.")
 
-            self._validate_password_strength(new_password)
             await self._update_password_and_invalidate(user, new_password)
 
         logger.info("password_reset", user_id=str(user.id))

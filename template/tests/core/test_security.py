@@ -30,6 +30,7 @@ from app.core.security import generate_password_hash
 from app.core.security import is_legacy_api_key_hash
 from app.core.security import is_token_blacklisted
 from app.core.security import mask_api_key
+from app.core.security import purge_user_tokens
 from app.core.security import verify_api_key
 from app.core.security import verify_email_verification_token
 from app.core.security import verify_magic_link_token
@@ -299,7 +300,8 @@ def mock_redis() -> AsyncMock:
     redis = AsyncMock()
     redis.set = AsyncMock(return_value="OK")
     redis.setex = AsyncMock()
-    redis.getdel = AsyncMock()
+    redis.getdel = AsyncMock(return_value=None)
+    redis.delete = AsyncMock()
     redis.exists = AsyncMock(return_value=0)
     return redis
 
@@ -430,8 +432,7 @@ class TestEmailVerificationTokens:
             f"rate_limit:email_verification:{user_id}", "1", nx=True, ex=60
         )
         # Token was stored with the expected prefix and user_id value.
-        mock_redis.setex.assert_called_once()
-        call_args = mock_redis.setex.call_args
+        call_args = mock_redis.setex.await_args_list[0]
         assert call_args[0][0].startswith("email_verification:")
         assert call_args[0][1] == 86400  # 24h TTL default
         assert call_args[0][2] == str(user_id)
@@ -484,8 +485,7 @@ class TestPasswordResetTokens:
         mock_redis.set.assert_awaited_once_with(
             f"rate_limit:password_reset:{user_id}", "1", nx=True, ex=60
         )
-        mock_redis.setex.assert_called_once()
-        call_args = mock_redis.setex.call_args
+        call_args = mock_redis.setex.await_args_list[0]
         assert call_args[0][0].startswith("password_reset:")
         assert call_args[0][1] == 3600  # 1h TTL default
         assert call_args[0][2] == str(user_id)
@@ -535,8 +535,7 @@ class TestMagicLinkTokens:
         mock_redis.set.assert_awaited_once_with(
             f"rate_limit:magic_link:{user_id}", "1", nx=True, ex=30
         )
-        mock_redis.setex.assert_called_once()
-        call_args = mock_redis.setex.call_args
+        call_args = mock_redis.setex.await_args_list[0]
         assert call_args[0][0].startswith("magic_link:")
         assert call_args[0][1] == 900  # 15min TTL default
         assert call_args[0][2] == str(user_id)
@@ -566,6 +565,58 @@ class TestMagicLinkTokens:
         result = await verify_magic_link_token("invalid-token")
 
         assert result is None
+
+
+# One live token per user and purpose
+
+
+class TestUserTokenLifecycle:
+    """Tests for replacing and purging a user's outstanding tokens."""
+
+    @pytest.mark.asyncio
+    async def test_issuing_a_token_deletes_the_one_it_replaces(
+        self, mock_redis: AsyncMock, _patch_get_redis: None
+    ) -> None:
+        """A second reset link must leave the first one dead."""
+        user_id = uuid4()
+        mock_redis.getdel = AsyncMock(return_value="earlier-token")
+
+        token = await create_password_reset_token(user_id)
+
+        mock_redis.getdel.assert_awaited_once_with(f"password_reset:user:{user_id}")
+        mock_redis.delete.assert_awaited_once_with("password_reset:earlier-token")
+        mock_redis.setex.assert_any_await(f"password_reset:user:{user_id}", 3600, token)
+
+    @pytest.mark.asyncio
+    async def test_purge_user_tokens_revokes_every_purpose(
+        self, mock_redis: AsyncMock, _patch_get_redis: None
+    ) -> None:
+        """A password or email change kills reset, magic link and verification."""
+        user_id = uuid4()
+        live = {
+            f"email_verification:user:{user_id}": "verify-token",
+            f"password_reset:user:{user_id}": "reset-token",
+            f"magic_link:user:{user_id}": "magic-token",
+        }
+        mock_redis.getdel = AsyncMock(side_effect=lambda key: live.pop(key, None))
+
+        await purge_user_tokens(user_id)
+
+        deleted = {call.args[0] for call in mock_redis.delete.await_args_list}
+        assert deleted == {
+            "email_verification:verify-token",
+            "password_reset:reset-token",
+            "magic_link:magic-token",
+        }
+
+    @pytest.mark.asyncio
+    async def test_purge_user_tokens_with_nothing_outstanding(
+        self, mock_redis: AsyncMock, _patch_get_redis: None
+    ) -> None:
+        """Purging a user with no live tokens deletes nothing."""
+        await purge_user_tokens(uuid4())
+
+        mock_redis.delete.assert_not_awaited()
 
 
 # JWT edge cases

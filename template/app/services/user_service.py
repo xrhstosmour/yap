@@ -22,6 +22,7 @@ from app.core import SYSTEM_TENANT_ID
 from app.core.encryption import encrypted_column_names
 from app.core.logging import get_logger
 from app.core.security import generate_password_hash
+from app.core.security import purge_user_tokens
 from app.core.security import revoke_apple_token
 from app.core.security import verify_password
 from app.core.storage import delete_object
@@ -365,6 +366,8 @@ class UserService:
             updated_user = await self.user_repository.update(user.id, update_data)
             if updated_user is None:
                 return user
+            if password_changing:
+                await purge_user_tokens(user.id)
 
         refreshed_user = await self.user_repository.get(user.id)
         return refreshed_user or user

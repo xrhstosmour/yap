@@ -18,6 +18,8 @@ background tasks, and comprehensive security features.
   endpoint. Without it there is nothing to revoke.
 - API key authentication (SHA-256-hashed, prefix-based scoping).
 - `token_version` column invalidates all JWTs on password change or admin revoke.
+- One live reset, magic link and verification token per user, all revoked on a
+  password change.
 
 ### Multi-tenancy
 - `tenant_id` on all models via `BaseModel`.
