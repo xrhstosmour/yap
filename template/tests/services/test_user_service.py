@@ -564,6 +564,41 @@ class TestUpdateProfile:
         send.assert_awaited_once_with(updated)
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("current_password", "password_matches", "message"),
+        [
+            (None, True, "Current password is required"),
+            ("wrong-password", False, "Current password is incorrect"),
+        ],
+    )
+    async def test_update_email_needs_the_current_password(
+        self,
+        mock_user_service: UserService,
+        current_password: str | None,
+        password_matches: bool,
+        message: str,
+    ) -> None:
+        """A stolen session must not be able to repoint the account's email.
+
+        The new address would receive the password reset, so the change
+        stays behind the password and nothing is written without it.
+        """
+        user = _make_user_mock(email="old@example.com")
+        mock_user_service.user_repository.get_by_email = AsyncMock(return_value=None)
+        mock_user_service.user_repository.update = AsyncMock()
+
+        data = UserUpdateMe.model_construct(
+            email="new@example.com", current_password=current_password
+        )
+        with patch(
+            "app.services.user_service.verify_password", return_value=password_matches
+        ):
+            with pytest.raises(UserServiceError, match=message):
+                await mock_user_service.update_profile(user, data)
+
+        mock_user_service.user_repository.update.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_update_email_survives_the_verification_cooldown(
         self, mock_user_service: UserService
     ) -> None:
