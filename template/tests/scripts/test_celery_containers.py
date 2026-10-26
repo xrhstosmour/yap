@@ -51,9 +51,23 @@ class TestCeleryContainers:
         """The CA path has to name a file mounted into the same container."""
         path = _environment(service).get("SSL_CERTIFICATE_PATH")
         assert path, f"{service} reads the CA path from .env, a host path"
+        # A volume is a short `source:target` string or a long-form mapping.
         targets = [
-            volume.split(":")[1]
+            volume["target"] if isinstance(volume, dict) else volume.split(":")[1]
             for volume in SERVICES[service].get("volumes", [])
-            if volume.count(":") >= 1
+            if isinstance(volume, dict) or volume.count(":") >= 1
         ]
         assert path in targets, f"{service} does not mount {path}"
+
+    @pytest.mark.skipif(not USES_RABBITMQ, reason="The project has no RabbitMQ.")
+    @pytest.mark.parametrize("service", BROKER_CLIENTS)
+    def test_a_missing_broker_ca_fails_the_start(self, service: str) -> None:
+        """Docker creates a root-owned directory for a missing bind source."""
+        mounts = [
+            volume
+            for volume in SERVICES[service].get("volumes", [])
+            if isinstance(volume, dict)
+            and volume["target"].endswith("ca_certificate.pem")
+        ]
+        assert len(mounts) == 1, f"{service} mounts the CA in the short form"
+        assert mounts[0]["bind"]["create_host_path"] is False
