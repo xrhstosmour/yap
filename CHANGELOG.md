@@ -9,6 +9,10 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add `WS_MAX_CONNECTIONS_PER_USER`, `WS_MAX_CONNECTIONS_TOTAL`, `WS_MAX_ADMIN_CONNECTIONS`, `WS_MAX_LIFETIME_SECONDS` and `WS_MAX_MESSAGE_BYTES`, capping `WebSocket` connections per user and per worker, closing them after a lifetime and limiting message size
+- Add `RATE_LIMIT_GLOBAL_ENABLED`, `RATE_LIMIT_GLOBAL_ANONYMOUS_PER_MINUTE`, `RATE_LIMIT_GLOBAL_AUTHENTICATED_PER_MINUTE` and `RATE_LIMIT_GLOBAL_API_KEY_PER_MINUTE`, a per-client rate limit in front of every route, by IP for anonymous callers and by user for a valid access token
+- Add `ABUSE_FAILURE_THRESHOLD`, `ABUSE_FAILURE_WINDOW_SECONDS` and `ABUSE_BLOCK_SECONDS`, blocking an IP that triggers too many 404, 405 or 422 responses within the window
+- Add `TRAEFIK_RATE_LIMIT_AVERAGE`, `TRAEFIK_RATE_LIMIT_BURST` and `TRAEFIK_RATE_LIMIT_IP_DEPTH`, a `Traefik` edge rate limit on the app router, with a separate unlimited router for the health probes
 - Add `APP_LINK_PATHS`, the link paths the native apps open instead of the browser, claimed in `apple-app-site-association` and `assetlinks.json`
 - Add `include_tiles`, serving `OpenFreeMap` vector tiles under `/tiles/` on the API's domain through a caching proxy, so phones never reach the tile provider, with the tileset's `TileJSON` at `/tiles/planet`, set with `TILE_UPSTREAM`
 - Add `PRODUCT_NAME`, the name users see in mail subjects and bodies and in authenticator apps, defaulting to `PROJECT_NAME`, which keeps naming the service in logs and the API documentation
@@ -54,6 +58,14 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Send a verification email when a user changes their email address, and reset `is_verified` for self and admin updates
+- Require a fresh proof, a `password`, a `totp_code` or a recent `auth_time`, for 2FA enrollment and confirmation, passkey registration and `DELETE /users/me`, answering 401 with the `REAUTH_REQUIRED` code when it is missing
+- Keep one live email token per user and purpose, purge them on a password or email change, and check password strength before a reset token is used up
+- Accept a `WebSocket` handshake before refusing it with a 1008 close, and refuse a connection over a cap with a 1013 close, so clients see a real close code instead of an HTTP 403
+- Release the database session before the `WebSocket` loop starts
+- Revalidate the platform admin every 30 seconds on `/ws/metrics`
+- Count an `X-API-Key` caller under the client IP as well as its key, so rotating random keys cannot skip the per-IP limit and the abuse block
+- Pin the containers repo to the loopback bind and rate limit merges
 - Run a generated project's CI on pull requests only, plus by hand, a push to `main` repeated the run its pull request had just passed and doubled the minutes a private repository pays for
 - Stop eager-loading collection relationships, `User` and `Tenant` collections are `lazy="raise"` so one user fetch runs 2 statements instead of 5, and no longer pulls every API key in the tenant on every authenticated request
 - Move settings-driven database pool and Celery tuning into `settings.py`
@@ -70,6 +82,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Scan markdown files for inline conflict markers in `synchronize.sh`, an `AGENTS.md` conflict slipped through the scan
 - Add every setting `.env.example` has and `.env` lacks when `setup.sh` runs, so a setting a template update requires, such as `APP_DOMAIN`, no longer stops `docker compose` on a machine set up before it existed
 - Keep the name and project in `welcome.html`, which generating a project rendered away
 - Refuse to start a deployed environment whose `SMTP_HOST` is `localhost`, a loopback address or `mailpit`, where every email was reported sent and never arrived
@@ -157,6 +170,9 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Neutralize an unverified account when a Google or Apple sign in links to it instead of linking it, and bind email verification tokens to the address
+- Remove a user's passkeys on password reset
+- Pin that an email change through `update_profile` needs `current_password`
 - Run the vendored `PostgreSQL` as its own user, uid 70, the server no longer starts as root and the entrypoint skips the outdated `gosu`
 - Move the vendored `Redis` and the CI service to `8.10-alpine`, `7.4` carried high `OpenSSL` findings fixed only on the 8 line
 - Patch the vendored `Traefik` to `v3.7.15`, `nginx` to `1.30-alpine` and `SeaweedFS` to `4.48`, clearing their fixed high and critical vulnerabilities
