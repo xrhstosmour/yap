@@ -31,6 +31,7 @@ from app.core.tenant import set_current_tenant_id
 from app.core.tenant import system_context
 from app.core.ws_ticket import consume_ws_ticket
 from app.database import get_async_session
+from app.database import session_scope
 from app.models.api_key import APIKey
 from app.models.user import User
 from app.models.user import UserRole
@@ -258,8 +259,32 @@ async def get_platform_admin(current_user: SuperuserUser) -> User:
 PlatformAdminUser = Annotated[User, Depends(get_platform_admin)]
 
 
+async def load_user_for_websocket(user_id: UUID) -> User | None:
+    """Look a user up on a session of its own, closed before this returns.
+
+    A WebSocket handler holds the socket for minutes. Depending on
+    `SessionDependency` would hold a pool connection for all of them, so
+    the lookup opens a short session instead, and loads the tenant while
+    it is open, which is what the callers read afterwards.
+
+    Args:
+        user_id: The user to load.
+
+    Returns:
+        The user with its tenant loaded, or `None` if there is no such user.
+    """
+    async with session_scope() as session:
+        # Bootstrapping identity from a ticket's user ID: the tenant isn't
+        # known yet, that's what this lookup exists to establish.
+        with system_context():
+            user = await UserRepository(session).get(user_id)
+        if user is not None:
+            # Read now, the session is closed once this block ends.
+            _ = user.tenant
+    return user
+
+
 async def get_current_user_ws(
-    session: SessionDependency,
     ticket: Annotated[str | None, Query()] = None,
 ) -> User:
     """Authenticate a WebSocket connection from a single-use ticket.
@@ -272,8 +297,11 @@ async def get_current_user_ws(
     ``ticket`` here. Failures raise ``WebSocketException``, which FastAPI
     turns into a policy-violation close before the connection is accepted.
 
+    The user is read on a short session of its own, see
+    `load_user_for_websocket`, so no pool connection is held while the
+    socket is open.
+
     Args:
-        session: Database session
         ticket: Single-use ticket minted by ``POST /auth/ws-ticket``
 
     Returns:
@@ -296,11 +324,7 @@ async def get_current_user_ws(
             reason="Invalid or expired ticket",
         )
 
-    user_repository = UserRepository(session)
-    # Bootstrapping identity from the ticket's user ID: the tenant isn't
-    # known yet, that's what this lookup exists to establish.
-    with system_context():
-        user = await user_repository.get(UUID(user_id))
+    user = await load_user_for_websocket(UUID(user_id))
 
     if not user:
         raise WebSocketException(

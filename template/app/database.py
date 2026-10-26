@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 from collections.abc import Generator
+from contextlib import asynccontextmanager
 from contextvars import ContextVar
 
 from sqlalchemy import Engine
@@ -125,12 +126,16 @@ if ADDITIONAL_DATABASE_ENABLED:
     )
 
 
-async def get_async_session() -> AsyncGenerator[AsyncSession]:
-    """Get async database session for dependency injection.
+@asynccontextmanager
+async def session_scope() -> AsyncGenerator[AsyncSession]:
+    """Open a session that commits on success and rolls back on error.
 
     Routes to the additional database engine when ``database_mode_variable`` is set to
     ``ADDITIONAL_DATABASE_MODE`` (``"additional"``, e.g. from the ``X-Database-Mode``
     header middleware), otherwise routes to the main database engine.
+
+    For work that must give its pool connection back before it is done, such
+    as a WebSocket handler that looks a user up and then holds the socket open.
 
     Yields:
         AsyncSession instance for database operations.
@@ -157,6 +162,18 @@ async def get_async_session() -> AsyncGenerator[AsyncSession]:
             raise
         finally:
             await session.close()
+
+
+async def get_async_session() -> AsyncGenerator[AsyncSession]:
+    """Get async database session for dependency injection.
+
+    See `session_scope` for the routing and the commit and rollback rules.
+
+    Yields:
+        AsyncSession instance for database operations.
+    """
+    async with session_scope() as session:
+        yield session
 
 
 # Sync engine for Alembic migrations.

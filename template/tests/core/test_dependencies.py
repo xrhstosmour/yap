@@ -830,7 +830,6 @@ class TestOffboardedTenantIsRejected:
         tenant = _make_tenant(is_active=False)
         user = _make_user(tenant_id=tenant.id)
         user.tenant = tenant
-        session = AsyncMock()
 
         with (
             patch(
@@ -843,7 +842,7 @@ class TestOffboardedTenantIsRejected:
             ),
         ):
             with pytest.raises(WebSocketException) as exc_info:
-                await get_current_user_ws(session=session, ticket="valid_ticket")
+                await get_current_user_ws(ticket="valid_ticket")
 
         assert exc_info.value.code == status.WS_1008_POLICY_VIOLATION
 

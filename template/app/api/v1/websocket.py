@@ -11,17 +11,22 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import time
 from typing import Any
 from typing import cast
 
 from fastapi import APIRouter
 from fastapi import WebSocket
 from fastapi import WebSocketDisconnect
+from fastapi import status
 
 from app.core.cache import get_redis
 from app.core.logging import get_logger
+from app.core.settings import settings
+from app.core.websocket_limits import connection_limiter
 from app.dependencies import CurrentUserWS
 from app.dependencies import PlatformAdminUserWS
+from app.models.user import User
 
 router = APIRouter(prefix="/ws", tags=["WebSocket"])
 logger = get_logger("api.ws")
@@ -34,6 +39,9 @@ _active_connections: dict[str, set[WebSocket]] = {}
 _BROADCAST_CHANNEL_PREFIX = "ws:broadcast:"
 
 _relay_task: asyncio.Task[None] | None = None
+
+# How long a health socket may stay silent before it is told it timed out.
+_HEALTH_IDLE_SECONDS = 30
 
 
 def _get_metrics() -> dict:
@@ -55,26 +63,61 @@ def _get_metrics() -> dict:
     }
 
 
+async def _refuse_if_full(
+    websocket: WebSocket, user: User, *, admin: bool = False
+) -> bool:
+    """Accept and at once close a socket when a connection cap is reached.
+
+    The close code only reaches the client after the handshake, a close
+    before `accept` is answered with an HTTP 403 and the code is lost.
+
+    The ticket is already spent by the time the cap is known, because the
+    user, and so which cap applies, is only learnt from it. A refused client
+    mints another, which is one cheap request.
+
+    Args:
+        websocket: The incoming, not yet accepted, connection.
+        user: Who is connecting.
+        admin: Whether this is a platform admin metrics socket.
+
+    Returns:
+        True when the socket was refused and the handler must return, False
+        when a slot was taken, which the handler must give back with
+        `connection_limiter.release`.
+    """
+    if connection_limiter.acquire(user.id, admin=admin):
+        return False
+    logger.warning("ws_connection_cap_reached", user_id=str(user.id))
+    await websocket.accept()
+    await websocket.close(code=status.WS_1013_TRY_AGAIN_LATER)
+    return True
+
+
 @router.websocket("/metrics")
 async def metrics_stream(
-    websocket: WebSocket, _current_user: PlatformAdminUserWS
+    websocket: WebSocket, current_user: PlatformAdminUserWS
 ) -> None:
     """Stream live system metrics every 2 seconds.
 
-    Requires an authenticated superuser (see ``get_current_superuser_ws``)
-    since this exposes internal DB connection-pool state.
+    Requires an authenticated platform admin (see ``get_platform_admin_ws``)
+    since this exposes internal DB connection-pool state. Bounded per user
+    and per worker, and closed after `WS_MAX_LIFETIME_SECONDS`.
 
     Args:
         websocket: Incoming WebSocket connection
-        _current_user: Authenticated superuser, validated before accept
+        current_user: Authenticated platform admin, validated before accept
     """
-    await websocket.accept()
-    client_id = str(id(websocket))
-    _active_connections.setdefault("metrics", set()).add(websocket)
-    logger.info("ws_metrics_connected", client_id=client_id)
+    if await _refuse_if_full(websocket, current_user, admin=True):
+        return
 
+    client_id = str(id(websocket))
+    deadline = time.monotonic() + settings.WS_MAX_LIFETIME_SECONDS
     try:
-        while True:
+        await websocket.accept()
+        _active_connections.setdefault("metrics", set()).add(websocket)
+        logger.info("ws_metrics_connected", client_id=client_id)
+
+        while time.monotonic() < deadline:
             metrics = _get_metrics()
             await websocket.send_json(
                 {
@@ -83,41 +126,76 @@ async def metrics_stream(
                 }
             )
             await asyncio.sleep(2)
+        await websocket.close(code=status.WS_1000_NORMAL_CLOSURE)
     except WebSocketDisconnect:
         logger.info("ws_metrics_disconnected", client_id=client_id)
     except Exception as e:
         logger.error("ws_metrics_error", error=str(e))
     finally:
         _active_connections.setdefault("metrics", set()).discard(websocket)
+        connection_limiter.release(current_user.id, admin=True)
 
 
 @router.websocket("/health")
-async def health_socket(websocket: WebSocket, _current_user: CurrentUserWS) -> None:
+async def health_socket(websocket: WebSocket, current_user: CurrentUserWS) -> None:
     """WebSocket health check endpoint.
 
-    Requires an authenticated user (see ``get_current_user_ws``).
+    Requires an authenticated user (see ``get_current_user_ws``). Bounded
+    per user and per worker, closed after `WS_MAX_LIFETIME_SECONDS`, and
+    closed with 1009 on a message over `WS_MAX_MESSAGE_BYTES`.
 
     Args:
         websocket: Incoming WebSocket connection
-        _current_user: Authenticated user, validated before accept
+        current_user: Authenticated user, validated before accept
     """
-    await websocket.accept()
-    client_id = str(id(websocket))
-    logger.info("ws_health_connected", client_id=client_id)
+    if await _refuse_if_full(websocket, current_user):
+        return
 
+    client_id = str(id(websocket))
+    deadline = time.monotonic() + settings.WS_MAX_LIFETIME_SECONDS
     try:
+        await websocket.accept()
+        _active_connections.setdefault("health", set()).add(websocket)
+        logger.info("ws_health_connected", client_id=client_id)
+
         while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                await websocket.close(code=status.WS_1000_NORMAL_CLOSURE)
+                return
+
             await websocket.send_json(
                 {"type": "ping", "timestamp": asyncio.get_event_loop().time()}
             )
-            data = await asyncio.wait_for(websocket.receive_text(), timeout=30)
-            if data == "pong":
+            try:
+                message = await asyncio.wait_for(
+                    websocket.receive(), timeout=min(_HEALTH_IDLE_SECONDS, remaining)
+                )
+            except TimeoutError:
+                if time.monotonic() >= deadline:
+                    await websocket.close(code=status.WS_1000_NORMAL_CLOSURE)
+                    return
+                await websocket.send_json({"type": "timeout", "ok": False})
+                await websocket.close()
+                return
+
+            if message["type"] == "websocket.disconnect":
+                logger.info("ws_health_disconnected", client_id=client_id)
+                return
+
+            text = message.get("text")
+            payload = text.encode() if text is not None else message.get("bytes") or b""
+            if len(payload) > settings.WS_MAX_MESSAGE_BYTES:
+                logger.warning("ws_health_message_too_big", client_id=client_id)
+                await websocket.close(code=status.WS_1009_MESSAGE_TOO_BIG)
+                return
+            if text == "pong":
                 await websocket.send_json({"type": "pong", "ok": True})
-    except TimeoutError:
-        await websocket.send_json({"type": "timeout", "ok": False})
-        await websocket.close()
     except WebSocketDisconnect:
         logger.info("ws_health_disconnected", client_id=client_id)
+    finally:
+        _active_connections.setdefault("health", set()).discard(websocket)
+        connection_limiter.release(current_user.id)
 
 
 async def broadcast_notification(message: str, channel: str = "general") -> None:

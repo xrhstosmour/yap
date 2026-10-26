@@ -83,7 +83,12 @@ background tasks, and comprehensive security features.
 - Sentry/GlitchTip error tracking.
 - Health endpoints: REST liveness/readiness probes, plus authenticated WebSocket
   streams for live health (`/ws/health`, any user) and metrics (`/ws/metrics`,
-  superuser-only, pool/cache stats).
+  superuser-only, pool/cache stats). Sockets look the user up on a short session
+  of their own, so none holds a pool connection while open. Per worker process:
+  `WS_MAX_CONNECTIONS_PER_USER` (3) and `WS_MAX_CONNECTIONS_TOTAL` (200), accepted
+  and closed with code 1013, `WS_MAX_ADMIN_CONNECTIONS` (5) for `/ws/metrics` sockets,
+  which do not count against the total, `WS_MAX_LIFETIME_SECONDS` (3600),
+  `WS_MAX_MESSAGE_BYTES` (1024, close code 1009).
 
 ## Where things live
 

@@ -383,6 +383,16 @@ class Settings(BaseSettings):
     TOTP_REPLAY_TTL: int = 90
     TOTP_RECOVERY_CODE_COUNT: int = 10
 
+    # WebSocket limits, counted per worker process. A socket past either
+    # connection cap is refused with close code 1013, one past the lifetime
+    # is closed so the client reconnects, one sending more than the message
+    # size is closed with 1009.
+    WS_MAX_CONNECTIONS_PER_USER: int = 3
+    WS_MAX_CONNECTIONS_TOTAL: int = 200
+    WS_MAX_ADMIN_CONNECTIONS: int = 5
+    WS_MAX_LIFETIME_SECONDS: int = 3600
+    WS_MAX_MESSAGE_BYTES: int = 1024
+
     # Email (SMTP) - for sending transactional emails.
     SMTP_HOST: str = "localhost"
     SMTP_PORT: int = 587
