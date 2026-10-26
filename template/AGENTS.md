@@ -88,7 +88,10 @@ background tasks, and comprehensive security features.
   `WS_MAX_CONNECTIONS_PER_USER` (3) and `WS_MAX_CONNECTIONS_TOTAL` (200), accepted
   and closed with code 1013, `WS_MAX_ADMIN_CONNECTIONS` (5) for `/ws/metrics` sockets,
   which do not count against the total, `WS_MAX_LIFETIME_SECONDS` (3600),
-  `WS_MAX_MESSAGE_BYTES` (1024, close code 1009).
+  `WS_MAX_MESSAGE_BYTES` (1024, close code 1009). `/ws/metrics` re-checks the
+  admin about every 30 seconds. A ticket carries the user's `token_version`, so a
+  revoke voids unused tickets and, on `/ws/metrics` only, closes the open socket.
+  `/ws/health` checks it at the handshake alone.
 
 ## Where things live
 

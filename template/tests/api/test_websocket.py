@@ -22,6 +22,7 @@ from app.api.v1.websocket import router as ws_router
 from app.core import SYSTEM_TENANT_ID
 from app.core.settings import settings
 from app.core.websocket_limits import ConnectionLimiter
+from app.core.ws_ticket import WebSocketTicket
 from app.database import get_async_session
 from app.dependencies import UserRepository
 from app.models.user import User
@@ -61,13 +62,14 @@ def _stub_ws_ticket(
     user_id: object | None,
     *,
     ticket: str = TEST_TICKET,
+    token_version: int = 1,
 ) -> None:
     """Make `consume_ws_ticket(ticket)` resolve to `user_id` without touching Redis."""
 
-    async def _consume(presented: str) -> str | None:
+    async def _consume(presented: str) -> WebSocketTicket | None:
         if presented != ticket:
             return None
-        return None if user_id is None else str(user_id)
+        return None if user_id is None else WebSocketTicket(str(user_id), token_version)
 
     monkeypatch.setattr("app.dependencies.consume_ws_ticket", _consume)
 
@@ -175,6 +177,19 @@ class TestHealthWebSocket:
         user = _make_user(is_active=False)
         _stub_user_repository(monkeypatch, user)
         _stub_ws_ticket(monkeypatch, user.id)
+
+        with pytest.raises(WebSocketDisconnect) as excinfo:
+            with ws_client.websocket_connect(f"/api/v1/ws/health?ticket={TEST_TICKET}"):
+                pass
+        assert excinfo.value.code == 1008
+
+    def test_websocket_rejects_a_ticket_from_before_a_revoke(
+        self, ws_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A ticket minted before a `token_version` bump is refused."""
+        user = _make_user()
+        _stub_user_repository(monkeypatch, user)
+        _stub_ws_ticket(monkeypatch, user.id, token_version=user.token_version - 1)
 
         with pytest.raises(WebSocketDisconnect) as excinfo:
             with ws_client.websocket_connect(f"/api/v1/ws/health?ticket={TEST_TICKET}"):
@@ -447,6 +462,103 @@ class TestSessionIsNotHeldWhileConnected:
         ) as websocket:
             websocket.receive_json()
             assert events == ["opened", "closed"]
+
+
+class TestMetricsRevalidation:
+    """A platform admin who loses the role loses the stream."""
+
+    def test_a_demoted_admin_is_closed(
+        self, ws_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The next re-check finds a plain user and ends the socket with 1008."""
+        monkeypatch.setattr("app.api.v1.websocket._METRICS_REVALIDATE_EVERY", 1)
+        monkeypatch.setattr("app.api.v1.websocket._METRICS_INTERVAL_SECONDS", 0.01)
+        admin = _make_user(role=UserRole.SUPERUSER, tenant_id=SYSTEM_TENANT_ID)
+        demoted = User(
+            id=admin.id,
+            email=admin.email,
+            hashed_password="hashed",
+            is_active=True,
+            role=UserRole.USER,
+            tenant_id=SYSTEM_TENANT_ID,
+        )
+        lookups = [admin, demoted]
+
+        async def _get(self: UserRepository, _user_id: object) -> User:
+            return lookups.pop(0) if len(lookups) > 1 else lookups[0]
+
+        monkeypatch.setattr(UserRepository, "get", _get)
+        _stub_ws_ticket(monkeypatch, admin.id)
+
+        with ws_client.websocket_connect(
+            f"/api/v1/ws/metrics?ticket={TEST_TICKET}"
+        ) as websocket:
+            assert websocket.receive_json()["type"] == "metrics"
+            with pytest.raises(WebSocketDisconnect) as excinfo:
+                while True:
+                    websocket.receive_json()
+
+        assert excinfo.value.code == 1008
+
+    def test_an_admin_whose_tokens_were_revoked_is_closed(
+        self, ws_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A bumped `token_version` ends the stream at the next re-check."""
+        monkeypatch.setattr("app.api.v1.websocket._METRICS_REVALIDATE_EVERY", 1)
+        monkeypatch.setattr("app.api.v1.websocket._METRICS_INTERVAL_SECONDS", 0.01)
+        admin = _make_user(role=UserRole.SUPERUSER, tenant_id=SYSTEM_TENANT_ID)
+        revoked = User(
+            id=admin.id,
+            email=admin.email,
+            hashed_password="hashed",
+            is_active=True,
+            role=UserRole.SUPERUSER,
+            tenant_id=SYSTEM_TENANT_ID,
+            token_version=admin.token_version + 1,
+        )
+        lookups = [admin, revoked]
+
+        async def _get(self: UserRepository, _user_id: object) -> User:
+            return lookups.pop(0) if len(lookups) > 1 else lookups[0]
+
+        monkeypatch.setattr(UserRepository, "get", _get)
+        _stub_ws_ticket(monkeypatch, admin.id, token_version=admin.token_version)
+
+        with ws_client.websocket_connect(
+            f"/api/v1/ws/metrics?ticket={TEST_TICKET}"
+        ) as websocket:
+            with pytest.raises(WebSocketDisconnect) as excinfo:
+                while True:
+                    websocket.receive_json()
+
+        assert excinfo.value.code == 1008
+
+    def test_an_admin_who_is_deactivated_is_closed(
+        self, ws_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Deactivation ends the stream the same way."""
+        monkeypatch.setattr("app.api.v1.websocket._METRICS_REVALIDATE_EVERY", 1)
+        monkeypatch.setattr("app.api.v1.websocket._METRICS_INTERVAL_SECONDS", 0.01)
+        admin = _make_user(role=UserRole.SUPERUSER, tenant_id=SYSTEM_TENANT_ID)
+        inactive = _make_user(
+            role=UserRole.SUPERUSER, tenant_id=SYSTEM_TENANT_ID, is_active=False
+        )
+        lookups = [admin, inactive]
+
+        async def _get(self: UserRepository, _user_id: object) -> User:
+            return lookups.pop(0) if len(lookups) > 1 else lookups[0]
+
+        monkeypatch.setattr(UserRepository, "get", _get)
+        _stub_ws_ticket(monkeypatch, admin.id)
+
+        with ws_client.websocket_connect(
+            f"/api/v1/ws/metrics?ticket={TEST_TICKET}"
+        ) as websocket:
+            with pytest.raises(WebSocketDisconnect) as excinfo:
+                while True:
+                    websocket.receive_json()
+
+        assert excinfo.value.code == 1008
 
 
 class TestBroadcastNotification:

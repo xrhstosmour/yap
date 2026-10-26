@@ -589,7 +589,7 @@ async def create_websocket_ticket(current_user: CurrentUser) -> WSTicketResponse
     Pass the returned ticket as the `ticket` query parameter when opening
     a `/ws/*` connection. Expires in `WS_TICKET_TTL_SECONDS` if unused.
     """
-    ticket = await create_ws_ticket(str(current_user.id))
+    ticket = await create_ws_ticket(str(current_user.id), current_user.token_version)
     return WSTicketResponse(ticket=ticket, expires_in=WS_TICKET_TTL_SECONDS)
 
 

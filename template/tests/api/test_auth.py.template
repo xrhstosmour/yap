@@ -1413,10 +1413,11 @@ class TestWebSocketTicket:
         )
         access_token = create_access_token(subject=user.id)
 
-        captured: dict[str, str] = {}
+        captured: dict[str, object] = {}
 
-        async def _fake_create_ws_ticket(user_id: str) -> str:
+        async def _fake_create_ws_ticket(user_id: str, token_version: int) -> str:
             captured["user_id"] = user_id
+            captured["token_version"] = token_version
             return "fake-ticket"
 
         monkeypatch.setattr("app.api.v1.auth.create_ws_ticket", _fake_create_ws_ticket)
@@ -1431,6 +1432,7 @@ class TestWebSocketTicket:
         assert data["ticket"] == "fake-ticket"
         assert data["expires_in"] == 30
         assert captured["user_id"] == str(user.id)
+        assert captured["token_version"] == user.token_version
 
     async def test_requires_authentication(self, client: AsyncClient) -> None:
         """Without a bearer token the request should be rejected."""

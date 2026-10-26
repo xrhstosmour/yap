@@ -242,6 +242,15 @@ def is_platform_admin(user: User) -> bool:
     return user.role == UserRole.SUPERUSER and user.tenant_id == SYSTEM_TENANT_ID
 
 
+def is_usable_platform_admin(user: User) -> bool:
+    """Whether a user may still hold a platform admin WebSocket.
+
+    The one rule for both the handshake and the later re-checks: the account
+    is active, still a platform admin, and its tenant is usable.
+    """
+    return user.is_active and is_platform_admin(user) and is_tenant_usable(user.tenant)
+
+
 async def get_platform_admin(current_user: SuperuserUser) -> User:
     """Get the current user if they administer the whole platform.
 
@@ -317,19 +326,25 @@ async def get_current_user_ws(
             reason="Missing authentication ticket",
         )
 
-    user_id = await consume_ws_ticket(ticket)
-    if not user_id:
+    claim = await consume_ws_ticket(ticket)
+    if not claim:
         raise WebSocketException(
             code=status.WS_1008_POLICY_VIOLATION,
             reason="Invalid or expired ticket",
         )
 
-    user = await load_user_for_websocket(UUID(user_id))
+    user = await load_user_for_websocket(UUID(claim.user_id))
 
     if not user:
         raise WebSocketException(
             code=status.WS_1008_POLICY_VIOLATION,
             reason="User not found",
+        )
+
+    if user.token_version != claim.token_version:
+        raise WebSocketException(
+            code=status.WS_1008_POLICY_VIOLATION,
+            reason="Session revoked",
         )
 
     if not user.is_active:
@@ -379,9 +394,9 @@ SuperuserUserWS = Annotated[User, Depends(get_current_superuser_ws)]
 async def get_platform_admin_ws(current_user: SuperuserUserWS) -> User:
     """Get the current WebSocket user if they administer the whole platform.
 
-    See `is_platform_admin`.
+    See `is_usable_platform_admin`.
     """
-    if not is_platform_admin(current_user):
+    if not is_usable_platform_admin(current_user):
         raise WebSocketException(
             code=status.WS_1008_POLICY_VIOLATION,
             reason="Not enough permissions",

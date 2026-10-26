@@ -14,6 +14,7 @@ import json
 import time
 from typing import Any
 from typing import cast
+from uuid import UUID
 
 from fastapi import APIRouter
 from fastapi import WebSocket
@@ -26,6 +27,8 @@ from app.core.settings import settings
 from app.core.websocket_limits import connection_limiter
 from app.dependencies import CurrentUserWS
 from app.dependencies import PlatformAdminUserWS
+from app.dependencies import is_usable_platform_admin
+from app.dependencies import load_user_for_websocket
 from app.models.user import User
 
 router = APIRouter(prefix="/ws", tags=["WebSocket"])
@@ -39,6 +42,11 @@ _active_connections: dict[str, set[WebSocket]] = {}
 _BROADCAST_CHANNEL_PREFIX = "ws:broadcast:"
 
 _relay_task: asyncio.Task[None] | None = None
+
+# A metrics frame goes out this often, and the admin is looked up again every
+# `_METRICS_REVALIDATE_EVERY` of them, about 30 seconds.
+_METRICS_INTERVAL_SECONDS = 2
+_METRICS_REVALIDATE_EVERY = 15
 
 # How long a health socket may stay silent before it is told it timed out.
 _HEALTH_IDLE_SECONDS = 30
@@ -100,8 +108,11 @@ async def metrics_stream(
     """Stream live system metrics every 2 seconds.
 
     Requires an authenticated platform admin (see ``get_platform_admin_ws``)
-    since this exposes internal DB connection-pool state. Bounded per user
-    and per worker, and closed after `WS_MAX_LIFETIME_SECONDS`.
+    since this exposes internal DB connection-pool state. The admin is
+    looked up again every `_METRICS_REVALIDATE_EVERY` messages, so a demoted
+    or deactivated one loses the stream within about 30 seconds instead of
+    keeping it until the socket drops. A socket is closed after
+    `WS_MAX_LIFETIME_SECONDS` regardless.
 
     Args:
         websocket: Incoming WebSocket connection
@@ -112,12 +123,22 @@ async def metrics_stream(
 
     client_id = str(id(websocket))
     deadline = time.monotonic() + settings.WS_MAX_LIFETIME_SECONDS
+    iteration = 0
     try:
         await websocket.accept()
         _active_connections.setdefault("metrics", set()).add(websocket)
         logger.info("ws_metrics_connected", client_id=client_id)
 
         while time.monotonic() < deadline:
+            if iteration and iteration % _METRICS_REVALIDATE_EVERY == 0:
+                if not await _is_still_platform_admin(
+                    current_user.id, current_user.token_version
+                ):
+                    logger.info("ws_metrics_revoked", client_id=client_id)
+                    await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                    return
+            iteration += 1
+
             metrics = _get_metrics()
             await websocket.send_json(
                 {
@@ -125,7 +146,7 @@ async def metrics_stream(
                     "data": metrics,
                 }
             )
-            await asyncio.sleep(2)
+            await asyncio.sleep(_METRICS_INTERVAL_SECONDS)
         await websocket.close(code=status.WS_1000_NORMAL_CLOSURE)
     except WebSocketDisconnect:
         logger.info("ws_metrics_disconnected", client_id=client_id)
@@ -134,6 +155,25 @@ async def metrics_stream(
     finally:
         _active_connections.setdefault("metrics", set()).discard(websocket)
         connection_limiter.release(current_user.id, admin=True)
+
+
+async def _is_still_platform_admin(user_id: UUID, token_version: int) -> bool:
+    """Look a platform admin up again and say whether they still are one.
+
+    Args:
+        user_id: The admin the socket was opened for.
+        token_version: The `token_version` the socket was opened with.
+
+    Returns:
+        False when the user is gone, no longer a usable platform admin, or
+        their tokens were revoked since the socket was opened.
+    """
+    user = await load_user_for_websocket(user_id)
+    return (
+        user is not None
+        and user.token_version == token_version
+        and is_usable_platform_admin(user)
+    )
 
 
 @router.websocket("/health")

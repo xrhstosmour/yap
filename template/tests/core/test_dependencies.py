@@ -22,6 +22,7 @@ from jwt import ExpiredSignatureError
 from jwt import InvalidTokenError
 
 from app.core.security import DUMMY_API_KEY_HASH
+from app.core.ws_ticket import WebSocketTicket
 from app.dependencies import get_api_key_auth
 from app.dependencies import get_current_superuser
 from app.dependencies import get_current_user
@@ -835,7 +836,7 @@ class TestOffboardedTenantIsRejected:
             patch(
                 "app.dependencies.consume_ws_ticket",
                 new_callable=AsyncMock,
-                return_value=str(user.id),
+                return_value=WebSocketTicket(str(user.id), user.token_version),
             ),
             patch.object(
                 UserRepository, "get", new_callable=AsyncMock, return_value=user
