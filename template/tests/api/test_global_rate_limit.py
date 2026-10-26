@@ -51,6 +51,7 @@ class FakeRedis:
         self.expiries: dict[str, int] = {}
         self.values: dict[str, str] = {}
         self.events: list[str] = []
+        self.retry_afters: dict[str, int] = {}
 
     async def eval(self, script: str, _keys: int, key: str, *arguments: str) -> Any:  # noqa: ANN401
         if script == COUNT_FAILURE_SCRIPT:
@@ -67,7 +68,10 @@ class FakeRedis:
         if count < limit:
             self.windows[key] = count + 1
             return [0, limit - count - 1, 0]
-        return [1, 0, 42]
+        retry_after = next(
+            (wait for part, wait in self.retry_afters.items() if part in key), 42
+        )
+        return [1, 0, retry_after]
 
     def _count_failure(
         self, key: str, block_key: str, window: str, threshold: str, block: str
@@ -303,26 +307,76 @@ class TestTiers:
     def test_a_forged_secret_does_not_spend_the_real_keys_allowance(self) -> None:
         """Knowing a key ID is not enough to land in its bucket."""
         for index in range(API_KEY_LIMIT + 2):
-            _client().get("/thing", headers={"X-API-Key": f"key_abc:forged-{index}"})
+            _client("198.51.100.50").get(
+                "/thing", headers={"X-API-Key": f"key_abc:forged-{index}"}
+            )
 
         real = _client().get("/thing", headers={"X-API-Key": "key_abc:secret"})
 
         assert real.status_code == 200
 
-    def test_an_api_key_is_counted_apart_from_the_address_and_other_keys(self) -> None:
-        """Neither the address nor another key shares its allowance."""
-        for _ in range(API_KEY_LIMIT):
+    def test_rotating_api_keys_still_hit_the_address_allowance(self) -> None:
+        """A fresh made-up key per request is not a fresh allowance."""
+        client = _client()
+
+        statuses = [
+            client.get("/thing", headers={"X-API-Key": f"a:{index}"}).status_code
+            for index in range(ANONYMOUS_LIMIT + 1)
+        ]
+
+        assert statuses == [200] * ANONYMOUS_LIMIT + [429]
+
+    def test_the_longest_wait_among_refusing_allowances_is_reported(
+        self, redis: FakeRedis
+    ) -> None:
+        """Coming back after the key frees up would still meet the address limit."""
+        redis.retry_afters = {"ratelimit:global:key": 5, "ratelimit:global:ip": 40}
+        client = _client()
+        headers = {"X-API-Key": "key_abc:secret"}
+        for _ in range(ANONYMOUS_LIMIT):
+            client.get("/thing", headers=headers)
+        # The key allowance is spent too, from other addresses.
+        for index in range(API_KEY_LIMIT):
+            _client(f"198.51.100.{index}").get("/thing", headers=headers)
+
+        response = client.get("/thing", headers=headers)
+
+        assert response.status_code == 429
+        assert int(response.headers["retry-after"]) >= 40
+
+    def test_a_revoked_token_with_an_api_key_falls_back_to_the_address(
+        self, redis: FakeRedis
+    ) -> None:
+        """A logged-out token does not earn the user bucket next to a key."""
+        token = create_access_token(subject="user-8")
+        identifier = jwt.decode(token, options={"verify_signature": False})["jti"]
+        redis.values[f"{_JWT_BLACKLIST_PREFIX}:{identifier}"] = "1"
+        client = _client()
+        headers = {**_bearer(token), "X-API-Key": "key_abc:secret"}
+
+        statuses = [
+            client.get("/thing", headers=headers).status_code
+            for _ in range(ANONYMOUS_LIMIT + 1)
+        ]
+
+        assert statuses == [200] * ANONYMOUS_LIMIT + [429]
+        assert not any("user-8" in key for key in redis.windows)
+
+    def test_an_api_key_adds_to_the_address_count_not_replaces_it(self) -> None:
+        """Key requests spend the address allowance too, other keys do not share."""
+        for _ in range(ANONYMOUS_LIMIT):
             _client().get("/thing", headers={"X-API-Key": "key_abc:secret"})
 
-        other_key = _client().get("/thing", headers={"X-API-Key": "key_def:secret"})
-
+        assert _client().get("/thing").status_code == 429
+        other_key = _client("198.51.100.4").get(
+            "/thing", headers={"X-API-Key": "key_def:secret"}
+        )
         assert other_key.status_code == 200
-        assert _client().get("/thing").status_code == 200
         assert (
-            _client("198.51.100.4")
+            _client("198.51.100.5")
             .get("/thing", headers={"X-API-Key": "key_abc:secret"})
             .status_code
-            == 429
+            == 200
         )
 
     def test_clients_in_one_ipv6_block_share_the_allowance(self) -> None:
@@ -540,17 +594,35 @@ class TestFailureBlock:
 
         assert refused.status_code == 429
         assert all("key_abc" not in key for key in redis.counters)
-        assert all(key.startswith("abuse:{key:") for key in redis.counters)
-        other = _client().get("/thing", headers={"X-API-Key": "key_def:secret"})
+        other = _client("198.51.100.31").get(
+            "/thing", headers={"X-API-Key": "key_def:secret"}
+        )
         assert other.status_code == 200
 
+    def test_rotating_api_keys_cannot_reset_the_address_block(
+        self, redis: FakeRedis
+    ) -> None:
+        """Probing under a new made-up key each time still blocks the address."""
+        client = _client()
+        for index in range(FAILURE_THRESHOLD):
+            assert (
+                client.get("/missing", headers={"X-API-Key": f"a:{index}"}).status_code
+                == 404
+            )
+
+        refused = client.get("/thing", headers={"X-API-Key": "a:fresh"})
+        assert refused.status_code == 429
+        assert refused.headers["retry-after"] == "300"
+
     def test_a_forged_secret_cannot_block_the_real_key(self, redis: FakeRedis) -> None:
-        """Failures under a made-up secret block that secret alone."""
+        """Failures under a made-up secret block that secret and its address."""
         for _ in range(FAILURE_THRESHOLD):
             _client().get("/missing", headers={"X-API-Key": "key_abc:forged"})
 
         forged = _client().get("/thing", headers={"X-API-Key": "key_abc:forged"})
-        real = _client().get("/thing", headers={"X-API-Key": "key_abc:secret"})
+        real = _client("198.51.100.32").get(
+            "/thing", headers={"X-API-Key": "key_abc:secret"}
+        )
 
         assert forged.status_code == 429
         assert real.status_code == 200
