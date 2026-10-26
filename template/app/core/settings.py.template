@@ -113,7 +113,8 @@ class Settings(BaseSettings):
         RATE_LIMIT_GLOBAL_ENABLED: Turn the limit in front of every route on or off
         RATE_LIMIT_GLOBAL_ANONYMOUS_PER_MINUTE: Allowance per client IP
         RATE_LIMIT_GLOBAL_AUTHENTICATED_PER_MINUTE: Allowance per signed-in user
-        RATE_LIMIT_GLOBAL_API_KEY_PER_MINUTE: Allowance per API key
+        RATE_LIMIT_GLOBAL_API_KEY_PER_MINUTE: Extra cap per API key, on top of the
+            per IP one, so from one IP the smaller of the two applies
         ABUSE_FAILURE_THRESHOLD: 404, 405 and 422 answers per caller that trigger a block
         ABUSE_FAILURE_WINDOW_SECONDS: Window those answers are counted in
         ABUSE_BLOCK_SECONDS: How long a blocked caller is refused

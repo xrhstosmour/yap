@@ -6,16 +6,19 @@ everything else answered anybody, as fast as they could send. This sits in
 front of every route and does two things:
 
 - Sliding window per caller: a valid, not revoked access token is keyed by
-  its user, an `X-API-Key` by a hash of the whole header value, anything else
-  by client IP. Each has its own allowance. The key is not verified here, it
-  only names a bucket, so a made-up one gets a bucket of its own and cannot
-  spend or block the real key's. IPv6 clients are keyed by their /64, the
-  smallest block one subscriber usually holds, or the allowance would be one
-  per address.
+  its user, anything else by client IP. Each has its own allowance. An
+  `X-API-Key` is counted under a hash of the whole header value as well as
+  under the client IP, never instead of it. The key is not verified here
+  (this runs before authentication), so a made-up one costs nothing and a
+  fresh one per request would otherwise be a fresh allowance. The key bucket
+  can only add a limit, the IP one always applies, and a made-up key cannot
+  spend or block the real key's bucket. IPv6 clients are keyed by their /64,
+  the smallest block one subscriber usually holds, or the allowance would be
+  one per address.
 - A block for callers that probe: one that collects too many 404, 405 and
   422 answers in a minute is refused outright for a while, counted under the
-  same key as its allowance. 401, 403 and 429 are not counted, honest
-  clients meet those.
+  same keys as its allowance, so a key caller is also counted, and blocked,
+  by IP. 401, 403 and 429 are not counted, honest clients meet those.
 
 Both keep their counters in Redis under their own key prefixes, so they
 never add to the per-user count in `app.dependencies`. Both fail open when
@@ -135,10 +138,11 @@ def normalize_client_address(host: str | None) -> str:
 def _api_key_identifier(headers: Headers) -> str | None:
     """Name the bucket of an `X-API-Key` by a hash of the whole header value.
 
-    Nothing is looked up or verified, see the module note. Hashing the secret
-    too means that knowing a key's ID is not enough to land in its bucket,
-    so a forged secret cannot spend its allowance or get it blocked. The
-    value is hashed so it never reaches Redis or the logs as it is.
+    Nothing is looked up or verified, see the module note, so the bucket
+    only adds a limit on top of the IP one. Hashing the secret too means that
+    knowing a key's ID is not enough to land in its bucket, so a forged
+    secret cannot spend its allowance or get it blocked. The value is hashed
+    so it never reaches Redis or the logs as it is.
 
     Args:
         headers: Request headers.
@@ -233,7 +237,7 @@ class GlobalRateLimitMiddleware:
             return
 
         address = self._address(scope)
-        caller, token_identifier = self._caller(scope, address)
+        callers, token_identifier = self._callers(scope, address)
 
         try:
             async with asyncio.timeout(REDIS_TIMEOUT_SECONDS):
@@ -241,26 +245,39 @@ class GlobalRateLimitMiddleware:
                 if token_identifier is not None and await is_token_blacklisted(
                     token_identifier
                 ):
-                    caller = address
-                # The block and the allowance are independent keys, asked
-                # together so they cost one round trip of latency, not two.
-                remaining_block, (allowed, _, retry_after) = await asyncio.gather(
-                    self._remaining_block(caller),
-                    self.limiters[caller.scope].check_rate_limit(caller.identifier),
+                    callers = [address]
+                # Every block and allowance is an independent key, asked
+                # together so they cost one round trip of latency, not one
+                # per key. Every allowance is charged, even when another one
+                # refuses, so the IP is counted for every request.
+                blocks, results = await asyncio.gather(
+                    asyncio.gather(*(self._remaining_block(c) for c in callers)),
+                    asyncio.gather(
+                        *(
+                            self.limiters[c.scope].check_rate_limit(c.identifier)
+                            for c in callers
+                        )
+                    ),
                 )
         except (TimeoutError, *REDIS_ERRORS):
             logger.warning("global_rate_limit_unavailable", exc_info=True)
-            remaining_block, allowed, retry_after = 0, True, 0
+            blocks, results = [0], [(True, 0, 0)]
+        remaining_block = max(blocks)
         if remaining_block > 0:
             await self._refuse(scope, receive, send, remaining_block)
             return
-        if not allowed:
-            logger.warning(
-                "global_rate_limit_exceeded",
-                caller_scope=caller.scope,
-                caller=caller.identifier,
-            )
-            await self._refuse(scope, receive, send, retry_after)
+        # Come back only once every refusing allowance has room again.
+        waits = []
+        for caller, (allowed, _, retry_after) in zip(callers, results, strict=False):
+            if not allowed:
+                logger.warning(
+                    "global_rate_limit_exceeded",
+                    caller_scope=caller.scope,
+                    caller=caller.identifier,
+                )
+                waits.append(retry_after)
+        if waits:
+            await self._refuse(scope, receive, send, max(waits))
             return
 
         failed = False
@@ -279,7 +296,7 @@ class GlobalRateLimitMiddleware:
                 and not message.get("more_body", False)
             ):
                 failed = False
-                await self._count_failure(caller)
+                await asyncio.gather(*(self._count_failure(c) for c in callers))
 
         await self.app(scope, receive, counting_send)
 
@@ -290,21 +307,24 @@ class GlobalRateLimitMiddleware:
         return Caller("ip", normalize_client_address(client[0] if client else None))
 
     @staticmethod
-    def _caller(scope: Scope, address: Caller) -> tuple[Caller, str | None]:
-        """Pick who a request is counted as: its user, its API key, its IP.
+    def _callers(scope: Scope, address: Caller) -> tuple[list[Caller], str | None]:
+        """Pick who a request is counted as: its user, or its IP.
+
+        An API key is unverified here, so it never replaces the IP, it is
+        counted next to it. A valid token replaces it, it is signed.
 
         Returns:
-            The caller, and the `jti` to check for revocation when it is a
-            user.
+            The callers, and the `jti` to check for revocation when the
+            caller is a user.
         """
         headers = Headers(scope=scope)
         user = _authenticated_user(headers)
         if user is not None:
-            return Caller("user", user[0]), user[1]
+            return [Caller("user", user[0])], user[1]
         key_identifier = _api_key_identifier(headers)
         if key_identifier is not None:
-            return Caller("key", key_identifier), None
-        return address, None
+            return [Caller("key", key_identifier), address], None
+        return [address], None
 
     @staticmethod
     async def _remaining_block(caller: Caller) -> int:
