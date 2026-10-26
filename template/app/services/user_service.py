@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import SYSTEM_TENANT_ID
 from app.core.encryption import encrypted_column_names
 from app.core.logging import get_logger
+from app.core.security import TokenRateLimitError
 from app.core.security import generate_password_hash
 from app.core.security import purge_user_tokens
 from app.core.security import revoke_apple_token
@@ -41,6 +42,7 @@ from app.repositories.user_repository import UserRepository
 from app.schemas.user import UserCreate
 from app.schemas.user import UserUpdate
 from app.schemas.user import UserUpdateMe
+from app.services.auth_service import AuthService
 from app.services.personal_data_service import PersonalDataService
 from app.services.username import UsernameTakenError
 from app.services.username import resolve_username_change
@@ -252,17 +254,21 @@ class UserService:
             update_data["role"] = data.role
 
         # Check for email conflicts if email is being changed.
-        email = update_data.get("email")
-        if isinstance(email, str) and email != user.email:
-            existing = await self.user_repository.get_by_email(email)
+        email_changing = False
+        if data.email is not None and data.email != user.email:
+            email_changing = True
+            existing = await self.user_repository.get_by_email(data.email)
             if existing:
                 raise UserServiceError("Email already in use")
+            update_data["is_verified"] = False
 
         if update_data:
             updated_user = await self.user_repository.update(user_id, update_data)
             if not updated_user:
                 return None
             user = updated_user
+            if email_changing:
+                await self._reverify_email(user)
 
             # Log update. `changes` lands in `AuditLog.changes`, a plain
             # unencrypted JSON column, so PII values (e.g. the new email)
@@ -362,15 +368,38 @@ class UserService:
             # an under-count there is a stale-token bug, not just a cosmetic one.
             update_data["token_version"] = User.token_version + 1
 
+        if email_changing:
+            update_data["is_verified"] = False
+
         if update_data:
             updated_user = await self.user_repository.update(user.id, update_data)
             if updated_user is None:
                 return user
-            if password_changing:
+            if email_changing:
+                await self._reverify_email(updated_user)
+            elif password_changing:
                 await purge_user_tokens(user.id)
 
         refreshed_user = await self.user_repository.get(user.id)
         return refreshed_user or user
+
+    async def _reverify_email(self, user: User) -> None:
+        """Revoke mailed links and ask the new address to prove itself.
+
+        Called once `user` already holds its new email. Links mailed to the
+        old address stop working, and a verification link goes to the new
+        one. The per-user cooldown on verification mail is swallowed, as
+        elsewhere, the person can ask again from
+        `POST /auth/send-verification-email`.
+
+        Args:
+            user: The user, after the email change.
+        """
+        await purge_user_tokens(user.id)
+        try:
+            await AuthService(self.session).send_verification_email(user)
+        except TokenRateLimitError:
+            logger.info("verification_email_throttled", user_id=str(user.id))
 
     async def delete(
         self,
