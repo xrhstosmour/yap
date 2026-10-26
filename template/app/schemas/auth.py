@@ -320,6 +320,29 @@ class TwoFactorEnrollResponse(BaseSchema):
     )
 
 
+class ReauthenticationRequest(BaseSchema):
+    """Fresh proof of the account owner, for actions that need it.
+
+    Send the authenticator code when 2FA is on, else the password. An
+    account with neither (made by a social sign in) sends nothing and must
+    have signed in within the last ten minutes.
+
+    Attributes:
+        password: The account password.
+        totp_code: 6-digit code from the authenticator app.
+    """
+
+    password: PasswordString | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_PASSWORD_BYTES,
+        description="Account password",
+    )
+    totp_code: str | None = Field(
+        default=None, min_length=6, max_length=6, description="6-digit TOTP code"
+    )
+
+
 class TwoFactorConfirmRequest(BaseSchema):
     """Request for POST /auth/2fa/confirm.
 
@@ -328,6 +351,25 @@ class TwoFactorConfirmRequest(BaseSchema):
     """
 
     totp_code: str = Field(min_length=6, max_length=6, description="6-digit TOTP code")
+
+
+class TwoFactorEnrollmentConfirmRequest(TwoFactorConfirmRequest):
+    """Request for POST /auth/2fa/confirm, with the proof it now asks for.
+
+    The code here is the first one from the new authenticator, it proves
+    the scan worked, not who is asking. `password` does the second.
+
+    Attributes:
+        password: The account password, unless the account has none, in
+            which case a sign in less than ten minutes old stands in.
+    """
+
+    password: PasswordString | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_PASSWORD_BYTES,
+        description="Account password",
+    )
 
 
 class TwoFactorVerifyRequest(BaseSchema):

@@ -237,6 +237,23 @@ def override_get_redis_fixture() -> None:
         app.dependency_overrides.pop(get_redis, None)
 
 
+@pytest.fixture(name="no_totp_attempt_counter")
+def no_totp_attempt_counter_fixture() -> Generator[None]:
+    """Stand in for the Redis counters behind the TOTP and password proof attempt limits."""
+    from unittest.mock import AsyncMock
+    from unittest.mock import patch
+
+    from app.services.two_factor_service import TwoFactorAuthService
+
+    with (
+        patch.object(TwoFactorAuthService, "_check_totp_rate_limit", AsyncMock()),
+        patch.object(TwoFactorAuthService, "_reset_totp_rate_limit", AsyncMock()),
+        patch.object(TwoFactorAuthService, "_check_password_proof_limit", AsyncMock()),
+        patch.object(TwoFactorAuthService, "_reset_password_proof_limit", AsyncMock()),
+    ):
+        yield
+
+
 @pytest.fixture(name="override_settings")
 def override_settings_fixture() -> Settings:
     """Override settings for testing."""

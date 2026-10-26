@@ -183,6 +183,29 @@ async def get_current_user(
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
+async def get_auth_time(token: AccessTokenDependency) -> int | None:
+    """Read when the person last signed in from the access token.
+
+    Args:
+        token: JWT access token.
+
+    Returns:
+        The `auth_time` claim in epoch seconds, `None` when the token has
+        none or cannot be decoded. `CurrentUser` rejects a bad token
+        itself, this only reads the claim.
+    """
+    try:
+        value = decode_token(token).get("auth_time")
+    except (InvalidTokenError, ExpiredSignatureError):
+        return None
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    return None
+
+
+AuthTimeDependency = Annotated[int | None, Depends(get_auth_time)]
+
+
 async def get_current_superuser(current_user: CurrentUser) -> User:
     """Get the current user if they are a superuser.
 

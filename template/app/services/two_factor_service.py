@@ -92,6 +92,18 @@ class TwoFactorAlreadyEnabledError(TwoFactorError):
     pass
 
 
+class InvalidProofPasswordError(TwoFactorError):
+    """The password offered as fresh proof is wrong."""
+
+    pass
+
+
+class ProofPasswordRateLimitError(TwoFactorRateLimitError):
+    """Too many wrong passwords offered as fresh proof."""
+
+    pass
+
+
 class TwoFactorAuthService:
     """Service for TOTP-based two-factor authentication.
 
@@ -558,6 +570,86 @@ class TwoFactorAuthService:
         await self._store_recovery_code_hashes(user.id, json.loads(pending))
 
         logger.info("totp_recovery_codes_renewed", user_id=str(user.id))
+
+    # Step-up proof
+
+    async def verify_proof_code(self, user: User, totp_code: str) -> None:
+        """Check an authenticator code given as fresh proof of the owner.
+
+        Shares the attempt limit and replay guard of every other TOTP
+        check, so a stolen session cannot guess codes here for free.
+
+        Args:
+            user: The signed-in user being asked to prove themselves.
+            totp_code: 6-digit TOTP code from the authenticator app.
+
+        Raises:
+            TwoFactorRateLimitError: If rate limit exceeded.
+            InvalidTOTPError: If the code is malformed, wrong or replayed.
+            TwoFactorError: If the account has no readable TOTP secret.
+        """
+        await self._check_totp_rate_limit(user.id)
+
+        totp_code = _validate_totp_code(totp_code)
+
+        if not user.totp_secret_encrypted:
+            raise TwoFactorError("User has no TOTP secret.")
+
+        try:
+            secret = decrypt(user.totp_secret_encrypted)
+        except Exception as e:
+            raise TwoFactorError("TOTP secret corrupted, please re-enroll") from e
+
+        if not verify_totp(secret, totp_code):
+            raise InvalidTOTPError("Invalid TOTP code.")
+
+        await self._prevent_replay(user.id, totp_code)
+        await self._reset_totp_rate_limit(user.id)
+
+    async def verify_proof_password(self, user: User, password: str) -> None:
+        """Check the account password given as fresh proof of the owner.
+
+        Has an attempt counter of its own, so somebody holding a session
+        and guessing passwords cannot use up the owner's TOTP attempts and
+        lock them out of confirming an enrollment.
+
+        Args:
+            user: The signed-in user being asked to prove themselves.
+            password: The account password.
+
+        Raises:
+            ProofPasswordRateLimitError: If rate limit exceeded.
+            InvalidProofPasswordError: If the password is wrong.
+        """
+        await self._check_password_proof_limit(user.id)
+
+        if not await asyncio.to_thread(verify_password, password, user.hashed_password):
+            raise InvalidProofPasswordError("Password is incorrect.")
+
+        await self._reset_password_proof_limit(user.id)
+
+    async def _reset_password_proof_limit(self, user_id: UUID) -> None:
+        """Clear the password proof attempt counter."""
+        redis = await get_redis()
+        await redis.delete(f"password_proof_attempts:{user_id}")
+
+    async def _check_password_proof_limit(self, user_id: UUID) -> None:
+        """Rate-limit password proofs on a counter apart from the TOTP one.
+
+        Same window and attempt limit as `_check_totp_rate_limit`.
+
+        Raises:
+            ProofPasswordRateLimitError: If the limit is exceeded.
+        """
+        redis = await get_redis()
+        key = f"password_proof_attempts:{user_id}"
+        count = await redis.incr(key)
+        await redis.expire(key, settings.TOTP_RATE_LIMIT_WINDOW)
+        if count > settings.TOTP_MAX_ATTEMPTS:
+            logger.warning("password_proof_rate_limit_exceeded", user_id=str(user_id))
+            raise ProofPasswordRateLimitError(
+                "Too many password attempts. Try again in a few minutes."
+            )
 
     # Private helpers
 

@@ -473,23 +473,54 @@ class TestRevokeUserSessions:
 class TestGdprDeleteMe:
     """Tests for DELETE /api/v1/users/me."""
 
-    @pytest.mark.usefixtures("override_get_async_session")
+    @pytest.mark.usefixtures("override_get_async_session", "no_totp_attempt_counter")
     async def test_delete_me_success(
         self, client: AsyncClient, session: AsyncSession
     ) -> None:
-        """Deleting own account should return 204."""
+        """Deleting own account with the password should return 204."""
         auth_service = _auth_service(session)
         user = await auth_service.register(
             RegisterRequest(email="todelete@{{ project_slug }}.com", password="password123")
         )
         token = create_access_token(subject=user.id)
 
-        response = await client.delete(
+        response = await client.request(
+            "DELETE",
             "/api/v1/users/me",
             headers={"Authorization": f"Bearer {token}"},
+            json={"password": "password123"},
         )
 
         assert response.status_code == 204
+
+    @pytest.mark.usefixtures("override_get_async_session", "no_totp_attempt_counter")
+    @pytest.mark.parametrize("body", [None, {"password": "not-the-password"}])
+    async def test_delete_me_refuses_a_bare_access_token(
+        self,
+        client: AsyncClient,
+        session: AsyncSession,
+        body: dict[str, str] | None,
+    ) -> None:
+        """A stolen access token alone must not delete the account."""
+        auth_service = _auth_service(session)
+        user = await auth_service.register(
+            RegisterRequest(email="keeper@{{ project_slug }}.com", password="password123")
+        )
+        token = create_access_token(subject=user.id)
+
+        response = await client.request(
+            "DELETE",
+            "/api/v1/users/me",
+            headers={"Authorization": f"Bearer {token}"},
+            json=body,
+        )
+
+        assert response.status_code == 401
+        assert response.json()["detail"]["code"] == "REAUTH_REQUIRED"
+        with system_context():
+            stored = await auth_service.user_repository.get(user.id)
+        assert stored is not None
+        assert stored.deleted_at is None
 
     @pytest.mark.usefixtures("override_get_async_session")
     async def test_delete_me_unauthenticated(self, client: AsyncClient) -> None:

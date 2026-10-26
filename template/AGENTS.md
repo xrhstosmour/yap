@@ -18,6 +18,14 @@ background tasks, and comprehensive security features.
   endpoint. Without it there is nothing to revoke.
 - API key authentication (SHA-256-hashed, prefix-based scoping).
 - `token_version` column invalidates all JWTs on password change or admin revoke.
+- Step-up proof for actions that give a stolen session a lasting hold:
+  `POST /auth/2fa/enroll`, `POST /auth/2fa/confirm`, `POST /auth/webauthn/register/begin`
+  and `DELETE /users/me`. The authenticator code when 2FA is on, else the password,
+  else, for an account with no password, a sign in under ten minutes old, read from
+  the `auth_time` claim a refresh keeps as it was. Failure is 401 with code
+  `REAUTH_REQUIRED`. Wrong passwords count against an attempt limit of their own,
+  apart from the one for authenticator codes. Accounts made by a social sign in carry
+  an unusable password hash (`!` prefix).
 - A provider identity (Google, Apple) that links to an email-matched account which
   is not verified first takes the account over: unusable password, `token_version`
   bumped, mailed links revoked, passkeys, 2FA and API keys removed, email marked

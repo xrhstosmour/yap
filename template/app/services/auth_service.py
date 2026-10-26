@@ -387,15 +387,32 @@ class AuthService:
 
         return user
 
-    def create_tokens(self, user: User) -> TokenResponse:
+    def create_tokens(
+        self, user: User, refreshed_from: dict[str, Any] | None = None
+    ) -> TokenResponse:
         """Create access and refresh tokens for user.
+
+        Both tokens carry `auth_time`, when the person last proved who they
+        are. A sign in stamps it with now, a refresh passes the payload it
+        exchanged and keeps that value as it was, so refreshing never makes
+        a session look freshly signed in. A refresh token minted before the
+        claim existed carries none, and its descendants carry none.
 
         Args:
             user: Authenticated user
+            refreshed_from: Decoded payload of the refresh token being
+                exchanged, `None` for a sign in.
 
         Returns:
             TokenResponse with access and refresh tokens
         """
+        auth_time = (
+            int(datetime.now(UTC).timestamp())
+            if refreshed_from is None
+            else refreshed_from.get("auth_time")
+        )
+        auth_time_claim = {} if auth_time is None else {"auth_time": auth_time}
+
         # Access token.
         access_token = create_access_token(
             subject=str(user.id),
@@ -404,13 +421,17 @@ class AuthService:
                 "tenant_id": str(user.tenant_id) if user.tenant_id else None,
                 "role": user.role.value,
                 "token_version": user.token_version,
+                **auth_time_claim,
             },
         )
 
         # Refresh token.
         refresh_token = create_refresh_token(
             subject=str(user.id),
-            additional_claims={"token_version": user.token_version},
+            additional_claims={
+                "token_version": user.token_version,
+                **auth_time_claim,
+            },
         )
 
         return TokenResponse(
@@ -512,7 +533,7 @@ class AuthService:
             if not await self._claim_payload_token(payload):
                 raise AuthenticationError("Refresh token has been revoked")
 
-            return self.create_tokens(user)
+            return self.create_tokens(user, refreshed_from=payload)
 
         except (
             InvalidTokenError,

@@ -1,5 +1,6 @@
 """Unit tests for `AuthService`."""
 
+import time
 from datetime import UTC
 from datetime import datetime
 from typing import Any
@@ -468,6 +469,13 @@ class TestAuthService:
         assert tokens.refresh_token
         assert tokens.token_type == "bearer"
         assert tokens.expires_in > 0
+        assert abs(decode_token(tokens.access_token)["auth_time"] - time.time()) < 5
+        assert "auth_time" in decode_token(tokens.refresh_token)
+
+        # A token from before the claim existed does not gain one on refresh.
+        legacy = auth_service.create_tokens(user, refreshed_from={})
+        assert "auth_time" not in decode_token(legacy.access_token)
+        assert "auth_time" not in decode_token(legacy.refresh_token)
 
     @pytest.mark.asyncio
     async def test_change_password_wrong_current_raises_error(
