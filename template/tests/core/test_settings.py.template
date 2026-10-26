@@ -272,6 +272,22 @@ class TestSettingsValidationProduction:
                 REDIS_PASSWORD="",
             )
 
+    def test_production_raises_on_empty_rabbitmq_password(self) -> None:
+        """A broker with no password would let anyone on its network enqueue tasks."""
+        from app.core.settings import Settings
+
+        with pytest.raises(ValueError, match="RABBITMQ_PASSWORD is not set"):
+            Settings(
+                _env_file=None,
+                ENVIRONMENT="production",
+                SECRET_KEY="a-real-secret-key-value-0123456789",
+                POSTGRESQL_PASSWORD="a-real-password",
+                FIRST_SUPERUSER_PASSWORD="a-real-password",
+                CRYPTO_KEY="dGVzdC1rZXktMzItYnl0ZXMtbG9uZw==",
+                REDIS_PASSWORD="a-real-password",
+                RABBITMQ_PASSWORD="",
+            )
+
     def test_staging_raises_on_empty_secret_key(self) -> None:
         """Settings should raise ValueError in staging when SECRET_KEY is empty."""
         from app.core.settings import Settings
