@@ -140,6 +140,7 @@ class TestAccountWithoutPassword:
     @pytest.mark.parametrize(
         "auth_time",
         [None, 0, int(time.time()) - REAUTH_WINDOW_SECONDS - 5],
+        ids=["missing", "epoch", "past_window"],
     )
     async def test_old_or_missing_sign_in_is_refused(
         self, auth_time: int | None
