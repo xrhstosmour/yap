@@ -325,7 +325,7 @@ info "Running copier update..."
         --answers-file "$ANSWERS_FILE" ${copier_data[@]+"${copier_data[@]}"} 2>&1 || exit 2
 
     # Check for unresolved merge conflicts from copier update.
-    if grep -rq "^<<<<<<< \|^>>>>>>> " --include="*.py" --include="*.yml" --include="*.yaml" --include="*.sh" --include="*.toml" . 2>/dev/null; then
+    if grep -rq "^<<<<<<< \|^>>>>>>> " --include="*.py" --include="*.yml" --include="*.yaml" --include="*.sh" --include="*.toml" --include="*.md" . 2>/dev/null; then
         warn "Inline merge conflicts found. Search for '<<<<<<<' markers and resolve them before committing."
         exit 3
     fi
