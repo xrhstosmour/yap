@@ -68,11 +68,15 @@ background tasks, and comprehensive security features.
 - Circuit breaker for external service calls (`pybreaker`).
 - Rate limiting per user and per API key (Redis sliding window).
 - A global limit in front of every route (`GlobalRateLimitMiddleware`): 600 requests a
-  minute for a valid, not revoked access token, keyed by user, 300 for an `X-API-Key`,
-  keyed by a hash of the whole value without verifying it, 300 for anyone else, keyed by
-  client IP (IPv6 by its /64). A caller collecting 30 answers of 404, 405 or 422 in a
-  minute is refused for five minutes under that same key, counted after the response is
-  sent. Probes (`/api/v1/live`, `/ready`, `/health`), OPTIONS, WebSockets and `/admin`
+  minute for a valid, not revoked access token, keyed by user, 300 for anyone else, keyed
+  by client IP (IPv6 by its /64). An `X-API-Key` is not verified there, so it is counted
+  under a hash of the whole value (300) as well as under the IP, never instead of it, and
+  a made-up key per request gains nothing. A caller collecting 30 answers of 404, 405 or
+  422 in a minute is refused for five minutes under those same keys, counted after the
+  response is sent. Because a key is also counted by IP, from one IP its cap is the
+  smaller of the key and IP allowances, and a key holder sharing an IP (or IPv6 /64) with
+  a prober is blocked with it. That is kept on purpose, it is what closes the bypass.
+  Probes (`/api/v1/live`, `/ready`, `/health`), OPTIONS, WebSockets and `/admin`
   are exempt. Counters live under their own hash tagged Redis keys, so Redis Cluster
   works, and fail open, every Redis step is cut off after one second. With Traefik, the
   router also has an edge limit per client (IPv6 by its /64), above the application's own
