@@ -48,6 +48,18 @@ def _make_user(
     )
 
 
+def _assert_refused_with_1008(ws_client: TestClient, url: str) -> None:
+    """Assert the handshake completes and the server then closes with 1008.
+
+    A refusal before `accept` reaches a real client as an HTTP 403 with no
+    close code, so the socket has to be accepted first.
+    """
+    with ws_client.websocket_connect(url) as websocket:
+        with pytest.raises(WebSocketDisconnect) as excinfo:
+            websocket.receive_json()
+    assert excinfo.value.code == 1008
+
+
 def _stub_user_repository(monkeypatch: pytest.MonkeyPatch, user: User | None) -> None:
     """Make `UserRepository.get()` return `user` without touching the DB."""
 
@@ -152,10 +164,7 @@ class TestHealthWebSocket:
 
     def test_websocket_rejects_missing_ticket(self, ws_client: TestClient) -> None:
         """Connecting without a ticket should be rejected before any data is sent."""
-        with pytest.raises(WebSocketDisconnect) as excinfo:
-            with ws_client.websocket_connect("/api/v1/ws/health"):
-                pass
-        assert excinfo.value.code == 1008
+        _assert_refused_with_1008(ws_client, "/api/v1/ws/health")
 
     def test_websocket_rejects_invalid_ticket(
         self, ws_client: TestClient, monkeypatch: pytest.MonkeyPatch
@@ -163,12 +172,9 @@ class TestHealthWebSocket:
         """Connecting with an unrecognized ticket should be rejected."""
         _stub_ws_ticket(monkeypatch, None)
 
-        with pytest.raises(WebSocketDisconnect) as excinfo:
-            with ws_client.websocket_connect(
-                "/api/v1/ws/health?ticket=not-a-real-ticket"
-            ):
-                pass
-        assert excinfo.value.code == 1008
+        _assert_refused_with_1008(
+            ws_client, "/api/v1/ws/health?ticket=not-a-real-ticket"
+        )
 
     def test_websocket_rejects_inactive_user(
         self, ws_client: TestClient, monkeypatch: pytest.MonkeyPatch
@@ -178,10 +184,7 @@ class TestHealthWebSocket:
         _stub_user_repository(monkeypatch, user)
         _stub_ws_ticket(monkeypatch, user.id)
 
-        with pytest.raises(WebSocketDisconnect) as excinfo:
-            with ws_client.websocket_connect(f"/api/v1/ws/health?ticket={TEST_TICKET}"):
-                pass
-        assert excinfo.value.code == 1008
+        _assert_refused_with_1008(ws_client, f"/api/v1/ws/health?ticket={TEST_TICKET}")
 
     def test_websocket_rejects_a_ticket_from_before_a_revoke(
         self, ws_client: TestClient, monkeypatch: pytest.MonkeyPatch
@@ -191,10 +194,7 @@ class TestHealthWebSocket:
         _stub_user_repository(monkeypatch, user)
         _stub_ws_ticket(monkeypatch, user.id, token_version=user.token_version - 1)
 
-        with pytest.raises(WebSocketDisconnect) as excinfo:
-            with ws_client.websocket_connect(f"/api/v1/ws/health?ticket={TEST_TICKET}"):
-                pass
-        assert excinfo.value.code == 1008
+        _assert_refused_with_1008(ws_client, f"/api/v1/ws/health?ticket={TEST_TICKET}")
 
     def test_websocket_rejects_unknown_user(
         self, ws_client: TestClient, monkeypatch: pytest.MonkeyPatch
@@ -203,10 +203,7 @@ class TestHealthWebSocket:
         _stub_user_repository(monkeypatch, None)
         _stub_ws_ticket(monkeypatch, uuid4())
 
-        with pytest.raises(WebSocketDisconnect) as excinfo:
-            with ws_client.websocket_connect(f"/api/v1/ws/health?ticket={TEST_TICKET}"):
-                pass
-        assert excinfo.value.code == 1008
+        _assert_refused_with_1008(ws_client, f"/api/v1/ws/health?ticket={TEST_TICKET}")
 
 
 class TestMetricsWebSocket:
@@ -214,10 +211,7 @@ class TestMetricsWebSocket:
 
     def test_websocket_rejects_missing_ticket(self, ws_client: TestClient) -> None:
         """Connecting without a ticket should be rejected before any data is sent."""
-        with pytest.raises(WebSocketDisconnect) as excinfo:
-            with ws_client.websocket_connect("/api/v1/ws/metrics"):
-                pass
-        assert excinfo.value.code == 1008
+        _assert_refused_with_1008(ws_client, "/api/v1/ws/metrics")
 
     def test_websocket_rejects_non_superuser(
         self, ws_client: TestClient, monkeypatch: pytest.MonkeyPatch
@@ -227,12 +221,7 @@ class TestMetricsWebSocket:
         _stub_user_repository(monkeypatch, user)
         _stub_ws_ticket(monkeypatch, user.id)
 
-        with pytest.raises(WebSocketDisconnect) as excinfo:
-            with ws_client.websocket_connect(
-                f"/api/v1/ws/metrics?ticket={TEST_TICKET}"
-            ):
-                pass
-        assert excinfo.value.code == 1008
+        _assert_refused_with_1008(ws_client, f"/api/v1/ws/metrics?ticket={TEST_TICKET}")
 
     def test_websocket_connect_as_superuser_receives_metrics(
         self, ws_client: TestClient, monkeypatch: pytest.MonkeyPatch
