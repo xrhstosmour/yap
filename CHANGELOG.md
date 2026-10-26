@@ -82,6 +82,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Generate only the `RabbitMQ` certificates when `setup.sh` finds the CA missing, with `scripts/assemble.py --certificates-only`, the full run copied every service directory over local edits, and stop with an error when the CA path is a directory a compose run created
 - Scan markdown files for inline conflict markers in `synchronize.sh`, an `AGENTS.md` conflict slipped through the scan
 - Add every setting `.env.example` has and `.env` lacks when `setup.sh` runs, so a setting a template update requires, such as `APP_DOMAIN`, no longer stops `docker compose` on a machine set up before it existed
 - Keep the name and project in `welcome.html`, which generating a project rendered away

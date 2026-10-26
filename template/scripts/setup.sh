@@ -271,9 +271,12 @@ set_url_password REDIS_URL "${CURRENT_REDIS_PASSWORD}" .env
 # that runs setup.sh without a prior sync has empty certificate directories,
 # which crashes RabbitMQ with failed_to_prepare_configuration.
 rabbitmq_cert="$PROJECT_DIR/containers/distribute/brokers/rabbitmq/certificates/ca_certificate.pem"
+if [ -d "$rabbitmq_cert" ]; then
+    error "$rabbitmq_cert is a directory, a compose run created it before the certificate existed. Remove it and run setup.sh again."
+fi
 if [ ! -f "$rabbitmq_cert" ] && [ -f "$PROJECT_DIR/scripts/assemble.py" ]; then
     info "Generating TLS certificates..."
-    python3 "$PROJECT_DIR/scripts/assemble.py" >/dev/null 2>&1 || \
+    python3 "$PROJECT_DIR/scripts/assemble.py" --certificates-only || \
         warn "Certificate generation failed; RabbitMQ TLS may not start"
 fi
 
