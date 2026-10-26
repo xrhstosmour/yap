@@ -381,6 +381,26 @@ class TwoFactorAuthService:
         )
         return int((await self.session.execute(query)).scalar_one())
 
+    async def clear_enrollment(self, user_id: UUID) -> None:
+        """Drop a user's TOTP secret and recovery codes without a code.
+
+        For when the account was taken back from someone who may have set
+        the factor up. The caller supplies the tenant context, as
+        `UserRepository.update` needs one.
+
+        Args:
+            user_id: User whose second factor is removed.
+        """
+        await self.user_repository.update(
+            user_id,
+            {
+                "is_2fa_enabled": False,
+                "totp_secret_encrypted": None,
+                "totp_confirmed_at": None,
+            },
+        )
+        await self._delete_all_recovery_codes(user_id)
+
     # Management
 
     async def disable(self, user: User, totp_code: str) -> None:

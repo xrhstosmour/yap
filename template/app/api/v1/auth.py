@@ -66,7 +66,6 @@ from app.services.auth_service import MinimumAgeNotConfirmedError
 from app.services.auth_service import OAuthProviderUnavailableError
 from app.services.auth_service import UserInactiveError
 from app.services.auth_service import UsernameAlreadyExistsError
-from app.services.auth_service import UserNotFoundError
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 logger = get_logger("api.auth")
@@ -627,18 +626,19 @@ async def verify_email(
             detail=INVALID_VERIFICATION_TOKEN,
         )
 
-    user_id = await verify_email_verification_token(token)
+    verified_token = await verify_email_verification_token(token)
 
-    if not user_id:
+    if not verified_token:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=INVALID_VERIFICATION_TOKEN,
         )
 
+    user_id, email_hash = verified_token
     service = AuthService(session)
     try:
-        await service.verify_user(user_id)
-    except UserNotFoundError as e:
+        await service.verify_user(user_id, email_hash)
+    except AuthenticationError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=INVALID_VERIFICATION_TOKEN,

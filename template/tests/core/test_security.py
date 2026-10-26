@@ -12,6 +12,7 @@ import pytest
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
+from app.core.encryption import crypto
 from app.core.security import DUMMY_PASSWORD_HASH
 from app.core.security import MAX_PASSWORD_BYTES
 from app.core.security import TokenRateLimitError
@@ -27,7 +28,9 @@ from app.core.security import decode_token
 from app.core.security import generate_api_key
 from app.core.security import generate_api_key_id
 from app.core.security import generate_password_hash
+from app.core.security import generate_unusable_password_hash
 from app.core.security import is_legacy_api_key_hash
+from app.core.security import is_password_usable
 from app.core.security import is_token_blacklisted
 from app.core.security import mask_api_key
 from app.core.security import purge_user_tokens
@@ -425,17 +428,17 @@ class TestEmailVerificationTokens:
         """Token is created, rate-limited, and stored in Redis."""
         user_id = uuid4()
 
-        token = await create_email_verification_token(user_id)
+        token = await create_email_verification_token(user_id, "a@example.com")
 
         # Rate limit check was called.
         mock_redis.set.assert_awaited_once_with(
             f"rate_limit:email_verification:{user_id}", "1", nx=True, ex=60
         )
-        # Token was stored with the expected prefix and user_id value.
+        # Token was stored with the expected prefix, bound to the address.
         call_args = mock_redis.setex.await_args_list[0]
         assert call_args[0][0].startswith("email_verification:")
         assert call_args[0][1] == 86400  # 24h TTL default
-        assert call_args[0][2] == str(user_id)
+        assert call_args[0][2] == f"{user_id}:{crypto.hash_for_search('a@example.com')}"
         # Returned token is a non-empty string.
         assert isinstance(token, str)
         assert len(token) > 0
@@ -446,14 +449,26 @@ class TestEmailVerificationTokens:
     async def test_verify_email_verification_token_valid(
         self, mock_redis: AsyncMock, _patch_get_redis: None
     ) -> None:
-        """Valid token returns the stored user UUID."""
+        """Valid token returns the stored user UUID and address hash."""
         user_id = uuid4()
-        mock_redis.getdel = AsyncMock(return_value=str(user_id))
+        mock_redis.getdel = AsyncMock(return_value=f"{user_id}:hmac:abc=")
 
         result = await verify_email_verification_token("valid-token")
 
-        assert result == user_id
+        assert result == (user_id, "hmac:abc=")
         mock_redis.getdel.assert_awaited_once_with("email_verification:valid-token")
+
+    @pytest.mark.asyncio
+    async def test_verify_email_verification_token_without_address_hash(
+        self, mock_redis: AsyncMock, _patch_get_redis: None
+    ) -> None:
+        """A token stored before addresses were bound carries an empty hash."""
+        user_id = uuid4()
+        mock_redis.getdel = AsyncMock(return_value=str(user_id))
+
+        result = await verify_email_verification_token("old-token")
+
+        assert result == (user_id, "")
 
     @pytest.mark.asyncio
     async def test_verify_email_verification_token_invalid(
@@ -617,6 +632,22 @@ class TestUserTokenLifecycle:
         await purge_user_tokens(uuid4())
 
         mock_redis.delete.assert_not_awaited()
+
+
+class TestUnusablePassword:
+    """Tests for the marker on accounts that have no password."""
+
+    def test_unusable_hash_never_verifies(self) -> None:
+        """No candidate, not even the marker itself, matches an unusable hash."""
+        hashed = generate_unusable_password_hash()
+
+        assert is_password_usable(hashed) is False
+        assert verify_password("anything-at-all", hashed) is False
+        assert verify_password(hashed, hashed) is False
+
+    def test_real_hash_is_usable(self) -> None:
+        """A bcrypt hash is a usable password."""
+        assert is_password_usable(generate_password_hash("password123")) is True
 
 
 # JWT edge cases

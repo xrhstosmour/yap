@@ -114,6 +114,36 @@ class APIKeyRepository(BaseRepository[APIKey]):
         """
         return await self.update(key_id, {"is_active": False})
 
+    async def revoke_all_for_user(self, user_id: UUID) -> int:
+        """Revoke every live API key a user owns, for good.
+
+        Soft-deleted as well as deactivated, as account deletion does, so
+        the keys stop authenticating and cannot be switched back on. Not
+        tenant filtered, the caller names the user.
+
+        Args:
+            user_id: Owner of the keys.
+
+        Returns:
+            Count of keys revoked.
+        """
+        from sqlalchemy import update
+
+        now = datetime.now(UTC)
+        statement = (
+            update(APIKey)
+            .where(
+                and_(
+                    APIKey.user_id == user_id,  # type: ignore[arg-type]
+                    APIKey.deleted_at.is_(None),  # type: ignore[union-attr]
+                )
+            )
+            .values(is_active=False, deleted_at=now, updated_at=now)
+        )
+        result = cast(CursorResult[Any], await self.session.execute(statement))
+        await self.session.flush()
+        return result.rowcount or 0
+
     async def list_by_user(
         self,
         user_id: str | UUID,

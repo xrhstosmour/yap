@@ -27,6 +27,7 @@ import qrcode.constants
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
+from app.core.encryption import crypto
 from app.core.logging import get_logger
 from app.core.settings import settings
 
@@ -100,6 +101,11 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     encoded = plain_password.encode()
     if len(encoded) > MAX_PASSWORD_BYTES:
         return False
+    if not is_password_usable(hashed_password):
+        # Spend the same time as a real check, so response time does not
+        # tell a caller which accounts have no password.
+        bcrypt.checkpw(encoded, DUMMY_PASSWORD_HASH.encode())
+        return False
     return bcrypt.checkpw(encoded, hashed_password.encode())
 
 
@@ -108,6 +114,34 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 # Used when user/key is not found to maintain consistent response time.
 # Any valid bcrypt hash works here, the actual value is not a secret.
 DUMMY_PASSWORD_HASH: str = generate_password_hash(secrets.token_urlsafe(32))
+
+# Marks a stored hash that no password can match, the same convention Unix
+# and Django use. Accounts made by a social sign in, and accounts a link
+# just neutralized, carry one. Accounts created before the marker existed
+# kept a bcrypt hash of a random value, which cannot be told apart from a
+# real one.
+UNUSABLE_PASSWORD_PREFIX = "!"
+
+
+def generate_unusable_password_hash() -> str:
+    """Return a stored value that no password verifies against.
+
+    Returns:
+        A random string carrying `UNUSABLE_PASSWORD_PREFIX`.
+    """
+    return UNUSABLE_PASSWORD_PREFIX + secrets.token_urlsafe(32)
+
+
+def is_password_usable(hashed_password: str) -> bool:
+    """Report whether a stored hash can ever match a password.
+
+    Args:
+        hashed_password: The value stored on the account.
+
+    Returns:
+        False for a value made by `generate_unusable_password_hash`.
+    """
+    return not hashed_password.startswith(UNUSABLE_PASSWORD_PREFIX)
 
 
 # JWT Token Management.
@@ -547,16 +581,18 @@ async def purge_user_tokens(user_id: UUID) -> None:
             await redis.delete(f"{prefix}:{previous}")
 
 
-async def create_email_verification_token(user_id: UUID) -> str:
+async def create_email_verification_token(user_id: UUID, email: str) -> str:
     """Create a single-use email verification token stored in Redis.
 
     Generates a cryptographically secure random token and stores a
-    mapping of token → user_id with a 24-hour TTL. The token is
-    consumed (deleted) on first successful verification. A newer token
-    replaces the previous one.
+    mapping of token to user_id and a hash of `email` with a 24-hour TTL.
+    The token is consumed (deleted) on first successful verification. A
+    newer token replaces the previous one.
 
     Args:
         user_id: UUID of the user whose email is being verified.
+        email: The address the link is mailed to. Only its search hash is
+            stored, so the link proves that address and no other.
 
     Returns:
         Opaque URL-safe token string (32 bytes, base64url encoded).
@@ -574,11 +610,11 @@ async def create_email_verification_token(user_id: UUID) -> str:
         _EMAIL_VERIFICATION_PREFIX,
         user_id,
         settings.EMAIL_VERIFICATION_TOKEN_TTL_SECONDS,
-        str(user_id),
+        f"{user_id}:{crypto.hash_for_search(email)}",
     )
 
 
-async def verify_email_verification_token(token: str) -> UUID | None:
+async def verify_email_verification_token(token: str) -> tuple[UUID, str] | None:
     """Consume and validate an email verification token.
 
     Deletes the token from Redis immediately after retrieval to enforce
@@ -588,7 +624,9 @@ async def verify_email_verification_token(token: str) -> UUID | None:
         token: Opaque token string received from the verification email.
 
     Returns:
-        User UUID if the token is valid and unexpired, None otherwise.
+        The user UUID and the search hash of the address the link was
+        mailed to if the token is valid and unexpired, None otherwise. The
+        caller must compare the hash with the account's current address.
     """
     from app.core.cache import get_redis
 
@@ -596,12 +634,16 @@ async def verify_email_verification_token(token: str) -> UUID | None:
     key = f"{_EMAIL_VERIFICATION_PREFIX}:{token}"
 
     # Atomic get-and-delete ensures single-use semantics with no race window.
-    user_id_str: str | None = await redis.getdel(key)
+    stored: str | None = await redis.getdel(key)
 
-    if not user_id_str:
+    if not stored:
         return None
 
-    return UUID(user_id_str)
+    user_id_str, _, email_hash = stored.partition(":")
+    try:
+        return UUID(user_id_str), email_hash
+    except ValueError:
+        return None
 
 
 async def create_password_reset_token(user_id: UUID) -> str:

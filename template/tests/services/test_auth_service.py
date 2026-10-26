@@ -1,5 +1,7 @@
 """Unit tests for `AuthService`."""
 
+from datetime import UTC
+from datetime import datetime
 from typing import Any
 from typing import cast
 from unittest.mock import ANY
@@ -14,6 +16,7 @@ from jwt import InvalidTokenError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.encryption import crypto
 from app.core.security import TokenRateLimitError
 from app.core.security import decode_token
 from app.core.security import generate_password_hash
@@ -38,6 +41,68 @@ from app.services.auth_service import UserNotFoundError
 
 def _auth_service(session: AsyncSession) -> AuthService:
     return AuthService(cast(AsyncSession, session))
+
+
+async def _plant_extra_credentials(session: AsyncSession, user: Any) -> None:  # noqa: ANN401
+    """Give an account a passkey, an API key, a TOTP secret and a recovery code."""
+    from app.core.encryption import encrypt
+    from app.models.api_key import APIKey
+    from app.models.totp_recovery_code import TotpRecoveryCode
+    from app.models.webauthn_credential import WebAuthnCredential
+
+    session.add_all(
+        [
+            WebAuthnCredential(
+                user_id=user.id,
+                credential_id=f"credential-{user.id}",
+                public_key="key",
+                user_handle="handle",
+                device_name="Phone",
+                tenant_id=user.tenant_id,
+            ),
+            APIKey(
+                key_id=f"key_{user.id}",
+                key_hash="hash",
+                key_prefix="sk_test",
+                name="Integration",
+                tenant_id=user.tenant_id,
+                user_id=user.id,
+            ),
+            TotpRecoveryCode(user_id=user.id, code_hash="hash"),
+        ]
+    )
+    with system_context():
+        await UserRepository(session).update(
+            user.id,
+            {
+                "totp_secret_encrypted": encrypt("JBSWY3DPEHPK3PXP"),
+                "is_2fa_enabled": True,
+                "totp_confirmed_at": datetime.now(UTC),
+            },
+        )
+    await session.flush()
+
+
+async def _remaining_extra_credentials(
+    session: AsyncSession,
+    user_id: Any,  # noqa: ANN401
+) -> dict[str, int]:
+    """Count the passkeys, live API keys and recovery codes an account has."""
+    from app.models.api_key import APIKey
+    from app.models.totp_recovery_code import TotpRecoveryCode
+    from app.models.webauthn_credential import WebAuthnCredential
+
+    counts = {}
+    for name, model in {
+        "passkeys": WebAuthnCredential,
+        "api_keys": APIKey,
+        "recovery_codes": TotpRecoveryCode,
+    }.items():
+        rows = await session.execute(select(model).where(model.user_id == user_id))
+        counts[name] = sum(
+            1 for row in rows.scalars() if getattr(row, "deleted_at", None) is None
+        )
+    return counts
 
 
 class TestAuthService:
@@ -432,13 +497,33 @@ class TestAuthService:
         )
         assert user.is_verified is False
 
-        await auth_service.verify_user(user.id)
+        await auth_service.verify_user(user.id, crypto.hash_for_search(user.email))
 
         with system_context():
             reloaded = await auth_service.user_repository.get(user.id)
 
         assert reloaded is not None
         assert reloaded.is_verified is True
+
+    @pytest.mark.asyncio
+    async def test_verify_user_refuses_a_token_for_another_email(
+        self, session: AsyncSession
+    ) -> None:
+        """A link mailed to the old address must not verify the new one."""
+        auth_service = _auth_service(session)
+        user = await auth_service.register(
+            RegisterRequest(email="current@example.com", password="password123")
+        )
+
+        with pytest.raises(AuthenticationError):
+            await auth_service.verify_user(
+                user.id, crypto.hash_for_search("previous@example.com")
+            )
+
+        with system_context():
+            reloaded = await auth_service.user_repository.get(user.id)
+        assert reloaded is not None
+        assert reloaded.is_verified is False
 
     @pytest.mark.asyncio
     async def test_refresh_tokens_blacklists_old_refresh_token(
@@ -1077,6 +1162,130 @@ class TestGoogleLogin:
         assert oauth.provider_email == "existing@example.com"
 
     @pytest.mark.asyncio
+    async def test_google_login_neutralizes_unverified_account(
+        self, session: AsyncSession
+    ) -> None:
+        """An address nobody proved is taken from whoever registered it."""
+        auth_service = _auth_service(session)
+        squatter = await auth_service.register(
+            RegisterRequest(email="victim@example.com", password="attackerpass1")
+        )
+        stolen = auth_service.create_tokens(squatter)
+        squatter_version = squatter.token_version
+        mock_async_client = self._setup_httpx_mock(
+            self._make_token_response(),
+            self._make_userinfo_response(user_id="g-555", email="victim@example.com"),
+        )
+
+        with (
+            patch(
+                "app.core.security.verify_google_oauth_state",
+                AsyncMock(return_value="http://cb"),
+            ),
+            patch("httpx.AsyncClient", mock_async_client),
+            patch("app.services.auth_service.purge_user_tokens", AsyncMock()) as purge,
+        ):
+            await auth_service.google_login("code", "state", "http://cb")
+            with pytest.raises(AuthenticationError, match="password change"):
+                await auth_service.refresh_tokens(stolen.refresh_token)
+
+        purge.assert_awaited_once_with(squatter.id)
+        with pytest.raises(InvalidCredentialsError):
+            await auth_service.authenticate("victim@example.com", "attackerpass1")
+        with system_context():
+            reloaded = await auth_service.user_repository.get(squatter.id)
+        assert reloaded is not None
+        assert reloaded.is_verified is True
+        assert reloaded.token_version == squatter_version + 1
+
+    @pytest.mark.asyncio
+    async def test_google_login_removes_what_the_squatter_added(
+        self, session: AsyncSession
+    ) -> None:
+        """Passkeys, API keys and a TOTP factor outlive a password change."""
+        auth_service = _auth_service(session)
+        squatter = await auth_service.register(
+            RegisterRequest(email="victim2@example.com", password="attackerpass1")
+        )
+        await _plant_extra_credentials(session, squatter)
+        mock_async_client = self._setup_httpx_mock(
+            self._make_token_response(),
+            self._make_userinfo_response(user_id="g-556", email="victim2@example.com"),
+        )
+
+        with (
+            patch(
+                "app.core.security.verify_google_oauth_state",
+                AsyncMock(return_value="http://cb"),
+            ),
+            patch("httpx.AsyncClient", mock_async_client),
+        ):
+            tokens = await auth_service.google_login("code", "state", "http://cb")
+
+        assert tokens.access_token
+        assert await _remaining_extra_credentials(session, squatter.id) == {
+            "passkeys": 0,
+            "api_keys": 0,
+            "recovery_codes": 0,
+        }
+        with system_context():
+            reloaded = await auth_service.user_repository.get(squatter.id)
+        assert reloaded is not None
+        assert reloaded.is_2fa_enabled is False
+        assert reloaded.totp_secret_encrypted is None
+        assert reloaded.totp_confirmed_at is None
+
+    @pytest.mark.asyncio
+    async def test_google_login_of_a_clean_unverified_account_still_signs_in(
+        self, session: AsyncSession
+    ) -> None:
+        """The owner who registered first, then used Google, gets tokens."""
+        auth_service = _auth_service(session)
+        await auth_service.register(
+            RegisterRequest(email="owner@example.com", password="password123")
+        )
+        mock_async_client = self._setup_httpx_mock(
+            self._make_token_response(),
+            self._make_userinfo_response(user_id="g-557", email="owner@example.com"),
+        )
+
+        with (
+            patch(
+                "app.core.security.verify_google_oauth_state",
+                AsyncMock(return_value="http://cb"),
+            ),
+            patch("httpx.AsyncClient", mock_async_client),
+        ):
+            tokens = await auth_service.google_login("code", "state", "http://cb")
+
+        assert tokens.access_token and tokens.refresh_token
+
+    @pytest.mark.asyncio
+    async def test_clearing_access_can_keep_the_second_factor(
+        self, session: AsyncSession
+    ) -> None:
+        """Without `second_factor` the passkeys and keys go, TOTP stays."""
+        auth_service = _auth_service(session)
+        user = await auth_service.register(
+            RegisterRequest(email="keep2fa@example.com", password="password123")
+        )
+        await _plant_extra_credentials(session, user)
+
+        with system_context():
+            await auth_service._clear_account_access(user.id, second_factor=False)
+
+        assert await _remaining_extra_credentials(session, user.id) == {
+            "passkeys": 0,
+            "api_keys": 0,
+            "recovery_codes": 1,
+        }
+        with system_context():
+            reloaded = await auth_service.user_repository.get(user.id)
+        assert reloaded is not None
+        assert reloaded.is_2fa_enabled is True
+        assert reloaded.totp_secret_encrypted is not None
+
+    @pytest.mark.asyncio
     async def test_google_login_inactive_user(self, session: AsyncSession) -> None:
         """Inactive user should raise UserInactiveError."""
         auth_service = _auth_service(session)
@@ -1195,6 +1404,29 @@ class TestAppleNativeLogin:
         )
         assert link is not None
         assert link.user_id == existing.id
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("apple_native")
+    async def test_verified_account_keeps_its_password_when_linked(
+        self, session: AsyncSession
+    ) -> None:
+        """Only an unproven address is neutralized, a verified one is left."""
+        auth_service = _auth_service(session)
+        existing = await auth_service.register(
+            RegisterRequest(email="apple@example.com", password="password123")
+        )
+        await auth_service.verify_user(
+            existing.id, crypto.hash_for_search("apple@example.com")
+        )
+        existing_version = existing.token_version
+
+        with _verified_apple():
+            await auth_service.apple_native_login("token", "nonce")
+
+        authenticated = await auth_service.authenticate(
+            "apple@example.com", "password123"
+        )
+        assert authenticated.token_version == existing_version
 
     @pytest.mark.asyncio
     @pytest.mark.usefixtures("apple_native")

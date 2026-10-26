@@ -15,6 +15,7 @@ from hashlib import sha256
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy import delete
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from webauthn import generate_authentication_options
@@ -307,6 +308,19 @@ class WebAuthnService:
         return user
 
     # --- Helpers ---
+
+    async def delete_for_user(self, user_id: UUID) -> None:
+        """Hard-delete every passkey a user has registered.
+
+        Args:
+            user_id: Owner of the passkeys.
+        """
+        await self.session.execute(
+            delete(WebAuthnCredential).where(
+                WebAuthnCredential.user_id == user_id  # type: ignore[arg-type]
+            )
+        )
+        await self.session.flush()
 
     async def _get_user_credentials(self, user_id: UUID) -> list[WebAuthnCredential]:
         result = await self.session.execute(

@@ -12,6 +12,7 @@ from httpx import ASGITransport
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.encryption import crypto
 from app.core.security import TokenRateLimitError
 from app.core.security import create_access_token
 from app.core.security import create_refresh_token
@@ -350,7 +351,7 @@ class TestEmailVerification:
         access_token = create_access_token(subject=user.id)
 
         # Mock Redis-backed token creation to avoid Redis dependency.
-        async def _fake_create_token(_user_id):
+        async def _fake_create_token(_user_id, _email):
             return "test-verification-token"
 
         monkeypatch.setattr(
@@ -377,7 +378,7 @@ class TestEmailVerification:
             RegisterRequest(email="verified@{{ project_slug }}.com", password="password123")
         )
         # Mark as verified directly.
-        await auth_service.verify_user(user.id)
+        await auth_service.verify_user(user.id, crypto.hash_for_search(user.email))
         access_token = create_access_token(subject=user.id)
 
         response = await client.post(
@@ -404,7 +405,9 @@ class TestEmailVerification:
         # Patch token verification to return this user's id without Redis.
         async def _fake_verify(token: str):
             if token == "valid-token":
-                return user.id
+                return user.id, crypto.hash_for_search(user.email)
+            if token == "old-address-token":
+                return user.id, crypto.hash_for_search("previous@{{ project_slug }}.com")
             return None
 
         monkeypatch.setattr(
@@ -418,6 +421,14 @@ class TestEmailVerification:
         )
 
         assert response.status_code == 204
+
+        stale = await client.get(
+            "/api/v1/auth/verify-email",
+            params={"token": "old-address-token"},
+        )
+
+        assert stale.status_code == 400
+        assert "Invalid or expired" in stale.json()["detail"]
 
     @pytest.mark.usefixtures("override_get_async_session")
     async def test_verify_email_invalid_token(

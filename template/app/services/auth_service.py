@@ -7,7 +7,6 @@ user authentication, registration, and token management.
 from __future__ import annotations
 
 import asyncio
-import secrets
 from datetime import UTC
 from datetime import datetime
 from typing import Any
@@ -18,6 +17,7 @@ from jwt import InvalidTokenError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import SYSTEM_TENANT_ID
+from app.core.encryption import crypto
 from app.core.logging import get_logger
 from app.core.security import DUMMY_PASSWORD_HASH
 from app.core.security import TokenRateLimitError
@@ -27,6 +27,7 @@ from app.core.security import create_access_token
 from app.core.security import create_refresh_token
 from app.core.security import decode_token
 from app.core.security import generate_password_hash
+from app.core.security import generate_unusable_password_hash
 from app.core.security import is_token_blacklisted
 from app.core.security import purge_user_tokens
 from app.core.security import verify_password
@@ -36,6 +37,7 @@ from app.models.audit_log import AuditAction
 from app.models.consent_record import MINIMUM_AGE_KIND
 from app.models.user import User
 from app.models.user import UserRole
+from app.repositories.api_key_repository import APIKeyRepository
 from app.repositories.audit_repository import AuditLogRepository
 from app.repositories.consent_record_repository import ConsentRecordRepository
 from app.repositories.oauth_account_repository import OAuthAccountRepository
@@ -43,6 +45,8 @@ from app.repositories.user_repository import UserRepository
 from app.schemas.auth import LoginResponse
 from app.schemas.auth import RegisterRequest
 from app.schemas.auth import TokenResponse
+from app.services.two_factor_service import TwoFactorAuthService
+from app.services.webauthn_service import WebAuthnService
 
 logger = get_logger("service.auth")
 
@@ -597,21 +601,30 @@ class AuthService:
 
         logger.info("password_changed", user_id=str(user.id))
 
-    async def verify_user(self, user_id: UUID) -> None:
+    async def verify_user(self, user_id: UUID, email_hash: str) -> None:
         """Mark user as verified.
+
+        The link proves the address it was mailed to, so it only counts
+        while that is still the account's address.
 
         Args:
             user_id: User to verify.
+            email_hash: Search hash of the address the token was issued for.
 
         Raises:
             UserNotFoundError: If the user no longer exists.
+            AuthenticationError: If the account's email changed since the
+                token was issued.
         """
         # Bootstrapping identity from a verification token: the tenant
         # isn't known yet, that's what this lookup establishes.
         with system_context():
-            user = await self.user_repository.set_verified(user_id)
-        if not user:
-            raise UserNotFoundError(f"User {user_id!s} not found.")
+            user = await self.user_repository.get(user_id)
+            if not user:
+                raise UserNotFoundError(f"User {user_id!s} not found.")
+            if email_hash not in crypto.hash_candidates_for_search(user.email):
+                raise AuthenticationError("Verification token is for another email.")
+            await self.user_repository.set_verified(user_id)
         logger.info("user_verified", user_id=str(user_id))
 
     async def send_verification_email(self, user: User) -> None:
@@ -632,7 +645,7 @@ class AuthService:
 
         await self._send_token_email(
             user=user,
-            token_factory=create_email_verification_token(user.id),
+            token_factory=create_email_verification_token(user.id, user.email),
             url_path="/auth/verify-email",
             subject=f"Verify your email, {settings.PRODUCT_NAME}",
             template_name="verification.html",
@@ -879,6 +892,11 @@ class AuthService:
         else:
             user = await self.user_repository.get_by_email(email)
             if user:
+                # The provider proved the address, the password account may
+                # not have. Whoever registered it could be someone else.
+                if not user.is_verified:
+                    await self._neutralize_unverified_account(user)
+
                 # Link the provider to an existing password-based account.
                 await self.oauth_account_repository.create_link(
                     user_id=user.id,
@@ -893,12 +911,9 @@ class AuthService:
                 # NOTE: OAuth users are created without a tenant_id.
                 # Projects requiring multi-tenancy should assign a tenant
                 # during OAuth registration (e.g. via invitation or subdomain).
-                placeholder_hash = await asyncio.to_thread(
-                    generate_password_hash, secrets.token_urlsafe(32)
-                )
                 user = await self.user_repository.create_user(
                     email=email,
-                    password_hash=placeholder_hash,
+                    password_hash=generate_unusable_password_hash(),
                     full_name=full_name,
                     role=UserRole.USER,
                     is_verified=True,
@@ -917,6 +932,55 @@ class AuthService:
 
         logger.info(f"{provider}_login_success", user_id=str(user.id))
         return await self.issue_login_response(user)
+
+    async def _neutralize_unverified_account(self, user: User) -> None:
+        """Cut off whoever registered an account before its email was proven.
+
+        `register` hands out tokens for an unverified account, so a stranger
+        can claim an address before its owner shows up. When the owner then
+        signs in with a provider that has proven the address, the account is
+        theirs from that moment: the password is replaced by one nobody can
+        match, every session and mailed link is revoked, and the address is
+        marked verified.
+
+        Args:
+            user: The unverified account a provider identity is linking to.
+        """
+        # A provider sign in has no tenant yet, the update needs one.
+        with system_context():
+            await self.user_repository.update(
+                user.id,
+                {
+                    "hashed_password": generate_unusable_password_hash(),
+                    "token_version": User.token_version + 1,
+                    "is_verified": True,
+                },
+            )
+            await self._clear_account_access(user.id)
+        await purge_user_tokens(user.id)
+        logger.info("unverified_account_neutralized", user_id=str(user.id))
+
+    async def _clear_account_access(
+        self, user_id: UUID, *, second_factor: bool = True
+    ) -> None:
+        """Remove every credential besides the password someone may have added.
+
+        Passkeys, the TOTP secret with its recovery codes, and API keys all
+        sign in without the password or outlive a `token_version` bump, so
+        taking an account back means removing them too. Runs in the caller's
+        transaction and tenant context.
+
+        Args:
+            user_id: The account being taken back.
+            second_factor: Whether to remove the TOTP secret and recovery
+                codes too. Keep them when the account's owner may well have
+                set them up, since removing them would let whoever reaches
+                the mailbox skip the second factor.
+        """
+        await WebAuthnService(self.session).delete_for_user(user_id)
+        if second_factor:
+            await TwoFactorAuthService(self.session).clear_enrollment(user_id)
+        await APIKeyRepository(self.session).revoke_all_for_user(user_id)
 
     async def apple_native_login(
         self,

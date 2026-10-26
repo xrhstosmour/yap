@@ -18,8 +18,11 @@ background tasks, and comprehensive security features.
   endpoint. Without it there is nothing to revoke.
 - API key authentication (SHA-256-hashed, prefix-based scoping).
 - `token_version` column invalidates all JWTs on password change or admin revoke.
-- One live reset, magic link and verification token per user, all revoked on a
-  password change.
+- A provider identity (Google, Apple) that links to an email-matched account which
+  is not verified first takes the account over: unusable password, `token_version`
+  bumped, mailed links revoked, passkeys, 2FA and API keys removed, email marked
+  verified. A verification link is bound to the address it was mailed to. One live
+  reset, magic link and verification token per user, all revoked on a password change.
 
 ### Multi-tenancy
 - `tenant_id` on all models via `BaseModel`.
