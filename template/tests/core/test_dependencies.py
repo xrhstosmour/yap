@@ -827,7 +827,8 @@ class TestOffboardedTenantIsRejected:
 
     @pytest.mark.asyncio
     async def test_websocket_ticket_is_rejected(self) -> None:
-        """A WebSocket handshake must be closed, not accepted."""
+        """A WebSocket handshake is accepted only to be closed with 1008."""
+        websocket = AsyncMock()
         tenant = _make_tenant(is_active=False)
         user = _make_user(tenant_id=tenant.id)
         user.tenant = tenant
@@ -843,7 +844,7 @@ class TestOffboardedTenantIsRejected:
             ),
         ):
             with pytest.raises(WebSocketException) as exc_info:
-                await get_current_user_ws(ticket="valid_ticket")
+                await get_current_user_ws(websocket, ticket="valid_ticket")
 
         assert exc_info.value.code == status.WS_1008_POLICY_VIOLATION
 

@@ -8,12 +8,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 from typing import Annotated
+from typing import NoReturn
 from uuid import UUID
 
 from fastapi import Depends
 from fastapi import HTTPException
 from fastapi import Query
 from fastapi import Request
+from fastapi import WebSocket
 from fastapi import WebSocketException
 from fastapi import status
 from fastapi.security import OAuth2PasswordBearer
@@ -293,7 +295,27 @@ async def load_user_for_websocket(user_id: UUID) -> User | None:
     return user
 
 
+async def _refuse_websocket(websocket: WebSocket, reason: str) -> NoReturn:
+    """Accept the handshake, then end it with a 1008 close.
+
+    A `WebSocketException` raised before `accept` is answered by uvicorn with
+    an HTTP 403 and the close code is lost. Accepting first lets the client
+    see the 1008 and the reason. The raised exception is turned into the
+    close frame by the framework, so the close is sent exactly once.
+
+    Args:
+        websocket: The incoming, not yet accepted, connection
+        reason: Why the connection is refused
+
+    Raises:
+        WebSocketException: Always, with the policy-violation code
+    """
+    await websocket.accept()
+    raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION, reason=reason)
+
+
 async def get_current_user_ws(
+    websocket: WebSocket,
     ticket: Annotated[str | None, Query()] = None,
 ) -> User:
     """Authenticate a WebSocket connection from a single-use ticket.
@@ -303,14 +325,15 @@ async def get_current_user_ws(
     ``?token=`` query parameter would leak it into server/proxy access logs.
     Instead the client first mints a short-lived, single-use ticket via
     ``POST /auth/ws-ticket`` (see ``app.core.ws_ticket``) and passes that as
-    ``ticket`` here. Failures raise ``WebSocketException``, which FastAPI
-    turns into a policy-violation close before the connection is accepted.
+    ``ticket`` here. Failures go through `_refuse_websocket`, so the client
+    sees a real 1008 close.
 
     The user is read on a short session of its own, see
     `load_user_for_websocket`, so no pool connection is held while the
     socket is open.
 
     Args:
+        websocket: The incoming, not yet accepted, connection
         ticket: Single-use ticket minted by ``POST /auth/ws-ticket``
 
     Returns:
@@ -321,43 +344,25 @@ async def get_current_user_ws(
             the user cannot be validated
     """
     if not ticket:
-        raise WebSocketException(
-            code=status.WS_1008_POLICY_VIOLATION,
-            reason="Missing authentication ticket",
-        )
+        await _refuse_websocket(websocket, "Missing authentication ticket")
 
     claim = await consume_ws_ticket(ticket)
     if not claim:
-        raise WebSocketException(
-            code=status.WS_1008_POLICY_VIOLATION,
-            reason="Invalid or expired ticket",
-        )
+        await _refuse_websocket(websocket, "Invalid or expired ticket")
 
     user = await load_user_for_websocket(UUID(claim.user_id))
 
     if not user:
-        raise WebSocketException(
-            code=status.WS_1008_POLICY_VIOLATION,
-            reason="User not found",
-        )
+        await _refuse_websocket(websocket, "User not found")
 
     if user.token_version != claim.token_version:
-        raise WebSocketException(
-            code=status.WS_1008_POLICY_VIOLATION,
-            reason="Session revoked",
-        )
+        await _refuse_websocket(websocket, "Session revoked")
 
     if not user.is_active:
-        raise WebSocketException(
-            code=status.WS_1008_POLICY_VIOLATION,
-            reason="User account is inactive",
-        )
+        await _refuse_websocket(websocket, "User account is inactive")
 
     if not is_tenant_usable(user.tenant):
-        raise WebSocketException(
-            code=status.WS_1008_POLICY_VIOLATION,
-            reason="Tenant account is inactive",
-        )
+        await _refuse_websocket(websocket, "Tenant account is inactive")
 
     # See get_current_user() for why this falls back rather than skipping.
     set_current_tenant_id(user.tenant_id or SYSTEM_TENANT_ID)
@@ -368,10 +373,13 @@ async def get_current_user_ws(
 CurrentUserWS = Annotated[User, Depends(get_current_user_ws)]
 
 
-async def get_current_superuser_ws(current_user: CurrentUserWS) -> User:
+async def get_current_superuser_ws(
+    websocket: WebSocket, current_user: CurrentUserWS
+) -> User:
     """Get the current WebSocket user if they are a superuser.
 
     Args:
+        websocket: The incoming, not yet accepted, connection
         current_user: Current authenticated WebSocket user
 
     Returns:
@@ -381,26 +389,26 @@ async def get_current_superuser_ws(current_user: CurrentUserWS) -> User:
         WebSocketException: If user is not a superuser
     """
     if current_user.role != UserRole.SUPERUSER:
-        raise WebSocketException(
-            code=status.WS_1008_POLICY_VIOLATION,
-            reason="Not enough permissions",
-        )
+        await _refuse_websocket(websocket, "Not enough permissions")
     return current_user
 
 
 SuperuserUserWS = Annotated[User, Depends(get_current_superuser_ws)]
 
 
-async def get_platform_admin_ws(current_user: SuperuserUserWS) -> User:
+async def get_platform_admin_ws(
+    websocket: WebSocket, current_user: SuperuserUserWS
+) -> User:
     """Get the current WebSocket user if they administer the whole platform.
 
     See `is_usable_platform_admin`.
+
+    Args:
+        websocket: The incoming, not yet accepted, connection
+        current_user: Current authenticated superuser WebSocket user
     """
     if not is_usable_platform_admin(current_user):
-        raise WebSocketException(
-            code=status.WS_1008_POLICY_VIOLATION,
-            reason="Not enough permissions",
-        )
+        await _refuse_websocket(websocket, "Not enough permissions")
     return current_user
 
 
