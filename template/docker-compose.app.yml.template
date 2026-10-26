@@ -88,6 +88,29 @@ services:
       # `le` for a Let's Encrypt certificate, empty for the existing ones.
       - "traefik.http.routers.{{ project_slug }}-app.tls.certresolver=${TRAEFIK_CERTIFICATE_RESOLVER:-}"
       - "traefik.http.services.{{ project_slug }}-app.loadbalancer.server.port=8000"
+      # Edge limit per client, in front of the application's own limits and
+      # set above them, so it only stops what they would not. Many people
+      # behind one address share it, raise it for a busy office or campus.
+      # An IPv6 client is one per /64, the block a subscriber holds, not one
+      # per address. Behind a CDN or load balancer the client address is in
+      # `X-Forwarded-For`, set `TRAEFIK_RATE_LIMIT_IP_DEPTH` to the number of
+      # proxies in front of Traefik, or every client is counted as the proxy.
+      - "traefik.http.middlewares.{{ project_slug }}-ratelimit.ratelimit.average=${TRAEFIK_RATE_LIMIT_AVERAGE:-30}"
+      - "traefik.http.middlewares.{{ project_slug }}-ratelimit.ratelimit.period=1s"
+      - "traefik.http.middlewares.{{ project_slug }}-ratelimit.ratelimit.burst=${TRAEFIK_RATE_LIMIT_BURST:-200}"
+      - "traefik.http.middlewares.{{ project_slug }}-ratelimit.ratelimit.sourcecriterion.ipstrategy.depth=${TRAEFIK_RATE_LIMIT_IP_DEPTH:-0}"
+      - "traefik.http.middlewares.{{ project_slug }}-ratelimit.ratelimit.sourcecriterion.ipstrategy.ipv6subnet=64"
+      - "traefik.http.routers.{{ project_slug }}-app.middlewares={{ project_slug }}-ratelimit"
+      # The probes get a router of their own without the limit, and a higher
+      # priority so they match before the one above. Without a priority
+      # Traefik ranks routers by rule length, and the longer rule wins.
+      - "traefik.http.routers.{{ project_slug }}-probes.rule=Host(`${APP_DOMAIN?Variable not set}`) && (Path(`/api/v1/live`) || Path(`/api/v1/ready`) || Path(`/api/v1/health`))"
+      - "traefik.http.routers.{{ project_slug }}-probes.priority=1000"
+      - "traefik.http.routers.{{ project_slug }}-probes.entrypoints=web_secure"
+      - "traefik.http.routers.{{ project_slug }}-probes.tls=true"
+      - "traefik.http.routers.{{ project_slug }}-probes.tls.options=${TRAEFIK_TLS_OPTIONS:-tls-opts@file}"
+      - "traefik.http.routers.{{ project_slug }}-probes.tls.certresolver=${TRAEFIK_CERTIFICATE_RESOLVER:-}"
+      - "traefik.http.routers.{{ project_slug }}-probes.service={{ project_slug }}-app"
 {%- endif %}
     networks:
       - "internal"

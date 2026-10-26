@@ -58,10 +58,12 @@ class TestTraefikAppRouting:
         """No path prefix in any rule covers a private path."""
         for rule in rules:
             prefixes = re.findall(r"PathPrefix\(`([^`]*)`\)", rule)
+            exact = re.findall(r"(?<![A-Za-z])Path\(`([^`]*)`\)", rule)
             # A rule with no path at all routes every path.
-            assert prefixes, f"{rule} routes {path}"
+            assert prefixes or exact, f"{rule} routes {path}"
             for prefix in prefixes:
                 assert not path.startswith(prefix), f"{rule} routes {path}"
+            assert path not in exact, f"{rule} routes {path}"
 
     def test_every_rule_names_its_host(self, rules: list[str]) -> None:
         """A rule without a host answers for any name pointed at the server."""
@@ -92,3 +94,19 @@ class TestTraefikAppRouting:
                 "${TRAEFIK_TLS_OPTIONS:-tls-opts@file}"
             )
             assert expected in labels, f"{router} fixes its TLS options"
+
+    def test_the_edge_limit_is_tunable_and_above_the_application_tiers(
+        self, rules: list[str]
+    ) -> None:
+        """A shared address must not be stopped by the proxy before the app."""
+        labels = _labels()
+        values = {
+            label.split("=", 1)[0].rsplit(".", 1)[1]: label.split("=", 1)[1]
+            for label in labels
+            if re.fullmatch(r"traefik\.http\.middlewares\.[^.]+-ratelimit\..*", label)
+        }
+
+        assert values["average"] == "${TRAEFIK_RATE_LIMIT_AVERAGE:-30}"
+        assert values["burst"] == "${TRAEFIK_RATE_LIMIT_BURST:-200}"
+        assert values["depth"] == "${TRAEFIK_RATE_LIMIT_IP_DEPTH:-0}"
+        assert values["ipv6subnet"] == "64"

@@ -74,8 +74,13 @@ background tasks, and comprehensive security features.
   minute is refused for five minutes under that same key, counted after the response is
   sent. Probes (`/api/v1/live`, `/ready`, `/health`), OPTIONS, WebSockets and `/admin`
   are exempt. Counters live under their own hash tagged Redis keys, so Redis Cluster
-  works, and fail open, every Redis step is cut off after one second.
-  Tune all of it through `RATE_LIMIT_GLOBAL_*` and `ABUSE_*`.
+  works, and fail open, every Redis step is cut off after one second. With Traefik, the
+  router also has an edge limit per client (IPv6 by its /64), above the application's own
+  tiers, 30 requests a second with a burst of 200, probes excluded. Tune the application
+  limits through `RATE_LIMIT_GLOBAL_*` and `ABUSE_*`, the edge one through
+  `TRAEFIK_RATE_LIMIT_AVERAGE` and `TRAEFIK_RATE_LIMIT_BURST` in `.env`. Behind a CDN or
+  load balancer set `TRAEFIK_RATE_LIMIT_IP_DEPTH` to the number of proxies in front of
+  Traefik (default 0, the connecting address), or every client is counted as the proxy.
 - Resilient container startup with retries.
 
 ### Compliance
