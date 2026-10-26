@@ -12,6 +12,7 @@ from httpx import ASGITransport
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.encryption import crypto
 from app.core.security import TokenRateLimitError
 from app.core.security import create_access_token
 from app.core.security import create_refresh_token
@@ -350,7 +351,7 @@ class TestEmailVerification:
         access_token = create_access_token(subject=user.id)
 
         # Mock Redis-backed token creation to avoid Redis dependency.
-        async def _fake_create_token(_user_id):
+        async def _fake_create_token(_user_id, _email):
             return "test-verification-token"
 
         monkeypatch.setattr(
@@ -377,7 +378,7 @@ class TestEmailVerification:
             RegisterRequest(email="verified@{{ project_slug }}.com", password="password123")
         )
         # Mark as verified directly.
-        await auth_service.verify_user(user.id)
+        await auth_service.verify_user(user.id, crypto.hash_for_search(user.email))
         access_token = create_access_token(subject=user.id)
 
         response = await client.post(
@@ -404,7 +405,9 @@ class TestEmailVerification:
         # Patch token verification to return this user's id without Redis.
         async def _fake_verify(token: str):
             if token == "valid-token":
-                return user.id
+                return user.id, crypto.hash_for_search(user.email)
+            if token == "old-address-token":
+                return user.id, crypto.hash_for_search("previous@{{ project_slug }}.com")
             return None
 
         monkeypatch.setattr(
@@ -418,6 +421,14 @@ class TestEmailVerification:
         )
 
         assert response.status_code == 204
+
+        stale = await client.get(
+            "/api/v1/auth/verify-email",
+            params={"token": "old-address-token"},
+        )
+
+        assert stale.status_code == 400
+        assert "Invalid or expired" in stale.json()["detail"]
 
     @pytest.mark.usefixtures("override_get_async_session")
     async def test_verify_email_invalid_token(
@@ -551,7 +562,7 @@ class TestPasswordReset:
 class TestTwoFactorAuth:
     """Tests for 2FA endpoints."""
 
-    @pytest.mark.usefixtures("override_get_async_session")
+    @pytest.mark.usefixtures("override_get_async_session", "no_totp_attempt_counter")
     async def test_enroll_returns_the_key_as_text(
         self,
         client: AsyncClient,
@@ -568,6 +579,7 @@ class TestTwoFactorAuth:
         response = await client.post(
             "/api/v1/auth/2fa/enroll",
             headers={"Authorization": f"Bearer {create_access_token(subject=user.id)}"},
+            json={"password": "password123"},
         )
 
         assert response.status_code == 200
@@ -577,6 +589,112 @@ class TestTwoFactorAuth:
         assert stored is not None
         assert stored.totp_secret_encrypted is not None
         assert decrypt(stored.totp_secret_encrypted) == secret
+
+    @pytest.mark.usefixtures("override_get_async_session", "no_totp_attempt_counter")
+    @pytest.mark.parametrize(
+        ("path", "body"),
+        [
+            ("/api/v1/auth/2fa/enroll", None),
+            ("/api/v1/auth/2fa/enroll", {"password": "not-the-password"}),
+            (
+                "/api/v1/auth/2fa/confirm",
+                {"totp_code": "123456"},
+            ),
+            (
+                "/api/v1/auth/2fa/confirm",
+                {"totp_code": "123456", "password": "not-the-password"},
+            ),
+            ("/api/v1/auth/webauthn/register/begin", None),
+            ("/api/v1/auth/webauthn/register/begin", {"password": "not-the-password"}),
+        ],
+    )
+    async def test_second_factor_and_passkey_setup_need_the_password(
+        self,
+        client: AsyncClient,
+        session: AsyncSession,
+        path: str,
+        body: dict[str, str] | None,
+    ) -> None:
+        """A bare access token must not enrol a factor or add a passkey."""
+        auth_service = AuthService(cast(AsyncSession, session))
+        user = await auth_service.register(
+            RegisterRequest(email="stepup@{{ project_slug }}.com", password="password123")
+        )
+
+        response = await client.post(
+            path,
+            headers={"Authorization": f"Bearer {create_access_token(subject=user.id)}"},
+            json=body,
+        )
+
+        assert response.status_code == 401
+        assert response.json()["detail"]["code"] == "REAUTH_REQUIRED"
+        with system_context():
+            stored = await auth_service.user_repository.get(user.id)
+        assert stored is not None
+        assert stored.totp_secret_encrypted is None
+
+    @pytest.mark.usefixtures("override_get_async_session", "no_totp_attempt_counter")
+    @pytest.mark.parametrize(
+        ("age_seconds", "expected_status"),
+        [(60, 200), (3600, 401), (None, 401)],
+    )
+    async def test_account_without_a_password_needs_a_recent_sign_in(
+        self,
+        client: AsyncClient,
+        session: AsyncSession,
+        age_seconds: int | None,
+        expected_status: int,
+    ) -> None:
+        """A social-only account proves itself with a sign in under ten minutes old."""
+        import time
+
+        from app.core.security import generate_unusable_password_hash
+
+        auth_service = AuthService(cast(AsyncSession, session))
+        user = await auth_service.register(
+            RegisterRequest(email="social@{{ project_slug }}.com", password="password123")
+        )
+        with system_context():
+            await auth_service.user_repository.update(
+                user.id, {"hashed_password": generate_unusable_password_hash()}
+            )
+        claims = (
+            {} if age_seconds is None else {"auth_time": int(time.time()) - age_seconds}
+        )
+
+        response = await client.post(
+            "/api/v1/auth/2fa/enroll",
+            headers={
+                "Authorization": "Bearer "
+                + create_access_token(subject=user.id, additional_claims=claims)
+            },
+        )
+
+        assert response.status_code == expected_status
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_refreshing_does_not_make_a_session_fresh(
+        self, client: AsyncClient, session: AsyncSession
+    ) -> None:
+        """A refresh keeps the original `auth_time`, the window cannot be extended."""
+        from app.core.security import decode_token
+
+        auth_service = AuthService(cast(AsyncSession, session))
+        user = await auth_service.register(
+            RegisterRequest(email="refresh-age@{{ project_slug }}.com", password="password123")
+        )
+        old = auth_service.create_tokens(user)
+        stale = decode_token(old.access_token)["auth_time"] - 3600
+        stale_refresh = create_refresh_token(
+            subject=user.id,
+            additional_claims={"token_version": user.token_version, "auth_time": stale},
+        )
+
+        refreshed = await auth_service.refresh_tokens(stale_refresh)
+
+        assert decode_token(refreshed.access_token)["auth_time"] == stale
+        assert decode_token(refreshed.refresh_token)["auth_time"] == stale
 
     @pytest.mark.usefixtures("override_get_async_session")
     async def test_login_issues_challenge_when_2fa_enabled(
@@ -1295,10 +1413,11 @@ class TestWebSocketTicket:
         )
         access_token = create_access_token(subject=user.id)
 
-        captured: dict[str, str] = {}
+        captured: dict[str, object] = {}
 
-        async def _fake_create_ws_ticket(user_id: str) -> str:
+        async def _fake_create_ws_ticket(user_id: str, token_version: int) -> str:
             captured["user_id"] = user_id
+            captured["token_version"] = token_version
             return "fake-ticket"
 
         monkeypatch.setattr("app.api.v1.auth.create_ws_ticket", _fake_create_ws_ticket)
@@ -1313,6 +1432,7 @@ class TestWebSocketTicket:
         assert data["ticket"] == "fake-ticket"
         assert data["expires_in"] == 30
         assert captured["user_id"] == str(user.id)
+        assert captured["token_version"] == user.token_version
 
     async def test_requires_authentication(self, client: AsyncClient) -> None:
         """Without a bearer token the request should be rejected."""

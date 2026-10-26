@@ -31,6 +31,7 @@ from app.core.tenant import set_current_tenant_id
 from app.core.tenant import system_context
 from app.core.ws_ticket import consume_ws_ticket
 from app.database import get_async_session
+from app.database import session_scope
 from app.models.api_key import APIKey
 from app.models.user import User
 from app.models.user import UserRole
@@ -183,6 +184,29 @@ async def get_current_user(
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
+async def get_auth_time(token: AccessTokenDependency) -> int | None:
+    """Read when the person last signed in from the access token.
+
+    Args:
+        token: JWT access token.
+
+    Returns:
+        The `auth_time` claim in epoch seconds, `None` when the token has
+        none or cannot be decoded. `CurrentUser` rejects a bad token
+        itself, this only reads the claim.
+    """
+    try:
+        value = decode_token(token).get("auth_time")
+    except (InvalidTokenError, ExpiredSignatureError):
+        return None
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    return None
+
+
+AuthTimeDependency = Annotated[int | None, Depends(get_auth_time)]
+
+
 async def get_current_superuser(current_user: CurrentUser) -> User:
     """Get the current user if they are a superuser.
 
@@ -218,6 +242,15 @@ def is_platform_admin(user: User) -> bool:
     return user.role == UserRole.SUPERUSER and user.tenant_id == SYSTEM_TENANT_ID
 
 
+def is_usable_platform_admin(user: User) -> bool:
+    """Whether a user may still hold a platform admin WebSocket.
+
+    The one rule for both the handshake and the later re-checks: the account
+    is active, still a platform admin, and its tenant is usable.
+    """
+    return user.is_active and is_platform_admin(user) and is_tenant_usable(user.tenant)
+
+
 async def get_platform_admin(current_user: SuperuserUser) -> User:
     """Get the current user if they administer the whole platform.
 
@@ -235,8 +268,32 @@ async def get_platform_admin(current_user: SuperuserUser) -> User:
 PlatformAdminUser = Annotated[User, Depends(get_platform_admin)]
 
 
+async def load_user_for_websocket(user_id: UUID) -> User | None:
+    """Look a user up on a session of its own, closed before this returns.
+
+    A WebSocket handler holds the socket for minutes. Depending on
+    `SessionDependency` would hold a pool connection for all of them, so
+    the lookup opens a short session instead, and loads the tenant while
+    it is open, which is what the callers read afterwards.
+
+    Args:
+        user_id: The user to load.
+
+    Returns:
+        The user with its tenant loaded, or `None` if there is no such user.
+    """
+    async with session_scope() as session:
+        # Bootstrapping identity from a ticket's user ID: the tenant isn't
+        # known yet, that's what this lookup exists to establish.
+        with system_context():
+            user = await UserRepository(session).get(user_id)
+        if user is not None:
+            # Read now, the session is closed once this block ends.
+            _ = user.tenant
+    return user
+
+
 async def get_current_user_ws(
-    session: SessionDependency,
     ticket: Annotated[str | None, Query()] = None,
 ) -> User:
     """Authenticate a WebSocket connection from a single-use ticket.
@@ -249,8 +306,11 @@ async def get_current_user_ws(
     ``ticket`` here. Failures raise ``WebSocketException``, which FastAPI
     turns into a policy-violation close before the connection is accepted.
 
+    The user is read on a short session of its own, see
+    `load_user_for_websocket`, so no pool connection is held while the
+    socket is open.
+
     Args:
-        session: Database session
         ticket: Single-use ticket minted by ``POST /auth/ws-ticket``
 
     Returns:
@@ -266,23 +326,25 @@ async def get_current_user_ws(
             reason="Missing authentication ticket",
         )
 
-    user_id = await consume_ws_ticket(ticket)
-    if not user_id:
+    claim = await consume_ws_ticket(ticket)
+    if not claim:
         raise WebSocketException(
             code=status.WS_1008_POLICY_VIOLATION,
             reason="Invalid or expired ticket",
         )
 
-    user_repository = UserRepository(session)
-    # Bootstrapping identity from the ticket's user ID: the tenant isn't
-    # known yet, that's what this lookup exists to establish.
-    with system_context():
-        user = await user_repository.get(UUID(user_id))
+    user = await load_user_for_websocket(UUID(claim.user_id))
 
     if not user:
         raise WebSocketException(
             code=status.WS_1008_POLICY_VIOLATION,
             reason="User not found",
+        )
+
+    if user.token_version != claim.token_version:
+        raise WebSocketException(
+            code=status.WS_1008_POLICY_VIOLATION,
+            reason="Session revoked",
         )
 
     if not user.is_active:
@@ -332,9 +394,9 @@ SuperuserUserWS = Annotated[User, Depends(get_current_superuser_ws)]
 async def get_platform_admin_ws(current_user: SuperuserUserWS) -> User:
     """Get the current WebSocket user if they administer the whole platform.
 
-    See `is_platform_admin`.
+    See `is_usable_platform_admin`.
     """
-    if not is_platform_admin(current_user):
+    if not is_usable_platform_admin(current_user):
         raise WebSocketException(
             code=status.WS_1008_POLICY_VIOLATION,
             reason="Not enough permissions",

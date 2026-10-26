@@ -22,6 +22,7 @@ from jwt import ExpiredSignatureError
 from jwt import InvalidTokenError
 
 from app.core.security import DUMMY_API_KEY_HASH
+from app.core.ws_ticket import WebSocketTicket
 from app.dependencies import get_api_key_auth
 from app.dependencies import get_current_superuser
 from app.dependencies import get_current_user
@@ -830,20 +831,19 @@ class TestOffboardedTenantIsRejected:
         tenant = _make_tenant(is_active=False)
         user = _make_user(tenant_id=tenant.id)
         user.tenant = tenant
-        session = AsyncMock()
 
         with (
             patch(
                 "app.dependencies.consume_ws_ticket",
                 new_callable=AsyncMock,
-                return_value=str(user.id),
+                return_value=WebSocketTicket(str(user.id), user.token_version),
             ),
             patch.object(
                 UserRepository, "get", new_callable=AsyncMock, return_value=user
             ),
         ):
             with pytest.raises(WebSocketException) as exc_info:
-                await get_current_user_ws(session=session, ticket="valid_ticket")
+                await get_current_user_ws(ticket="valid_ticket")
 
         assert exc_info.value.code == status.WS_1008_POLICY_VIOLATION
 

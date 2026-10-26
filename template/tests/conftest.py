@@ -211,6 +211,14 @@ def disable_token_blacklist_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "app.services.auth_service.claim_token_for_rotation", _claim_succeeds
     )
+    # The global limiter reads this flag per request, tests of it turn it back on.
+    monkeypatch.setattr(
+        "app.api.global_rate_limit.settings.RATE_LIMIT_GLOBAL_ENABLED", False
+    )
+    # Revoking mailed links reaches Redis too, tests that care for it patch
+    # their own.
+    monkeypatch.setattr("app.services.auth_service.purge_user_tokens", _noop_blacklist)
+    monkeypatch.setattr("app.services.user_service.purge_user_tokens", _noop_blacklist)
 
 
 @pytest.fixture(name="override_get_redis", autouse=True)
@@ -231,6 +239,23 @@ def override_get_redis_fixture() -> None:
         yield
     finally:
         app.dependency_overrides.pop(get_redis, None)
+
+
+@pytest.fixture(name="no_totp_attempt_counter")
+def no_totp_attempt_counter_fixture() -> Generator[None]:
+    """Stand in for the Redis counters behind the TOTP and password proof attempt limits."""
+    from unittest.mock import AsyncMock
+    from unittest.mock import patch
+
+    from app.services.two_factor_service import TwoFactorAuthService
+
+    with (
+        patch.object(TwoFactorAuthService, "_check_totp_rate_limit", AsyncMock()),
+        patch.object(TwoFactorAuthService, "_reset_totp_rate_limit", AsyncMock()),
+        patch.object(TwoFactorAuthService, "_check_password_proof_limit", AsyncMock()),
+        patch.object(TwoFactorAuthService, "_reset_password_proof_limit", AsyncMock()),
+    ):
+        yield
 
 
 @pytest.fixture(name="override_settings")

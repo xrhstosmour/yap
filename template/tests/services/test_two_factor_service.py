@@ -20,7 +20,9 @@ from app.core.settings import settings
 from app.core.tenant import tenant_context
 from app.schemas.auth import RegisterRequest
 from app.services.auth_service import AuthService
+from app.services.two_factor_service import InvalidProofPasswordError
 from app.services.two_factor_service import InvalidTOTPError
+from app.services.two_factor_service import ProofPasswordRateLimitError
 from app.services.two_factor_service import TwoFactorAlreadyEnabledError
 from app.services.two_factor_service import TwoFactorAuthService
 from app.services.two_factor_service import TwoFactorError
@@ -777,3 +779,44 @@ class TestRenewRecoveryCodes:
                 await service.confirm_recovery_code_renewal(user)
 
         assert redis.values == {}
+
+
+class _CounterRedis:
+    """INCR, EXPIRE and DELETE on a dict, to see which counter moved."""
+
+    def __init__(self) -> None:
+        self.counts: dict[str, int] = {}
+
+    async def incr(self, key: str) -> int:
+        self.counts[key] = self.counts.get(key, 0) + 1
+        return self.counts[key]
+
+    async def expire(self, key: str, ttl: int) -> None:
+        del key, ttl
+
+    async def delete(self, key: str) -> None:
+        self.counts.pop(key, None)
+
+
+class TestPasswordProofAttempts:
+    """Wrong passwords used as proof never spend the TOTP attempts."""
+
+    @pytest.mark.asyncio
+    async def test_guesses_are_limited_on_their_own_counter(
+        self, service: TwoFactorAuthService
+    ) -> None:
+        """The password proof locks out without touching `totp_attempts`."""
+        user = make_user()
+        user.hashed_password = generate_password_hash("correct-password")
+        redis = _CounterRedis()
+
+        with patch(
+            "app.services.two_factor_service.get_redis", AsyncMock(return_value=redis)
+        ):
+            for _ in range(settings.TOTP_MAX_ATTEMPTS):
+                with pytest.raises(InvalidProofPasswordError):
+                    await service.verify_proof_password(user, "guess")
+            with pytest.raises(ProofPasswordRateLimitError):
+                await service.verify_proof_password(user, "guess")
+
+        assert list(redis.counts) == [f"password_proof_attempts:{user.id}"]

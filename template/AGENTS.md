@@ -18,6 +18,22 @@ background tasks, and comprehensive security features.
   endpoint. Without it there is nothing to revoke.
 - API key authentication (SHA-256-hashed, prefix-based scoping).
 - `token_version` column invalidates all JWTs on password change or admin revoke.
+- Step-up proof for actions that give a stolen session a lasting hold:
+  `POST /auth/2fa/enroll`, `POST /auth/2fa/confirm`, `POST /auth/webauthn/register/begin`
+  and `DELETE /users/me`. The authenticator code when 2FA is on, else the password,
+  else, for an account with no password, a sign in under ten minutes old, read from
+  the `auth_time` claim a refresh keeps as it was. Failure is 401 with code
+  `REAUTH_REQUIRED`. Wrong passwords count against an attempt limit of their own,
+  apart from the one for authenticator codes. Accounts made by a social sign in carry
+  an unusable password hash (`!` prefix).
+  A password reset also removes the account's passkeys and API keys, and keeps its 2FA,
+  so the mailbox alone does not get past it.
+- A provider identity (Google, Apple) that links to an email-matched account which
+  is not verified first takes the account over: unusable password, `token_version`
+  bumped, mailed links revoked, passkeys, 2FA and API keys removed, email marked
+  verified. An email change marks the account unverified and mails the new address. A
+  verification link is bound to the address it was mailed to. One live reset, magic
+  link and verification token per user, all revoked on a password or email change.
 
 ### Multi-tenancy
 - `tenant_id` on all models via `BaseModel`.
@@ -51,6 +67,20 @@ background tasks, and comprehensive security features.
   instead of recomputing in parallel.
 - Circuit breaker for external service calls (`pybreaker`).
 - Rate limiting per user and per API key (Redis sliding window).
+- A global limit in front of every route (`GlobalRateLimitMiddleware`): 600 requests a
+  minute for a valid, not revoked access token, keyed by user, 300 for an `X-API-Key`,
+  keyed by a hash of the whole value without verifying it, 300 for anyone else, keyed by
+  client IP (IPv6 by its /64). A caller collecting 30 answers of 404, 405 or 422 in a
+  minute is refused for five minutes under that same key, counted after the response is
+  sent. Probes (`/api/v1/live`, `/ready`, `/health`), OPTIONS, WebSockets and `/admin`
+  are exempt. Counters live under their own hash tagged Redis keys, so Redis Cluster
+  works, and fail open, every Redis step is cut off after one second. With Traefik, the
+  router also has an edge limit per client (IPv6 by its /64), above the application's own
+  tiers, 30 requests a second with a burst of 200, probes excluded. Tune the application
+  limits through `RATE_LIMIT_GLOBAL_*` and `ABUSE_*`, the edge one through
+  `TRAEFIK_RATE_LIMIT_AVERAGE` and `TRAEFIK_RATE_LIMIT_BURST` in `.env`. Behind a CDN or
+  load balancer set `TRAEFIK_RATE_LIMIT_IP_DEPTH` to the number of proxies in front of
+  Traefik (default 0, the connecting address), or every client is counted as the proxy.
 - Resilient container startup with retries.
 
 ### Compliance
@@ -67,7 +97,15 @@ background tasks, and comprehensive security features.
 - Sentry/GlitchTip error tracking.
 - Health endpoints: REST liveness/readiness probes, plus authenticated WebSocket
   streams for live health (`/ws/health`, any user) and metrics (`/ws/metrics`,
-  superuser-only, pool/cache stats).
+  superuser-only, pool/cache stats). Sockets look the user up on a short session
+  of their own, so none holds a pool connection while open. Per worker process:
+  `WS_MAX_CONNECTIONS_PER_USER` (3) and `WS_MAX_CONNECTIONS_TOTAL` (200), accepted
+  and closed with code 1013, `WS_MAX_ADMIN_CONNECTIONS` (5) for `/ws/metrics` sockets,
+  which do not count against the total, `WS_MAX_LIFETIME_SECONDS` (3600),
+  `WS_MAX_MESSAGE_BYTES` (1024, close code 1009). `/ws/metrics` re-checks the
+  admin about every 30 seconds. A ticket carries the user's `token_version`, so a
+  revoke voids unused tickets and, on `/ws/metrics` only, closes the open socket.
+  `/ws/health` checks it at the handshake alone.
 
 ## Where things live
 

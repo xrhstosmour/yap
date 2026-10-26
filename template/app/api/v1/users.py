@@ -17,9 +17,12 @@ from fastapi import status
 from fastapi.requests import Request
 from fastapi.responses import Response
 
+from app.api.reauthentication import ProofDependency
+from app.api.reauthentication import require_reauthentication
 from app.core.logging import get_logger
 from app.core.pagination import PAGINATION_HEADERS_SPEC
 from app.core.pagination import PaginatedResponse
+from app.dependencies import AuthTimeDependency
 from app.dependencies import CurrentUser
 from app.dependencies import SessionDependency
 from app.dependencies import SuperuserUser
@@ -125,12 +128,16 @@ async def update_me(
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete own account",
     description=(
-        "Permanently delete the authenticated user's account (GDPR Article 17)."
+        "Permanently delete the authenticated user's account (GDPR Article 17). "
+        "Needs fresh proof in the JSON body, the authenticator code when 2FA "
+        "is on, else the password, else a sign in less than ten minutes old."
     ),
 )
 async def delete_me(
     current_user: CurrentUser,
     session: SessionDependency,
+    auth_time: AuthTimeDependency,
+    proof: ProofDependency,
 ) -> None:
     """Self-service account deletion (right to erasure).
 
@@ -139,6 +146,9 @@ async def delete_me(
     irreversible from the user's perspective and is logged for
     compliance.
     """
+    await require_reauthentication(
+        session, current_user, proof.password, proof.totp_code, auth_time
+    )
     service = UserService(session)
     await service.delete_me(current_user)
 

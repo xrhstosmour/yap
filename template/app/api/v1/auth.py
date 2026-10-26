@@ -18,6 +18,8 @@ from fastapi.security import OAuth2PasswordRequestForm
 from jwt import ExpiredSignatureError
 from jwt import InvalidTokenError
 
+from app.api.reauthentication import ProofDependency
+from app.api.reauthentication import require_reauthentication
 from app.core.logging import get_logger
 from app.core.rate_limit import check_auth_rate_limit
 from app.core.security import decode_token
@@ -25,6 +27,7 @@ from app.core.security import verify_email_verification_token
 from app.core.ws_ticket import WS_TICKET_TTL_SECONDS
 from app.core.ws_ticket import create_ws_ticket
 from app.dependencies import AccessTokenDependency
+from app.dependencies import AuthTimeDependency
 from app.dependencies import CurrentUser
 from app.dependencies import SessionDependency
 from app.schemas.auth import AppleAuthUrlResponse
@@ -46,6 +49,7 @@ from app.schemas.auth import RegisterRequest
 from app.schemas.auth import TokenResponse
 from app.schemas.auth import TwoFactorConfirmRequest
 from app.schemas.auth import TwoFactorDisableRequest
+from app.schemas.auth import TwoFactorEnrollmentConfirmRequest
 from app.schemas.auth import TwoFactorEnrollResponse
 from app.schemas.auth import TwoFactorStatusResponse
 from app.schemas.auth import TwoFactorVerifyRequest
@@ -66,7 +70,6 @@ from app.services.auth_service import MinimumAgeNotConfirmedError
 from app.services.auth_service import OAuthProviderUnavailableError
 from app.services.auth_service import UserInactiveError
 from app.services.auth_service import UsernameAlreadyExistsError
-from app.services.auth_service import UserNotFoundError
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 logger = get_logger("api.auth")
@@ -182,13 +185,16 @@ async def two_factor_status(
     status_code=status.HTTP_200_OK,
     summary="Begin 2FA enrollment",
     description=(
-        "Generate a TOTP secret and QR code. "
+        "Generate a TOTP secret and QR code. Needs fresh proof, the account "
+        "password, or a sign in less than ten minutes old when it has none. "
         "Call POST /auth/2fa/confirm with a valid code to activate 2FA."
     ),
 )
 async def enroll_2fa(
     current_user: CurrentUser,
     session: SessionDependency,
+    auth_time: AuthTimeDependency,
+    proof: ProofDependency,
 ) -> TwoFactorEnrollResponse:
     """Begin TOTP 2FA enrollment for the current user.
 
@@ -198,6 +204,9 @@ async def enroll_2fa(
     from app.services.two_factor_service import TwoFactorAlreadyEnabledError
     from app.services.two_factor_service import TwoFactorAuthService
 
+    await require_reauthentication(
+        session, current_user, proof.password, proof.totp_code, auth_time
+    )
     service = TwoFactorAuthService(session)
     try:
         secret, qr_data_url, recovery_codes = await service.begin_enrollment(
@@ -219,12 +228,17 @@ async def enroll_2fa(
     "/2fa/confirm",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Confirm 2FA enrollment",
-    description="Verify the first TOTP code to activate 2FA on the account.",
+    description=(
+        "Verify the first TOTP code to activate 2FA on the account. Needs "
+        "fresh proof as well, the account password, or a sign in less than "
+        "ten minutes old when it has none."
+    ),
 )
 async def confirm_2fa(
-    data: TwoFactorConfirmRequest,
+    data: TwoFactorEnrollmentConfirmRequest,
     current_user: CurrentUser,
     session: SessionDependency,
+    auth_time: AuthTimeDependency,
 ) -> None:
     """Confirm TOTP enrollment by verifying the first valid code."""
     from app.services.two_factor_service import InvalidTOTPError
@@ -233,6 +247,9 @@ async def confirm_2fa(
     from app.services.two_factor_service import TwoFactorError
     from app.services.two_factor_service import TwoFactorRateLimitError
 
+    await require_reauthentication(
+        session, current_user, data.password, None, auth_time
+    )
     service = TwoFactorAuthService(session)
     try:
         await service.confirm_enrollment(current_user, data.totp_code)
@@ -572,7 +589,7 @@ async def create_websocket_ticket(current_user: CurrentUser) -> WSTicketResponse
     Pass the returned ticket as the `ticket` query parameter when opening
     a `/ws/*` connection. Expires in `WS_TICKET_TTL_SECONDS` if unused.
     """
-    ticket = await create_ws_ticket(str(current_user.id))
+    ticket = await create_ws_ticket(str(current_user.id), current_user.token_version)
     return WSTicketResponse(ticket=ticket, expires_in=WS_TICKET_TTL_SECONDS)
 
 
@@ -627,18 +644,19 @@ async def verify_email(
             detail=INVALID_VERIFICATION_TOKEN,
         )
 
-    user_id = await verify_email_verification_token(token)
+    verified_token = await verify_email_verification_token(token)
 
-    if not user_id:
+    if not verified_token:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=INVALID_VERIFICATION_TOKEN,
         )
 
+    user_id, email_hash = verified_token
     service = AuthService(session)
     try:
-        await service.verify_user(user_id)
-    except UserNotFoundError as e:
+        await service.verify_user(user_id, email_hash)
+    except AuthenticationError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=INVALID_VERIFICATION_TOKEN,
@@ -669,7 +687,11 @@ async def forgot_password(
     "/reset-password",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Confirm password reset",
-    description="Reset password using the token from the reset email.",
+    description=(
+        "Reset password using the token from the reset email. Passkeys and "
+        "API keys are revoked, an enrolled second factor is kept and still "
+        "required at the next login."
+    ),
 )
 async def reset_password(
     data: PasswordResetConfirmRequest,
@@ -678,8 +700,9 @@ async def reset_password(
     """Reset a user's password using a valid reset token.
 
     Consumes the single-use token and updates the password. All
-    outstanding JWTs are invalidated by bumping `token_version`.
-    Returns 400 if the token is missing, expired, or already used.
+    outstanding JWTs are invalidated by bumping `token_version`, and the
+    account's passkeys and API keys are revoked. TOTP and recovery codes are
+    kept. Returns 400 if the token is missing, expired, or already used.
     """
     service = AuthService(session)
     try:
@@ -726,11 +749,18 @@ async def google_auth(
     "/webauthn/register/begin",
     response_model=WebAuthnRegisterBeginResponse,
     summary="Begin WebAuthn registration",
-    description="Generate WebAuthn registration options for passkey creation.",
+    description=(
+        "Generate WebAuthn registration options for passkey creation. Needs "
+        "fresh proof, the authenticator code when 2FA is on, else the "
+        "password, else a sign in less than ten minutes old. Completing the "
+        "registration needs the challenge issued here, so it takes none."
+    ),
 )
 async def webauthn_register_begin(
     current_user: CurrentUser,
     session: SessionDependency,
+    auth_time: AuthTimeDependency,
+    proof: ProofDependency,
 ) -> WebAuthnRegisterBeginResponse:
     """Begin WebAuthn passkey registration.
 
@@ -739,6 +769,9 @@ async def webauthn_register_begin(
     """
     from app.services.webauthn_service import WebAuthnService
 
+    await require_reauthentication(
+        session, current_user, proof.password, proof.totp_code, auth_time
+    )
     service = WebAuthnService(session)
     options = await service.begin_registration(current_user)
     return WebAuthnRegisterBeginResponse(options=options)

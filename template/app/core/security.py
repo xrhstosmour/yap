@@ -27,6 +27,7 @@ import qrcode.constants
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
+from app.core.encryption import crypto
 from app.core.logging import get_logger
 from app.core.settings import settings
 
@@ -100,6 +101,11 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     encoded = plain_password.encode()
     if len(encoded) > MAX_PASSWORD_BYTES:
         return False
+    if not is_password_usable(hashed_password):
+        # Spend the same time as a real check, so response time does not
+        # tell a caller which accounts have no password.
+        bcrypt.checkpw(encoded, DUMMY_PASSWORD_HASH.encode())
+        return False
     return bcrypt.checkpw(encoded, hashed_password.encode())
 
 
@@ -108,6 +114,34 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 # Used when user/key is not found to maintain consistent response time.
 # Any valid bcrypt hash works here, the actual value is not a secret.
 DUMMY_PASSWORD_HASH: str = generate_password_hash(secrets.token_urlsafe(32))
+
+# Marks a stored hash that no password can match, the same convention Unix
+# and Django use. Accounts made by a social sign in, and accounts a link
+# just neutralized, carry one. Accounts created before the marker existed
+# kept a bcrypt hash of a random value, which cannot be told apart from a
+# real one.
+UNUSABLE_PASSWORD_PREFIX = "!"
+
+
+def generate_unusable_password_hash() -> str:
+    """Return a stored value that no password verifies against.
+
+    Returns:
+        A random string carrying `UNUSABLE_PASSWORD_PREFIX`.
+    """
+    return UNUSABLE_PASSWORD_PREFIX + secrets.token_urlsafe(32)
+
+
+def is_password_usable(hashed_password: str) -> bool:
+    """Report whether a stored hash can ever match a password.
+
+    Args:
+        hashed_password: The value stored on the account.
+
+    Returns:
+        False for a value made by `generate_unusable_password_hash`.
+    """
+    return not hashed_password.startswith(UNUSABLE_PASSWORD_PREFIX)
 
 
 # JWT Token Management.
@@ -479,20 +513,86 @@ async def _check_token_rate_limit(
 
 
 # Single-use Redis-backed token configuration.
+#
+# Each token lives at `{prefix}:{token}`. A second key, `{prefix}:user:{id}`,
+# points back at the user's live token, so issuing a new one deletes the one
+# it replaces and `purge_user_tokens` can revoke them all. A token is URL-safe
+# base64 and never contains a colon, so the two key shapes cannot collide.
 
 # Email verification.
 _EMAIL_VERIFICATION_PREFIX = "email_verification"
 
+# Password reset.
+_PASSWORD_RESET_PREFIX = "password_reset"
 
-async def create_email_verification_token(user_id: UUID) -> str:
+# Magic link (passwordless login).
+_MAGIC_LINK_PREFIX = "magic_link"
+
+_USER_TOKEN_PREFIXES = (
+    _EMAIL_VERIFICATION_PREFIX,
+    _PASSWORD_RESET_PREFIX,
+    _MAGIC_LINK_PREFIX,
+)
+
+
+async def _store_user_token(
+    redis_client, prefix: str, user_id: UUID, ttl_seconds: int, value: str
+) -> str:
+    """Store a fresh token for a user, deleting the one it replaces.
+
+    Args:
+        redis_client: Redis client instance.
+        prefix: Token purpose prefix.
+        user_id: Owner of the token.
+        ttl_seconds: Lifetime of the token and of its index key.
+        value: What the token resolves to.
+
+    Returns:
+        Opaque URL-safe token string (32 bytes, base64url encoded).
+    """
+    index_key = f"{prefix}:user:{user_id}"
+    previous: str | None = await redis_client.getdel(index_key)
+    if previous:
+        await redis_client.delete(f"{prefix}:{previous}")
+
+    token = secrets.token_urlsafe(32)
+    await redis_client.setex(f"{prefix}:{token}", ttl_seconds, value)
+    await redis_client.setex(index_key, ttl_seconds, token)
+    return token
+
+
+async def purge_user_tokens(user_id: UUID) -> None:
+    """Revoke every outstanding email verification, reset and magic link token.
+
+    Called when a credential or the email address changes, so a link
+    mailed before the change cannot be used after it. A Redis outage
+    raises rather than being swallowed, the caller's transaction then
+    rolls back and the change is not half applied.
+
+    Args:
+        user_id: User whose tokens are revoked.
+    """
+    from app.core.cache import get_redis
+
+    redis = await get_redis()
+    for prefix in _USER_TOKEN_PREFIXES:
+        previous: str | None = await redis.getdel(f"{prefix}:user:{user_id}")
+        if previous:
+            await redis.delete(f"{prefix}:{previous}")
+
+
+async def create_email_verification_token(user_id: UUID, email: str) -> str:
     """Create a single-use email verification token stored in Redis.
 
     Generates a cryptographically secure random token and stores a
-    mapping of token → user_id with a 24-hour TTL. The token is
-    consumed (deleted) on first successful verification.
+    mapping of token to user_id and a hash of `email` with a 24-hour TTL.
+    The token is consumed (deleted) on first successful verification. A
+    newer token replaces the previous one.
 
     Args:
         user_id: UUID of the user whose email is being verified.
+        email: The address the link is mailed to. Only its search hash is
+            stored, so the link proves that address and no other.
 
     Returns:
         Opaque URL-safe token string (32 bytes, base64url encoded).
@@ -505,13 +605,16 @@ async def create_email_verification_token(user_id: UUID) -> str:
     redis = await get_redis()
     await _check_token_rate_limit(redis, "email_verification", str(user_id), 60)
 
-    token = secrets.token_urlsafe(32)
-    key = f"{_EMAIL_VERIFICATION_PREFIX}:{token}"
-    await redis.setex(key, settings.EMAIL_VERIFICATION_TOKEN_TTL_SECONDS, str(user_id))
-    return token
+    return await _store_user_token(
+        redis,
+        _EMAIL_VERIFICATION_PREFIX,
+        user_id,
+        settings.EMAIL_VERIFICATION_TOKEN_TTL_SECONDS,
+        f"{user_id}:{crypto.hash_for_search(email)}",
+    )
 
 
-async def verify_email_verification_token(token: str) -> UUID | None:
+async def verify_email_verification_token(token: str) -> tuple[UUID, str] | None:
     """Consume and validate an email verification token.
 
     Deletes the token from Redis immediately after retrieval to enforce
@@ -521,7 +624,9 @@ async def verify_email_verification_token(token: str) -> UUID | None:
         token: Opaque token string received from the verification email.
 
     Returns:
-        User UUID if the token is valid and unexpired, None otherwise.
+        The user UUID and the search hash of the address the link was
+        mailed to if the token is valid and unexpired, None otherwise. The
+        caller must compare the hash with the account's current address.
     """
     from app.core.cache import get_redis
 
@@ -529,16 +634,16 @@ async def verify_email_verification_token(token: str) -> UUID | None:
     key = f"{_EMAIL_VERIFICATION_PREFIX}:{token}"
 
     # Atomic get-and-delete ensures single-use semantics with no race window.
-    user_id_str: str | None = await redis.getdel(key)
+    stored: str | None = await redis.getdel(key)
 
-    if not user_id_str:
+    if not stored:
         return None
 
-    return UUID(user_id_str)
-
-
-# Password reset.
-_PASSWORD_RESET_PREFIX = "password_reset"
+    user_id_str, _, email_hash = stored.partition(":")
+    try:
+        return UUID(user_id_str), email_hash
+    except ValueError:
+        return None
 
 
 async def create_password_reset_token(user_id: UUID) -> str:
@@ -546,7 +651,8 @@ async def create_password_reset_token(user_id: UUID) -> str:
 
     Generates a cryptographically secure random token and stores a
     mapping of token → user_id with a 1-hour TTL. The token is
-    consumed (deleted) when the password is successfully reset.
+    consumed (deleted) when the password is successfully reset. A newer
+    token replaces the previous one.
 
     Args:
         user_id: UUID of the user requesting a password reset.
@@ -562,10 +668,13 @@ async def create_password_reset_token(user_id: UUID) -> str:
     redis = await get_redis()
     await _check_token_rate_limit(redis, "password_reset", str(user_id), 60)
 
-    token = secrets.token_urlsafe(32)
-    key = f"{_PASSWORD_RESET_PREFIX}:{token}"
-    await redis.setex(key, settings.PASSWORD_RESET_TOKEN_TTL_SECONDS, str(user_id))
-    return token
+    return await _store_user_token(
+        redis,
+        _PASSWORD_RESET_PREFIX,
+        user_id,
+        settings.PASSWORD_RESET_TOKEN_TTL_SECONDS,
+        str(user_id),
+    )
 
 
 async def verify_password_reset_token(token: str) -> UUID | None:
@@ -930,15 +1039,12 @@ def generate_recovery_codes(count: int = 10) -> list[str]:
     return list(codes)
 
 
-# Magic link (passwordless login).
-_MAGIC_LINK_PREFIX = "magic_link"
-
-
 async def create_magic_link_token(user_id: UUID) -> str:
     """Create a single-use magic link token stored in Redis.
 
     The token expires after ``MAGIC_LINK_TOKEN_TTL_SECONDS`` and is
-    consumed (deleted) on first successful verification.
+    consumed (deleted) on first successful verification. A newer token
+    replaces the previous one.
 
     Args:
         user_id: UUID of the user requesting a login link.
@@ -954,10 +1060,13 @@ async def create_magic_link_token(user_id: UUID) -> str:
     redis = await get_redis()
     await _check_token_rate_limit(redis, "magic_link", str(user_id), 30)
 
-    token = secrets.token_urlsafe(32)
-    key = f"{_MAGIC_LINK_PREFIX}:{token}"
-    await redis.setex(key, settings.MAGIC_LINK_TOKEN_TTL_SECONDS, str(user_id))
-    return token
+    return await _store_user_token(
+        redis,
+        _MAGIC_LINK_PREFIX,
+        user_id,
+        settings.MAGIC_LINK_TOKEN_TTL_SECONDS,
+        str(user_id),
+    )
 
 
 async def verify_magic_link_token(token: str) -> UUID | None:

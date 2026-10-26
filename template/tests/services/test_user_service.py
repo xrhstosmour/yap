@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
 from app.core import SYSTEM_TENANT_ID
+from app.core.security import TokenRateLimitError
 from app.core.tenant import system_context
 from app.models.audit_log import AuditAction
 from app.models.audit_log import AuditLog
@@ -182,7 +183,11 @@ class TestUserServiceUpdate:
             created = await user_service.create(user_create)
 
             update_data = UserUpdate(email="new@example.com")
-            await user_service.update(created.id, update_data, updated_by=uuid7())
+            with patch(
+                "app.services.user_service.AuthService.send_verification_email",
+                new_callable=AsyncMock,
+            ):
+                await user_service.update(created.id, update_data, updated_by=uuid7())
 
             result = await session.execute(
                 select(AuditLog).where(
@@ -195,6 +200,64 @@ class TestUserServiceUpdate:
         assert "new@example.com" not in str(entry.changes)
         assert entry.changes is not None
         assert entry.changes["email"] != "new@example.com"
+
+    @pytest.mark.asyncio
+    async def test_admin_email_change_unverifies_and_mails_the_new_address(
+        self, session: AsyncSession
+    ) -> None:
+        """A changed address is unproven until its link is followed."""
+        user_service = _user_service(session)
+        with system_context():
+            created = await user_service.create(
+                UserCreate(email="before@example.com", password="password123")
+            )
+            created.is_verified = True
+            await session.flush()
+
+            with (
+                patch(
+                    "app.services.user_service.AuthService.send_verification_email",
+                    new_callable=AsyncMock,
+                ) as send,
+                patch(
+                    "app.services.user_service.purge_user_tokens", AsyncMock()
+                ) as purge,
+            ):
+                updated = await user_service.update(
+                    created.id, UserUpdate(email="after@example.com"), uuid7()
+                )
+
+        assert updated is not None
+        assert updated.is_verified is False
+        purge.assert_awaited_once_with(created.id)
+        send.assert_awaited_once_with(updated)
+
+    @pytest.mark.asyncio
+    async def test_admin_update_without_email_change_keeps_verification(
+        self, session: AsyncSession
+    ) -> None:
+        """Renaming a user must not reset a proven address."""
+        user_service = _user_service(session)
+        with system_context():
+            created = await user_service.create(
+                UserCreate(email="kept@example.com", password="password123")
+            )
+            created.is_verified = True
+            await session.flush()
+
+            with patch(
+                "app.services.user_service.AuthService.send_verification_email",
+                new_callable=AsyncMock,
+            ) as send:
+                updated = await user_service.update(
+                    created.id,
+                    UserUpdate(email="kept@example.com", full_name="Renamed"),
+                    uuid7(),
+                )
+
+        assert updated is not None
+        assert updated.is_verified is True
+        send.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_update_user_not_found(self, session: AsyncSession) -> None:
@@ -482,13 +545,69 @@ class TestUpdateProfile:
         data = UserUpdateMe.model_construct(
             email="new@example.com", current_password="correct-password"
         )
-        with patch("app.services.user_service.verify_password", return_value=True):
+        with (
+            patch("app.services.user_service.verify_password", return_value=True),
+            patch(
+                "app.services.user_service.AuthService.send_verification_email",
+                new_callable=AsyncMock,
+            ) as send,
+            patch("app.services.user_service.purge_user_tokens", AsyncMock()) as purge,
+        ):
             result = await mock_user_service.update_profile(user, data)
 
         assert result.email == "new@example.com"
+        # The new address is unproven until its link is followed.
         mock_user_service.user_repository.update.assert_awaited_once_with(
-            user.id, {"email": "new@example.com"}
+            user.id, {"email": "new@example.com", "is_verified": False}
         )
+        purge.assert_awaited_once_with(user.id)
+        send.assert_awaited_once_with(updated)
+
+    @pytest.mark.asyncio
+    async def test_update_email_survives_the_verification_cooldown(
+        self, mock_user_service: UserService
+    ) -> None:
+        """A throttled verification mail must not fail the email change."""
+        user = _make_user_mock(email="old@example.com")
+        updated = _make_user_mock(email="new@example.com", id=user.id)
+        mock_user_service.user_repository.get_by_email = AsyncMock(return_value=None)
+        mock_user_service.user_repository.update = AsyncMock(return_value=updated)
+        mock_user_service.user_repository.get = AsyncMock(return_value=updated)
+
+        data = UserUpdateMe.model_construct(
+            email="new@example.com", current_password="correct-password"
+        )
+        with (
+            patch("app.services.user_service.verify_password", return_value=True),
+            patch(
+                "app.services.user_service.AuthService.send_verification_email",
+                AsyncMock(side_effect=TokenRateLimitError("wait")),
+            ),
+            patch("app.services.user_service.purge_user_tokens", AsyncMock()),
+        ):
+            result = await mock_user_service.update_profile(user, data)
+
+        assert result.email == "new@example.com"
+
+    @pytest.mark.asyncio
+    async def test_new_password_revokes_mailed_links(
+        self, mock_user_service: UserService
+    ) -> None:
+        """A reset link mailed before a password change must die with it."""
+        user = _make_user_mock()
+        mock_user_service.user_repository.update = AsyncMock(return_value=user)
+        mock_user_service.user_repository.get = AsyncMock(return_value=user)
+
+        data = UserUpdateMe.model_construct(
+            new_password="new-password-1", current_password="correct-password"
+        )
+        with (
+            patch("app.services.user_service.verify_password", return_value=True),
+            patch("app.services.user_service.purge_user_tokens", AsyncMock()) as purge,
+        ):
+            await mock_user_service.update_profile(user, data)
+
+        purge.assert_awaited_once_with(user.id)
 
     @pytest.mark.asyncio
     async def test_update_both_fields(self, mock_user_service: UserService) -> None:
@@ -504,13 +623,20 @@ class TestUpdateProfile:
             email="new@example.com",
             current_password="correct-password",
         )
-        with patch("app.services.user_service.verify_password", return_value=True):
+        with (
+            patch("app.services.user_service.verify_password", return_value=True),
+            patch(
+                "app.services.user_service.AuthService.send_verification_email",
+                new_callable=AsyncMock,
+            ),
+        ):
             result = await mock_user_service.update_profile(user, data)
 
         assert result.full_name == "New"
         assert result.email == "new@example.com"
         mock_user_service.user_repository.update.assert_awaited_once_with(
-            user.id, {"email": "new@example.com", "full_name": "New"}
+            user.id,
+            {"email": "new@example.com", "full_name": "New", "is_verified": False},
         )
 
     @pytest.mark.asyncio

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from collections.abc import AsyncIterator
 from typing import Any
@@ -19,6 +20,9 @@ from starlette.testclient import WebSocketDisconnect
 from app.api.v1.websocket import broadcast_notification
 from app.api.v1.websocket import router as ws_router
 from app.core import SYSTEM_TENANT_ID
+from app.core.settings import settings
+from app.core.websocket_limits import ConnectionLimiter
+from app.core.ws_ticket import WebSocketTicket
 from app.database import get_async_session
 from app.dependencies import UserRepository
 from app.models.user import User
@@ -58,13 +62,14 @@ def _stub_ws_ticket(
     user_id: object | None,
     *,
     ticket: str = TEST_TICKET,
+    token_version: int = 1,
 ) -> None:
     """Make `consume_ws_ticket(ticket)` resolve to `user_id` without touching Redis."""
 
-    async def _consume(presented: str) -> str | None:
+    async def _consume(presented: str) -> WebSocketTicket | None:
         if presented != ticket:
             return None
-        return None if user_id is None else str(user_id)
+        return None if user_id is None else WebSocketTicket(str(user_id), token_version)
 
     monkeypatch.setattr("app.dependencies.consume_ws_ticket", _consume)
 
@@ -178,6 +183,19 @@ class TestHealthWebSocket:
                 pass
         assert excinfo.value.code == 1008
 
+    def test_websocket_rejects_a_ticket_from_before_a_revoke(
+        self, ws_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A ticket minted before a `token_version` bump is refused."""
+        user = _make_user()
+        _stub_user_repository(monkeypatch, user)
+        _stub_ws_ticket(monkeypatch, user.id, token_version=user.token_version - 1)
+
+        with pytest.raises(WebSocketDisconnect) as excinfo:
+            with ws_client.websocket_connect(f"/api/v1/ws/health?ticket={TEST_TICKET}"):
+                pass
+        assert excinfo.value.code == 1008
+
     def test_websocket_rejects_unknown_user(
         self, ws_client: TestClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -230,6 +248,317 @@ class TestMetricsWebSocket:
             data = websocket.receive_json()
             assert data["type"] == "metrics"
             assert "pool" in data["data"]
+
+
+@pytest.fixture(autouse=True)
+def _fresh_connection_limiter(monkeypatch: pytest.MonkeyPatch) -> ConnectionLimiter:
+    """Give every test its own socket counts, the real ones are per process."""
+    limiter = ConnectionLimiter()
+    monkeypatch.setattr("app.api.v1.websocket.connection_limiter", limiter)
+    return limiter
+
+
+class TestConnectionCaps:
+    """A socket past a connection cap is closed with 1013 right after the handshake."""
+
+    @pytest.mark.usefixtures("patch_get_event_loop")
+    def test_the_fourth_socket_of_a_user_is_refused(
+        self, ws_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The default is three sockets per user, close code 1013 for the next."""
+        user = _make_user()
+        _stub_user_repository(monkeypatch, user)
+        _stub_ws_ticket(monkeypatch, user.id)
+        url = f"/api/v1/ws/health?ticket={TEST_TICKET}"
+
+        with (
+            ws_client.websocket_connect(url) as first,
+            ws_client.websocket_connect(url) as second,
+            ws_client.websocket_connect(url) as third,
+        ):
+            for socket in (first, second, third):
+                assert socket.receive_json()["type"] == "ping"
+            with pytest.raises(WebSocketDisconnect) as excinfo:
+                with ws_client.websocket_connect(url) as refused:
+                    refused.receive_json()
+
+        assert excinfo.value.code == 1013
+
+    @pytest.mark.usefixtures("patch_get_event_loop")
+    def test_the_worker_total_is_capped_across_users(
+        self, ws_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Different users share the per-worker total."""
+        monkeypatch.setattr(settings, "WS_MAX_CONNECTIONS_TOTAL", 1)
+        users = iter([_make_user(), _make_user()])
+        current: dict[str, User] = {}
+
+        async def _get(self: UserRepository, _user_id: object) -> User:
+            return current["user"]
+
+        monkeypatch.setattr(UserRepository, "get", _get)
+        _stub_ws_ticket(monkeypatch, uuid4())
+        url = f"/api/v1/ws/health?ticket={TEST_TICKET}"
+
+        current["user"] = next(users)
+        with ws_client.websocket_connect(url) as first:
+            assert first.receive_json()["type"] == "ping"
+            current["user"] = next(users)
+            with pytest.raises(WebSocketDisconnect) as excinfo:
+                with ws_client.websocket_connect(url) as refused:
+                    refused.receive_json()
+
+        assert excinfo.value.code == 1013
+
+    @pytest.mark.usefixtures("patch_get_event_loop")
+    def test_a_slot_is_released_when_the_socket_closes(
+        self, ws_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Closing sockets frees their slots, so the user can connect again."""
+        user = _make_user()
+        _stub_user_repository(monkeypatch, user)
+        _stub_ws_ticket(monkeypatch, user.id)
+        url = f"/api/v1/ws/health?ticket={TEST_TICKET}"
+
+        for _ in range(settings.WS_MAX_CONNECTIONS_PER_USER + 2):
+            with ws_client.websocket_connect(url) as socket:
+                assert socket.receive_json()["type"] == "ping"
+
+
+class TestAdminConnectionCap:
+    """Admin metrics sockets have a cap of their own, apart from the total."""
+
+    def test_a_full_total_does_not_lock_the_admins_out(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Ordinary users filling the total leave the admin slots free."""
+        monkeypatch.setattr(settings, "WS_MAX_CONNECTIONS_TOTAL", 1)
+        limiter = ConnectionLimiter()
+
+        assert limiter.acquire(uuid4())
+        assert not limiter.acquire(uuid4())
+        assert limiter.acquire(uuid4(), admin=True)
+
+    def test_admin_sockets_do_not_use_up_the_total(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Admin sockets leave the total for everyone else."""
+        monkeypatch.setattr(settings, "WS_MAX_CONNECTIONS_TOTAL", 1)
+        limiter = ConnectionLimiter()
+
+        assert limiter.acquire(uuid4(), admin=True)
+        assert limiter.acquire(uuid4())
+
+    def test_the_admin_cap_is_enforced_and_released(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Past `WS_MAX_ADMIN_CONNECTIONS` is refused, closing frees a slot."""
+        monkeypatch.setattr(settings, "WS_MAX_ADMIN_CONNECTIONS", 1)
+        limiter = ConnectionLimiter()
+        first, second = uuid4(), uuid4()
+
+        assert limiter.acquire(first, admin=True)
+        assert not limiter.acquire(second, admin=True)
+        limiter.release(first, admin=True)
+        assert limiter.acquire(second, admin=True)
+
+    def test_the_per_user_cap_still_applies_to_an_admin(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """One admin cannot hold every admin slot."""
+        monkeypatch.setattr(settings, "WS_MAX_CONNECTIONS_PER_USER", 1)
+        limiter = ConnectionLimiter()
+        admin_id = uuid4()
+
+        assert limiter.acquire(admin_id, admin=True)
+        assert not limiter.acquire(admin_id, admin=True)
+
+
+class TestSocketLimits:
+    """A socket cannot outlive its lifetime or send an oversized message."""
+
+    @pytest.mark.usefixtures("patch_get_event_loop")
+    def test_an_oversized_message_closes_the_socket(
+        self, ws_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """More than `WS_MAX_MESSAGE_BYTES` is close code 1009."""
+        user = _make_user()
+        _stub_user_repository(monkeypatch, user)
+        _stub_ws_ticket(monkeypatch, user.id)
+
+        with ws_client.websocket_connect(
+            f"/api/v1/ws/health?ticket={TEST_TICKET}"
+        ) as websocket:
+            websocket.receive_json()
+            websocket.send_text("x" * (settings.WS_MAX_MESSAGE_BYTES + 1))
+            with pytest.raises(WebSocketDisconnect) as excinfo:
+                websocket.receive_json()
+
+        assert excinfo.value.code == 1009
+
+    @pytest.mark.usefixtures("patch_get_event_loop")
+    def test_a_message_at_the_limit_is_served(
+        self, ws_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Exactly `WS_MAX_MESSAGE_BYTES` is still within the limit."""
+        user = _make_user()
+        _stub_user_repository(monkeypatch, user)
+        _stub_ws_ticket(monkeypatch, user.id)
+
+        with ws_client.websocket_connect(
+            f"/api/v1/ws/health?ticket={TEST_TICKET}"
+        ) as websocket:
+            websocket.receive_json()
+            websocket.send_text("x" * settings.WS_MAX_MESSAGE_BYTES)
+            assert websocket.receive_json()["type"] == "ping"
+            websocket.send_text("pong")
+            assert websocket.receive_json() == {"type": "pong", "ok": True}
+
+    @pytest.mark.usefixtures("patch_get_event_loop")
+    @pytest.mark.parametrize("endpoint", ["health", "metrics"])
+    def test_a_socket_is_closed_at_its_maximum_lifetime(
+        self, ws_client: TestClient, monkeypatch: pytest.MonkeyPatch, endpoint: str
+    ) -> None:
+        """Past `WS_MAX_LIFETIME_SECONDS` the server ends the socket."""
+        monkeypatch.setattr(settings, "WS_MAX_LIFETIME_SECONDS", 0)
+        user = _make_user(role=UserRole.SUPERUSER, tenant_id=SYSTEM_TENANT_ID)
+        _stub_user_repository(monkeypatch, user)
+        _stub_ws_ticket(monkeypatch, user.id)
+
+        with ws_client.websocket_connect(
+            f"/api/v1/ws/{endpoint}?ticket={TEST_TICKET}"
+        ) as websocket:
+            with pytest.raises(WebSocketDisconnect) as excinfo:
+                websocket.receive_json()
+
+        assert excinfo.value.code == 1000
+
+
+class TestSessionIsNotHeldWhileConnected:
+    """The user lookup gives its pool connection back before the loop."""
+
+    @pytest.mark.usefixtures("patch_get_event_loop")
+    def test_the_session_is_closed_before_the_first_message(
+        self, ws_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No session stays open while the socket is."""
+        user = _make_user()
+        _stub_user_repository(monkeypatch, user)
+        _stub_ws_ticket(monkeypatch, user.id)
+        events: list[str] = []
+
+        @contextlib.asynccontextmanager
+        async def _recording_scope() -> AsyncIterator[None]:
+            events.append("opened")
+            try:
+                yield None
+            finally:
+                events.append("closed")
+
+        monkeypatch.setattr("app.dependencies.session_scope", _recording_scope)
+
+        with ws_client.websocket_connect(
+            f"/api/v1/ws/health?ticket={TEST_TICKET}"
+        ) as websocket:
+            websocket.receive_json()
+            assert events == ["opened", "closed"]
+
+
+class TestMetricsRevalidation:
+    """A platform admin who loses the role loses the stream."""
+
+    def test_a_demoted_admin_is_closed(
+        self, ws_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The next re-check finds a plain user and ends the socket with 1008."""
+        monkeypatch.setattr("app.api.v1.websocket._METRICS_REVALIDATE_EVERY", 1)
+        monkeypatch.setattr("app.api.v1.websocket._METRICS_INTERVAL_SECONDS", 0.01)
+        admin = _make_user(role=UserRole.SUPERUSER, tenant_id=SYSTEM_TENANT_ID)
+        demoted = User(
+            id=admin.id,
+            email=admin.email,
+            hashed_password="hashed",
+            is_active=True,
+            role=UserRole.USER,
+            tenant_id=SYSTEM_TENANT_ID,
+        )
+        lookups = [admin, demoted]
+
+        async def _get(self: UserRepository, _user_id: object) -> User:
+            return lookups.pop(0) if len(lookups) > 1 else lookups[0]
+
+        monkeypatch.setattr(UserRepository, "get", _get)
+        _stub_ws_ticket(monkeypatch, admin.id)
+
+        with ws_client.websocket_connect(
+            f"/api/v1/ws/metrics?ticket={TEST_TICKET}"
+        ) as websocket:
+            assert websocket.receive_json()["type"] == "metrics"
+            with pytest.raises(WebSocketDisconnect) as excinfo:
+                while True:
+                    websocket.receive_json()
+
+        assert excinfo.value.code == 1008
+
+    def test_an_admin_whose_tokens_were_revoked_is_closed(
+        self, ws_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A bumped `token_version` ends the stream at the next re-check."""
+        monkeypatch.setattr("app.api.v1.websocket._METRICS_REVALIDATE_EVERY", 1)
+        monkeypatch.setattr("app.api.v1.websocket._METRICS_INTERVAL_SECONDS", 0.01)
+        admin = _make_user(role=UserRole.SUPERUSER, tenant_id=SYSTEM_TENANT_ID)
+        revoked = User(
+            id=admin.id,
+            email=admin.email,
+            hashed_password="hashed",
+            is_active=True,
+            role=UserRole.SUPERUSER,
+            tenant_id=SYSTEM_TENANT_ID,
+            token_version=admin.token_version + 1,
+        )
+        lookups = [admin, revoked]
+
+        async def _get(self: UserRepository, _user_id: object) -> User:
+            return lookups.pop(0) if len(lookups) > 1 else lookups[0]
+
+        monkeypatch.setattr(UserRepository, "get", _get)
+        _stub_ws_ticket(monkeypatch, admin.id, token_version=admin.token_version)
+
+        with ws_client.websocket_connect(
+            f"/api/v1/ws/metrics?ticket={TEST_TICKET}"
+        ) as websocket:
+            with pytest.raises(WebSocketDisconnect) as excinfo:
+                while True:
+                    websocket.receive_json()
+
+        assert excinfo.value.code == 1008
+
+    def test_an_admin_who_is_deactivated_is_closed(
+        self, ws_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Deactivation ends the stream the same way."""
+        monkeypatch.setattr("app.api.v1.websocket._METRICS_REVALIDATE_EVERY", 1)
+        monkeypatch.setattr("app.api.v1.websocket._METRICS_INTERVAL_SECONDS", 0.01)
+        admin = _make_user(role=UserRole.SUPERUSER, tenant_id=SYSTEM_TENANT_ID)
+        inactive = _make_user(
+            role=UserRole.SUPERUSER, tenant_id=SYSTEM_TENANT_ID, is_active=False
+        )
+        lookups = [admin, inactive]
+
+        async def _get(self: UserRepository, _user_id: object) -> User:
+            return lookups.pop(0) if len(lookups) > 1 else lookups[0]
+
+        monkeypatch.setattr(UserRepository, "get", _get)
+        _stub_ws_ticket(monkeypatch, admin.id)
+
+        with ws_client.websocket_connect(
+            f"/api/v1/ws/metrics?ticket={TEST_TICKET}"
+        ) as websocket:
+            with pytest.raises(WebSocketDisconnect) as excinfo:
+                while True:
+                    websocket.receive_json()
+
+        assert excinfo.value.code == 1008
 
 
 class TestBroadcastNotification:

@@ -279,12 +279,21 @@ def test_api_smoke() -> None:
         r = httpx.get(f"{base}/api/v1/auth/verify-email")
         assert r.status_code == 400
 
+        # 2FA enroll needs a fresh proof, without one it is refused.
+        r = httpx.post(
+            f"{base}/api/v1/auth/2fa/enroll",
+            headers={"Authorization": f"Bearer {new_token}"},
+            json={},
+        )
+        assert r.status_code == 401
+        assert r.json()["detail"]["code"] == "REAUTH_REQUIRED"
+
         # 2FA enroll endpoint exists
         # (returns 400 since already logged in without pending).
         r = httpx.post(
             f"{base}/api/v1/auth/2fa/enroll",
             headers={"Authorization": f"Bearer {new_token}"},
-            json={},
+            json={"password": "newpass456"},
         )
         assert r.status_code in (400, 200, 403)
 
