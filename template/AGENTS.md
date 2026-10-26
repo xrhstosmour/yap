@@ -26,6 +26,8 @@ background tasks, and comprehensive security features.
   `REAUTH_REQUIRED`. Wrong passwords count against an attempt limit of their own,
   apart from the one for authenticator codes. Accounts made by a social sign in carry
   an unusable password hash (`!` prefix).
+  A password reset also removes the account's passkeys and API keys, and keeps its 2FA,
+  so the mailbox alone does not get past it.
 - A provider identity (Google, Apple) that links to an email-matched account which
   is not verified first takes the account over: unusable password, `token_version`
   bumped, mailed links revoked, passkeys, 2FA and API keys removed, email marked

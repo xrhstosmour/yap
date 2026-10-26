@@ -687,7 +687,11 @@ async def forgot_password(
     "/reset-password",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Confirm password reset",
-    description="Reset password using the token from the reset email.",
+    description=(
+        "Reset password using the token from the reset email. Passkeys and "
+        "API keys are revoked, an enrolled second factor is kept and still "
+        "required at the next login."
+    ),
 )
 async def reset_password(
     data: PasswordResetConfirmRequest,
@@ -696,8 +700,9 @@ async def reset_password(
     """Reset a user's password using a valid reset token.
 
     Consumes the single-use token and updates the password. All
-    outstanding JWTs are invalidated by bumping `token_version`.
-    Returns 400 if the token is missing, expired, or already used.
+    outstanding JWTs are invalidated by bumping `token_version`, and the
+    account's passkeys and API keys are revoked. TOTP and recovery codes are
+    kept. Returns 400 if the token is missing, expired, or already used.
     """
     service = AuthService(session)
     try:

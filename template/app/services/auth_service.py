@@ -717,8 +717,10 @@ class AuthService:
         """Reset a user's password using a valid reset token.
 
         Validates and consumes the single-use token, then updates
-        the hashed password and increments `token_version` to
-        invalidate all outstanding JWT tokens.
+        the hashed password, increments `token_version` to invalidate
+        all outstanding JWT tokens, and removes the account's passkeys and API
+        keys. The TOTP factor and recovery codes stay: the reset link comes
+        from the mailbox, which must not be enough to skip the second factor.
 
         Args:
             token: Opaque reset token from the password reset email.
@@ -747,6 +749,11 @@ class AuthService:
                 raise UserNotFoundError("User not found.")
 
             await self._update_password_and_invalidate(user, new_password)
+
+            # Whoever held the account may have added a passkey or an API
+            # key, and neither ends with the password. The second factor is
+            # kept, whoever resets from the mailbox must still pass it.
+            await self._clear_account_access(user.id, second_factor=False)
 
         logger.info("password_reset", user_id=str(user.id))
 

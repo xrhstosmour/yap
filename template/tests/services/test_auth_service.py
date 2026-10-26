@@ -800,12 +800,15 @@ class TestResetPassword:
         consume.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_reset_revokes_mailed_links(self, session: AsyncSession) -> None:
-        """A link mailed before the reset must not outlive it."""
+    async def test_reset_removes_passkeys_and_keys_but_keeps_the_second_factor(
+        self, session: AsyncSession
+    ) -> None:
+        """A thief's passkey or API key must go, the owner's TOTP must stay."""
         auth_service = _auth_service(session)
         user = await auth_service.register(
             RegisterRequest(email="passkeys@example.com", password="oldpassword1")
         )
+        await _plant_extra_credentials(session, user)
 
         with (
             patch(
@@ -817,6 +820,24 @@ class TestResetPassword:
             await auth_service.reset_password("valid-token", "newpassword2")
 
         purge.assert_awaited_once_with(user.id)
+        assert await _remaining_extra_credentials(session, user.id) == {
+            "passkeys": 0,
+            "api_keys": 0,
+            "recovery_codes": 1,
+        }
+        with system_context():
+            reloaded = await auth_service.user_repository.get(user.id)
+        assert reloaded is not None
+        assert reloaded.is_2fa_enabled is True
+        assert reloaded.totp_secret_encrypted is not None
+
+        with patch(
+            "app.services.two_factor_service.TwoFactorAuthService.issue_challenge",
+            AsyncMock(return_value="challenge"),
+        ):
+            response = await auth_service.issue_login_response(reloaded)
+        assert response.requires_2fa is True
+        assert response.access_token is None
 
     @pytest.mark.asyncio
     async def test_reset_password_invalid_token(self, session: AsyncSession) -> None:
