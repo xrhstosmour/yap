@@ -29,6 +29,21 @@ fi
 # `Jane Doe`, ran its second word as a command and stopped here. Compose and
 # the app read `.env` themselves.
 POSTGRESQL_USER="$(grep "^POSTGRESQL_USER=" .env | head -1 | cut -d= -f2- | tr -d '"' || true)"
+RABBITMQ_PORT="$(grep "^RABBITMQ_PORT=" .env | head -1 | cut -d= -f2- | tr -d '"' || true)"
+RABBITMQ_PASSWORD="$(grep "^RABBITMQ_PASSWORD=" .env | head -1 | cut -d= -f2- | tr -d '"' || true)"
+
+# RabbitMQ is the Celery broker, and it refuses to start without a password
+# or the TLS certificates `setup.sh` generates. Say so here rather than letting
+# the container crash and every dispatch fail later. The value is never printed.
+RABBITMQ_CA_CERTIFICATE="containers/distribute/brokers/rabbitmq/certificates/ca_certificate.pem"
+if [ -z "${RABBITMQ_PASSWORD}" ]; then
+    echo "RABBITMQ_PASSWORD is empty in .env. Run ./scripts/setup.sh first." >&2
+    exit 1
+fi
+if [ ! -f "${RABBITMQ_CA_CERTIFICATE}" ]; then
+    echo "${RABBITMQ_CA_CERTIFICATE} is missing. Run ./scripts/setup.sh first." >&2
+    exit 1
+fi
 
 # The compose service names only resolve inside the Docker network. From the
 # host, reach the published ports on loopback instead. The app reads
@@ -36,9 +51,10 @@ POSTGRESQL_USER="$(grep "^POSTGRESQL_USER=" .env | head -1 | cut -d= -f2- | tr -
 export POSTGRESQL_SERVER=127.0.0.1
 export POSTGRESQL_HOST=127.0.0.1
 export REDIS_HOST=127.0.0.1
+export RABBITMQ_HOST=127.0.0.1
 
 echo "Starting services..."
-docker compose -f docker-compose.yml up -d postgresql redis{% if include_object_storage %} seaweedfs{% endif %}
+docker compose -f docker-compose.yml up -d postgresql redis rabbitmq{% if include_object_storage %} seaweedfs{% endif %}
 
 echo "Waiting for PostgreSQL..."
 for _ in $(seq 1 30); do
@@ -48,6 +64,38 @@ for _ in $(seq 1 30); do
     fi
     sleep 1
 done
+
+# Without the broker every `.delay()` on the request path retries and then
+# fails, so a signup is slow and its email is never queued. Stop here instead.
+echo "Waiting for RabbitMQ..."
+rabbitmq_healthy=false
+for _ in $(seq 1 60); do
+    if [ "$(docker compose -f docker-compose.yml ps --format '{{ '{{' }}.Health{{ '}}' }}' rabbitmq 2>/dev/null)" = "healthy" ]; then
+        rabbitmq_healthy=true
+        break
+    fi
+    sleep 2
+done
+if [ "${rabbitmq_healthy}" != "true" ]; then
+    echo "RabbitMQ did not become healthy in 120 seconds." >&2
+    echo "See: docker compose -f docker-compose.yml logs rabbitmq" >&2
+    exit 1
+fi
+
+# The compose healthcheck only pings the node. Check the AMQPS listener answers
+# a TLS handshake that the CA verifies, so a bad certificate setup fails here
+# and not on the first dispatch.
+if command -v openssl >/dev/null 2>&1; then
+    if ! openssl s_client -connect "127.0.0.1:${RABBITMQ_PORT:-5672}" \
+        -CAfile "${RABBITMQ_CA_CERTIFICATE}" -verify_return_error \
+        </dev/null >/dev/null 2>&1; then
+        echo "RabbitMQ is healthy but its AMQPS listener failed a TLS handshake with the CA certificate." >&2
+        echo "See: docker compose -f docker-compose.yml logs rabbitmq" >&2
+        exit 1
+    fi
+else
+    echo "openssl not found, skipping the RabbitMQ TLS handshake check."
+fi
 
 # `setup.sh` already migrated, but a branch switch adds revisions without
 # needing the whole machine prepared again, and this is a no-op when there
