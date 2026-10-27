@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import importlib.util
+import ssl
 import sys
+from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -102,6 +106,52 @@ class TestCeleryAppConfig:
             celery_app.conf.result_expires
             == _mock_settings.CELERY_RESULT_EXPIRES_SECONDS
         )
+
+
+@pytest.mark.skipif(
+    celery_app is None, reason="celery_app module not available (template not rendered)"
+)
+class TestBrokerTLS:
+    """The broker connection verifies the server certificate when a CA is set."""
+
+    @staticmethod
+    def _load_with(
+        monkeypatch: pytest.MonkeyPatch, certificate_path: str | None
+    ) -> Any:  # noqa: ANN401
+        """Execute `app/celery_app.py` as a fresh module against fake settings."""
+        monkeypatch.setattr(_mock_settings, "SSL_CERTIFICATE_PATH", certificate_path)
+        monkeypatch.setitem(
+            sys.modules, "app.core.settings", MagicMock(settings=_mock_settings)
+        )
+        path = Path(__file__).resolve().parents[2] / "app" / "celery_app.py"
+        spec = importlib.util.spec_from_file_location("celery_app_under_test", path)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(module)
+        finally:
+            # A new `Celery` becomes the process-wide current app, put it back.
+            celery_app.set_current()
+        return module.celery_app
+
+    def test_certificate_path_requires_a_verified_server_certificate(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """With a CA path the broker must present a certificate that chains to it."""
+        app = self._load_with(monkeypatch, "/etc/ssl/rabbitmq/ca_certificate.pem")
+
+        assert app.conf.broker_use_ssl == {
+            "ca_certs": "/etc/ssl/rabbitmq/ca_certificate.pem",
+            "cert_reqs": ssl.CERT_REQUIRED,
+        }
+
+    def test_without_a_certificate_path_tls_is_not_configured(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No CA path leaves the transport settings to the broker URL."""
+        app = self._load_with(monkeypatch, None)
+
+        assert not app.conf.broker_use_ssl
 
 
 @pytest.mark.skipif(

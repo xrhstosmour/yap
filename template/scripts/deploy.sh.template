@@ -133,7 +133,11 @@ info "Copying the project to $TARGET:~/$REMOTE_DIRECTORY."
 # Excluded paths are also kept on the server, so the certificates `Traefik`
 # has issued and the settings survive every deploy. Files are readable by
 # all, the services' own users map to other user IDs than the owner, and
-# the home directory above keeps everyone else out.
+# the home directory above keeps everyone else out. The `RabbitMQ` CA private
+# key is never sent, and a copy a past deploy left on the server is deleted,
+# it only signs certificates on the machine that ran setup and
+# nothing at runtime reads it. The server key has to stay readable to the
+# broker's own user, whose ID differs from the deploy user's.
 rsync -az --delete --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r \
     -e "ssh ${SSH_OPTIONS[*]}" \
     --exclude='.git/' --exclude='.venv/' --exclude='__pycache__/' \
@@ -141,7 +145,7 @@ rsync -az --delete --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r \
     --exclude='htmlcov/' --exclude='.coverage' --exclude='node_modules/' \
     --exclude='.env' --exclude='.env.*' --exclude='backups/' \
     --exclude='deploy/backup.env' --exclude='deploy/ssh/' \
-    --exclude='acme.json' --exclude='.htpasswd' --exclude='/docker-compose.yml' \
+    --exclude='acme.json' --exclude='.htpasswd' --filter='H ca_key.pem' --exclude='/docker-compose.yml' \
     ./ "$TARGET:$REMOTE_DIRECTORY/"
 rsync -az -e "ssh ${SSH_OPTIONS[*]}" --chmod=F644 "$STAGING/docker-compose.yml" "$TARGET:$REMOTE_DIRECTORY/docker-compose.yml"
 

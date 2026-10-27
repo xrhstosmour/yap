@@ -63,7 +63,14 @@ services:
       # hold. This is the same reasoning as `CELERY_CONCURRENCY`.
       - "WEB_CONCURRENCY=${WEB_CONCURRENCY:-1}"
     volumes:
-      - "./containers/distribute/brokers/rabbitmq/certificates/ca_certificate.pem:/etc/ssl/rabbitmq/ca_certificate.pem:ro"
+      # Long form so a missing certificate fails the start instead of Docker
+      # creating a root-owned directory at the path.
+      - type: "bind"
+        source: "./containers/distribute/brokers/rabbitmq/certificates/ca_certificate.pem"
+        target: "/etc/ssl/rabbitmq/ca_certificate.pem"
+        read_only: true
+        bind:
+          create_host_path: false
     ports:
       # Bound to loopback by default. `"8000:8000"` publishes on 0.0.0.0, so
       # with Traefik in front the app was still reachable directly on port
@@ -136,7 +143,14 @@ services:
     container_name: "{{ project_slug }}-celery-worker"
     restart: "unless-stopped"
     volumes:
-      - "./containers/distribute/brokers/rabbitmq/certificates/ca_certificate.pem:/etc/ssl/rabbitmq/ca_certificate.pem:ro"
+      # Long form so a missing certificate fails the start instead of Docker
+      # creating a root-owned directory at the path.
+      - type: "bind"
+        source: "./containers/distribute/brokers/rabbitmq/certificates/ca_certificate.pem"
+        target: "/etc/ssl/rabbitmq/ca_certificate.pem"
+        read_only: true
+        bind:
+          create_host_path: false
     # The image's check asks the API on port 8000, which a worker does not
     # serve, so it reported unhealthy forever. A ping answered by this
     # worker proves it is up and connected to the broker.
@@ -199,7 +213,14 @@ services:
 {%- if include_redbeat %}
     command: ["celery", "-A", "app.celery_app", "beat", "-S", "redbeat.RedBeatScheduler", "-l", "info"]
     volumes:
-      - "./containers/distribute/brokers/rabbitmq/certificates/ca_certificate.pem:/etc/ssl/rabbitmq/ca_certificate.pem:ro"
+      # Long form so a missing certificate fails the start instead of Docker
+      # creating a root-owned directory at the path.
+      - type: "bind"
+        source: "./containers/distribute/brokers/rabbitmq/certificates/ca_certificate.pem"
+        target: "/etc/ssl/rabbitmq/ca_certificate.pem"
+        read_only: true
+        bind:
+          create_host_path: false
 {%- else %}
     # `--schedule` is explicit because the default writes `celerybeat-schedule`
     # into the working directory, and `/app` is root-owned while the container
@@ -210,7 +231,14 @@ services:
     command: ["celery", "-A", "app.celery_app", "beat", "--loglevel=info", "--schedule", "/var/lib/celery/celerybeat-schedule"]
     volumes:
       - "celery-beat-schedule:/var/lib/celery"
-      - "./containers/distribute/brokers/rabbitmq/certificates/ca_certificate.pem:/etc/ssl/rabbitmq/ca_certificate.pem:ro"
+      # Long form so a missing certificate fails the start instead of Docker
+      # creating a root-owned directory at the path.
+      - type: "bind"
+        source: "./containers/distribute/brokers/rabbitmq/certificates/ca_certificate.pem"
+        target: "/etc/ssl/rabbitmq/ca_certificate.pem"
+        read_only: true
+        bind:
+          create_host_path: false
 {%- endif %}
     env_file:
       - ".env"

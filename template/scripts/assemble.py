@@ -6,6 +6,7 @@ so that relative paths (configuration/, certificates/) inside each service's
 docker-compose.yml resolve correctly.
 """
 
+import argparse
 import os
 import re
 import shutil
@@ -385,6 +386,56 @@ def store_traefik_dashboard_password(password: str) -> None:
         return
 
 
+def write_certificate_path(containers_directory: str) -> None:
+    """Write `SSL_CERTIFICATE_PATH` so Python's ssl module trusts the self-signed CA.
+
+    Args:
+        containers_directory: Directory the services are vendored into.
+    """
+    certs_env = os.path.join(containers_directory, ".certificates")
+    ca_cert = os.path.abspath(
+        os.path.join(
+            containers_directory, MAP["rabbitmq"], "certificates", "ca_certificate.pem"
+        )
+    )
+    with open(certs_env, "w") as f:
+        f.write(f"SSL_CERTIFICATE_PATH={ca_cert}\n")
+    print(f"  Wrote {certs_env}")
+
+
+def copy_certificate_to_flower(containers_directory: str) -> None:
+    """Copy the `RabbitMQ` CA to Flower so it can trust the broker over TLS.
+
+    Args:
+        containers_directory: Directory the services are vendored into.
+    """
+    rabbit_cert = os.path.join(
+        containers_directory, MAP["rabbitmq"], "certificates", "ca_certificate.pem"
+    )
+    flower_cert_dir = os.path.join(containers_directory, MAP["flower"], "certificates")
+    if os.path.isfile(rabbit_cert):
+        os.makedirs(flower_cert_dir, exist_ok=True)
+        shutil.copy2(rabbit_cert, os.path.join(flower_cert_dir, "ca_certificate.pem"))
+        print("  Copied RabbitMQ CA cert to Flower")
+
+
+def generate_broker_certificates() -> None:
+    """Generate only the `RabbitMQ` certificates, touching nothing else.
+
+    Used by `setup.sh` on a fresh clone, where the full run would copy every
+    vendored service over local edits and regenerate the `Traefik` secrets.
+    """
+    containers_directory = "containers"
+    certificate_directory = os.path.join(
+        containers_directory, MAP["rabbitmq"], "certificates"
+    )
+    os.makedirs(certificate_directory, exist_ok=True)
+    generate_certs(certificate_directory, read_project_slug())
+    if os.path.isdir(os.path.join(containers_directory, MAP["flower"])):
+        copy_certificate_to_flower(containers_directory)
+    write_certificate_path(containers_directory)
+
+
 def main() -> None:
     containers_directory = "containers"
     services = read_services(containers_directory)
@@ -501,32 +552,11 @@ def main() -> None:
         if os.path.basename(root) == "certificates":
             generate_certs(root, project_slug)
 
-    # Propagate the RabbitMQ CA cert to Flower so it can trust the broker over TLS.
     # Must run after generate_certs() so ca_certificate.pem actually exists.
     if "flower" in services:
-        rabbit_cert = os.path.join(
-            containers_directory, MAP["rabbitmq"], "certificates", "ca_certificate.pem"
-        )
-        flower_cert_dir = os.path.join(
-            containers_directory, MAP["flower"], "certificates"
-        )
-        if os.path.isfile(rabbit_cert):
-            os.makedirs(flower_cert_dir, exist_ok=True)
-            shutil.copy2(
-                rabbit_cert, os.path.join(flower_cert_dir, "ca_certificate.pem")
-            )
-            print("  Copied RabbitMQ CA cert to Flower")
+        copy_certificate_to_flower(containers_directory)
 
-    # Write SSL_CERTIFICATE_PATH so Python's ssl module trusts the self-signed CA.
-    certs_env = os.path.join(containers_directory, ".certificates")
-    ca_cert = os.path.abspath(
-        os.path.join(
-            containers_directory, MAP["rabbitmq"], "certificates", "ca_certificate.pem"
-        )
-    )
-    with open(certs_env, "w") as f:
-        f.write(f"SSL_CERTIFICATE_PATH={ca_cert}\n")
-    print(f"  Wrote {certs_env}")
+    write_certificate_path(containers_directory)
 
     # The cache is kept so subsequent runs of assemble.py within the same
     # copier update reuse it instead of cloning again. It is validated
@@ -537,4 +567,13 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Vendor the containers repo.")
+    parser.add_argument(
+        "--certificates-only",
+        action="store_true",
+        help="generate only the RabbitMQ certificates, touching nothing else",
+    )
+    if parser.parse_args().certificates_only:
+        generate_broker_certificates()
+    else:
+        main()
