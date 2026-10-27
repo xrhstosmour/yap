@@ -9,6 +9,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Start `rabbitmq` in `scripts/start.sh`, refusing to start without `RABBITMQ_PASSWORD` or the CA certificate, then wait for the broker to be healthy and check its AMQPS listener with a verified TLS handshake
 - Add `WS_MAX_CONNECTIONS_PER_USER`, `WS_MAX_CONNECTIONS_TOTAL`, `WS_MAX_ADMIN_CONNECTIONS`, `WS_MAX_LIFETIME_SECONDS` and `WS_MAX_MESSAGE_BYTES`, capping `WebSocket` connections per user and per worker, closing them after a lifetime and limiting message size
 - Add `RATE_LIMIT_GLOBAL_ENABLED`, `RATE_LIMIT_GLOBAL_ANONYMOUS_PER_MINUTE`, `RATE_LIMIT_GLOBAL_AUTHENTICATED_PER_MINUTE` and `RATE_LIMIT_GLOBAL_API_KEY_PER_MINUTE`, a per-client rate limit in front of every route, by IP for anonymous callers and by user for a valid access token
 - Add `ABUSE_FAILURE_THRESHOLD`, `ABUSE_FAILURE_WINDOW_SECONDS` and `ABUSE_BLOCK_SECONDS`, blocking an IP that triggers too many 404, 405 or 422 responses within the window

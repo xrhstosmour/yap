@@ -124,7 +124,7 @@ You need:
 # The same, turning a generation option on or off.
 ./scripts/synchronize.sh --data include_flower=true
 
-# Start dev server, with services and migrations.
+# Start dev server, with services (including RabbitMQ) and migrations.
 ./scripts/start.sh
 
 # Run every gate CI runs.
