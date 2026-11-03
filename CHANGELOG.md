@@ -59,6 +59,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Run `GlitchTip` 6 as one all-in-one container of about 200 MiB instead of a web and worker pair of about 1.2 GiB, and add `EMAIL_URL` and `GLITCHTIP_DOMAIN`, which it requires, an existing `GlitchTip` 4 database must first be migrated by a `5.x` image and `PostgreSQL` restarted for `max_locks_per_transaction`
 - Send a verification email when a user changes their email address, and reset `is_verified` for self and admin updates
 - Require a fresh proof, a `password`, a `totp_code` or a recent `auth_time`, for 2FA enrollment and confirmation, passkey registration and `DELETE /users/me`, answering 401 with the `REAUTH_REQUIRED` code when it is missing
 - Keep one live email token per user and purpose, purge them on a password or email change, and check password strength before a reset token is used up
