@@ -120,7 +120,7 @@ chmod 600 .env
 # the Postgres and Redis passwords in full connection URLs.
 "${SED_INPLACE[@]}" "s/METABASE_DATABASE_PASSWORD=.*/METABASE_DATABASE_PASSWORD=your-postgresql-password/" .env.example
 "${SED_INPLACE[@]}" "s|^DATABASE_URL=.*|DATABASE_URL=postgres://your-user:your-postgresql-password@postgresql:5432/glitchtip|" .env.example
-"${SED_INPLACE[@]}" "s|^REDIS_URL=.*|REDIS_URL=redis://:your-redis-password@redis:6379/0|" .env.example
+"${SED_INPLACE[@]}" "s|^VALKEY_URL=.*|VALKEY_URL=redis://:your-redis-password@redis:6379/0|" .env.example
 "${SED_INPLACE[@]}" "s/SENTRY_DSN=.*/SENTRY_DSN=https:\/\/public:secret@sentry.com\/1/" .env.example
 
 # Append every setting `.env.example` has and `.env` lacks, as the example
@@ -264,7 +264,7 @@ CURRENT_POSTGRESQL_PASSWORD="$(sed -n "s/^POSTGRESQL_PASSWORD=//p" .env | head -
 set_url_password DATABASE_URL "${CURRENT_POSTGRESQL_PASSWORD}" .env
 set_environment_value METABASE_DATABASE_PASSWORD "${CURRENT_POSTGRESQL_PASSWORD}" .env
 CURRENT_REDIS_PASSWORD="$(sed -n "s/^REDIS_PASSWORD=//p" .env | head -1)"
-set_url_password REDIS_URL "${CURRENT_REDIS_PASSWORD}" .env
+set_url_password VALKEY_URL "${CURRENT_REDIS_PASSWORD}" .env
 
 # Generate self-signed TLS certificates for RabbitMQ and Traefik if they are
 # missing. assemble.py creates them during synchronize.sh, but a fresh clone
