@@ -272,6 +272,22 @@ class TestGetDownloadUrl:
         )
 
     @pytest.mark.asyncio
+    async def test_control_characters_never_reach_the_disposition_header(
+        self, mock_s3_client: MagicMock
+    ) -> None:
+        """A CR or LF in a filename must not become a second header line."""
+        await get_download_url(
+            object_key="test-key",
+            mimetype="text/html",
+            filename="a\r\nX-Injected: 1\x00.html",
+        )
+
+        _, kwargs = mock_s3_client.generate_presigned_url.call_args
+        disposition = kwargs["Params"]["ResponseContentDisposition"]
+        assert not any(character in disposition for character in "\r\n\x00")
+        assert 'filename="aX-Injected: 1.html"' in disposition
+
+    @pytest.mark.asyncio
     async def test_svg_forces_attachment_disposition(
         self, mock_s3_client: MagicMock
     ) -> None:
