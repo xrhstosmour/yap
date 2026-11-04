@@ -50,7 +50,6 @@ while [ $# -gt 0 ]; do
 done
 
 REMOTE_DIRECTORY="{{ project_slug }}"
-COMPOSE="docker compose -f docker-compose.yml -f docker-compose.app.yml"
 
 # A domain gets a certificate, an address cannot.
 if [[ "$ADDRESS" =~ ^[0-9.]+$ || "$ADDRESS" == *:* ]]; then
@@ -128,7 +127,7 @@ rsync -az --delete --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r \
     --exclude='.mypy_cache/' --exclude='.pytest_cache/' --exclude='.ruff_cache/' \
     --exclude='htmlcov/' --exclude='.coverage' --exclude='node_modules/' \
     --exclude='.env' --exclude='.env.*' --exclude='backups/' \
-    --exclude='deploy/backup.env' --exclude='deploy/ssh/' \
+    --exclude='deploy/backup.env' --exclude='deploy/ssh/' --exclude='/.releases' \
     --exclude='acme.json' --exclude='.htpasswd' --filter='H ca_key.pem' --exclude='/docker-compose.yml' \
     ./ "$TARGET:$REMOTE_DIRECTORY/"
 rsync -az -e "ssh ${SSH_OPTIONS[*]}" --chmod=F644 "$STAGING/docker-compose.yml" "$TARGET:$REMOTE_DIRECTORY/docker-compose.yml"
@@ -173,6 +172,10 @@ fi
 rm -f settings-error.log
 
 $COMPOSE up -d --remove-orphans --wait --wait-timeout 300
+
+# Only a release that came up healthy is kept to roll back to, and its images
+# keep their tag, so the prune below leaves them.
+COMPOSE="$COMPOSE" bash scripts/releases.sh record $RELEASE
 docker image prune -f >/dev/null
 $COMPOSE ps --format 'table {{ "{{" }}.Service{{ "}}" }}\t{{ "{{" }}.Status{{ "}}" }}'
 EOF

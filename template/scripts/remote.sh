@@ -8,6 +8,10 @@ info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*" >&2; exit 1; }
 
+# The stack as the server runs it, from inside the project directory there.
+# shellcheck disable=SC2034 # Used by the scripts that source this file.
+COMPOSE="docker compose -f docker-compose.yml -f docker-compose.app.yml"
+
 # set_value <key> <value> <file>, replaces the line of a settings file.
 set_value() {
     local key="$1" value="$2" file="$3"
