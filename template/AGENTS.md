@@ -129,7 +129,7 @@ app/
 
 migrations/         Alembic versions
 tests/              pytest suite (api/, services/, repositories/, core/, models/)
-scripts/            setup.sh, lint.sh, deploy.sh, backup.sh, offsite_backup.sh, restore.sh, assemble.py
+scripts/            setup.sh, lint.sh, deploy.sh, rollback.sh, logs.sh, env.sh, backup.sh, offsite_backup.sh, restore.sh, assemble.py
 deploy/             First-boot server setup, off-box backup configuration and its timer
 templates/email/    Jinja2 email templates
 ```
@@ -160,6 +160,44 @@ With a domain, `Traefik` gets a `Let's Encrypt` certificate, point its
 DNS at the server first. With an IP address it runs on a self-signed
 certificate, for trying a server out only. Run it again to deploy a new
 version, issued certificates and the settings on the server are kept.
+
+Day two, from the same machine, with the same `user@host`, `-p` and `-i`:
+
+- `rollback.sh` runs the images of an earlier release again, the previous one
+  by default, `--list` shows what the server keeps. A deploy that came up
+  healthy is recorded in `.releases` on the server and keeps its images, the
+  last three. Which release runs is read from the images, so after a deploy
+  that failed its health check a rollback goes back to the last healthy one.
+  A rollback swaps images only: the compose files, configuration and settings
+  stay at the newest deploy and migrations the newer release ran stay
+  applied, so it is only safe while the older images run on all of those. A
+  release is the commit, deploy from a clean tree or two releases share a
+  name.
+- `logs.sh [service] [-f] [-n COUNT]` reads the stack's logs.
+- `env.sh list|get|set` shows the names of the server's settings, never their
+  values in a listing, reads one, or sets one from standard input or a
+  prompt, never an argument, and brings the stack up again, putting the old
+  settings back if it does not come up. `deploy.sh` writes the file again
+  from `.env.production`, so `set` changes that local file too, and a deploy
+  from GitHub writes it from the `ENV_PRODUCTION` secret, update that as
+  well.
+
+`scripts/remote.sh` holds what these four share, `releases.sh` and
+`environment.sh` run on the server.
+
+To deploy on every merge to `main`, answer yes to `include_deploy_workflow`.
+It adds `.github/workflows/deploy.yml`, which runs `deploy.sh` in a
+`production` environment of the repository. Set the secrets `DEPLOY_HOST`
+(`user@host`), `DEPLOY_DOMAIN`, `DEPLOY_SSH_KEY`, `DEPLOY_KNOWN_HOSTS` (the
+server's line from `ssh-keyscan`) and `ENV_PRODUCTION` (the contents of
+`.env.production`) on it, and `DEPLOY_PORT` as a variable if SSH is not on
+22. Run the first deploy by hand, it creates the dashboard login and
+certificates, which later deploys from the workflow leave where the server
+keeps them. The job runs for `main` only, also when started by hand, and the
+environment should allow deployments from `main` only too. Add required
+reviewers to the environment to gate every deploy. When the project is nested
+in a larger repository, its environment is `<folder>-production` and its
+runs queue apart from the other projects'.
 
 Docker publishes ports past `ufw` unless it runs rootless. The compose
 files publish the infrastructure on `127.0.0.1`, keep any port added
