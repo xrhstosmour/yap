@@ -160,6 +160,40 @@ auth_rate_limiter = RateLimiter(
 )
 
 
+_FIXED_WINDOW_SCRIPT = """
+local count = redis.call("INCR", KEYS[1])
+local ttl = redis.call("TTL", KEYS[1])
+if count == 1 or ttl < 0 then
+    redis.call("EXPIRE", KEYS[1], ARGV[1])
+    ttl = tonumber(ARGV[1])
+end
+return {count, ttl}
+"""
+
+
+async def fixed_window_count(key: str, window: int) -> tuple[int, int]:
+    """Count one event in a fixed window that the events cannot extend.
+
+    The window starts at the first event and ends `window` seconds later.
+    Refreshing the TTL on every event, over-limit ones included, would let
+    anyone who keeps trying hold a lockout open for as long as they like.
+    Counting and expiring run in one script, so a counter whose TTL was lost
+    or never set gets one again instead of staying closed for good.
+
+    Args:
+        key: Redis key of the counter
+        window: Window length in seconds
+
+    Returns:
+        Tuple of (count including this event, seconds until the window ends)
+    """
+    redis_client = await get_redis()
+    count, ttl = await redis_client.eval(  # type: ignore[misc]
+        _FIXED_WINDOW_SCRIPT, 1, key, str(window)
+    )
+    return int(count), int(ttl)
+
+
 async def check_user_rate_limit(user_id: str) -> None:
     """Check if user has exceeded their rate limit.
 
