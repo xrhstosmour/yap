@@ -263,7 +263,7 @@ uv run celery -A app.celery_app beat --loglevel=info
 ./scripts/synchronize.sh --data include_redbeat=true
 ```
 
-`YAP_SYNC=1 ./scripts/setup.sh` skips Docker/migrations/seeding, only ensure `.env` exists. Automatically set by `synchronize.sh`.
+`YAP_SYNC=1 ./scripts/setup.sh` skips Docker, migrations and seeding. It still ensures `.env` exists, generates the TLS certificates, runs `uv sync` and installs the pre-commit hooks. Automatically set by `synchronize.sh`.
 
 ## Architecture patterns
 
@@ -292,5 +292,5 @@ uv run celery -A app.celery_app beat --loglevel=info
 - `from __future__ import annotations` at the top of every module.
 - `ruff` for linting (single-line imports, double quotes, LF).
 - `mypy-ci.toml` for CI type checking.
-- Pre-commit hooks enforce formatting, type checking, and secret detection.
+- Pre-commit hooks enforce formatting, type checking, and private key and AWS credential detection.
 - Commit messages: imperative mood, descriptive, prefixed with scope if needed.
