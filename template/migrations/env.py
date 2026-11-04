@@ -50,12 +50,15 @@ def _include_object(
 ) -> bool:
     """Hide objects autogenerate cannot see the definition of.
 
-    The trigram indexes are created with raw `CREATE INDEX ... USING gin`
-    inside earlier migrations rather than declared on a model, so every
-    autogenerate run reads them as orphans and proposes dropping them.
+    The trigram and full-text indexes are created with raw
+    `CREATE INDEX ... USING gin` inside earlier migrations rather than
+    declared on a model, so every autogenerate run, and `alembic check` in a
+    generated project's CI, reads them as orphans and proposes dropping them.
     """
     del database_object
-    return not (type_ == "index" and name is not None and name.endswith("_trgm"))
+    return not (
+        type_ == "index" and name is not None and name.endswith(("_trgm", "_fts"))
+    )
 
 
 def _compare_type(
