@@ -27,6 +27,7 @@ import time
 from dataclasses import dataclass
 from dataclasses import field
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 import jwt
@@ -181,7 +182,7 @@ class PushService:
             for token in tokens:
                 try:
                     response = await client.post(
-                        f"{host}/3/device/{token}",
+                        f"{host}/3/device/{quote(token, safe='')}",
                         json=payload,
                         headers=headers,
                     )
