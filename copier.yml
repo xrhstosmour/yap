@@ -194,6 +194,11 @@ development_port:
   help: "Port the local development server listens on:"
   default: 8000
 
+include_deploy_workflow:
+  type: bool
+  help: "Deploy to the server from GitHub Actions on every merge to main?"
+  default: false
+
 nested:
   type: bool
   help: "Is this project nested inside a larger repository?"
@@ -223,7 +228,7 @@ _exclude:
 _tasks:
   - "python3 scripts/assemble.py"
   - "./scripts/setup.sh"
-  - "{% if nested %}ROOT=$(git rev-parse --show-toplevel 2>/dev/null || (cd .. && pwd)) && mkdir -p \"$ROOT/.github/workflows\" && mv .github/workflows/ci.yml \"$ROOT/.github/workflows/{{ _folder_name }}.yml\" && rm -rf .github{% endif %}"
+  - "{% if nested %}ROOT=$(git rev-parse --show-toplevel 2>/dev/null || (cd .. && pwd)) && mkdir -p \"$ROOT/.github/workflows\" && mv .github/workflows/ci.yml \"$ROOT/.github/workflows/{{ _folder_name }}.yml\" && { [ ! -f .github/workflows/deploy.yml ] || mv .github/workflows/deploy.yml \"$ROOT/.github/workflows/{{ _folder_name }}-deploy.yml\"; } && rm -rf .github{% endif %}"
   - "./scripts/record_template_version.sh"
 
 _answers_file: .copier/.answers.yml

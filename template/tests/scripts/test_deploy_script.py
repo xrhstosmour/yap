@@ -6,6 +6,7 @@ a placeholder secret or development settings never reaches production.
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -88,6 +89,43 @@ class TestDeployScript:
         result = _deploy(project, "deploy@server.example", "app.example.com")
         assert result.returncode == 1
         assert "set it to production" in result.stderr
+
+    @pytest.mark.skipif(shutil.which("rsync") is None, reason="needs rsync")
+    def test_the_servers_certificates_survive_a_deploy_without_them(
+        self, tmp_path: Path
+    ) -> None:
+        """A checkout from the GitHub workflow has no git ignored certificates.
+
+        `--delete` used to remove the server's, and the broker's bind mounts
+        became directories the next time it was recreated. The script's own
+        filters are run here against a server that has them.
+        """
+        filters = [
+            f"--{kind}={rule}"
+            for kind, rule in re.findall(
+                r"--(exclude|filter)='([^']+)'", DEPLOY.read_text()
+            )
+        ]
+        source, server = tmp_path / "source", tmp_path / "server"
+        (source / "config").mkdir(parents=True)
+        (server / "config").mkdir(parents=True)
+        (source / "app.py").write_text("")
+        for name in ("server.pem", "server.key", "server.crt", "ca_key.pem"):
+            (server / "config" / name).write_text("kept")
+        (server / "stale.txt").write_text("")
+
+        subprocess.run(
+            ["rsync", "-a", "--delete", *filters, f"{source}/", f"{server}/"],
+            check=True,
+            timeout=30,
+        )
+
+        assert (server / "config" / "server.pem").exists()
+        assert (server / "config" / "server.key").exists()
+        assert (server / "config" / "server.crt").exists()
+        # The CA key is deleted on purpose, nothing at runtime reads it.
+        assert not (server / "config" / "ca_key.pem").exists()
+        assert not (server / "stale.txt").exists()
 
     def test_missing_settings_are_refused(self, project: Path) -> None:
         """The local `.env` is never shipped in place of production settings."""
