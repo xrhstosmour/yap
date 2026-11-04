@@ -133,6 +133,17 @@ You need:
 # Deploy to a server, with production settings in .env.production.
 ./scripts/deploy.sh deploy@203.0.113.10 api.example.com
 
+# Go back to the previous release on the server, or list what it keeps.
+./scripts/rollback.sh deploy@203.0.113.10
+./scripts/rollback.sh deploy@203.0.113.10 --list
+
+# Read the logs of the stack on the server, one service, following.
+./scripts/logs.sh deploy@203.0.113.10 app -f
+
+# List, read and set the settings on the server.
+./scripts/env.sh deploy@203.0.113.10 list
+./scripts/env.sh deploy@203.0.113.10 set SENTRY_DSN
+
 # Start all services, the app, worker and beat included. The base file
 # alone only starts the infrastructure.
 docker compose -f docker-compose.yml -f docker-compose.app.yml up -d

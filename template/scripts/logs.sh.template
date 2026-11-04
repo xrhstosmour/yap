@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Read the logs of the stack on the server.
+# Usage: ./scripts/logs.sh <user@host> [service] [options]
+#
+#   -p, --port PORT           SSH port, 22 by default
+#   -i, --identity FILE       SSH private key
+#   -n, --lines COUNT         lines to start from, 100 by default
+#   -f, --follow              keep printing new lines until interrupted
+#
+# Every service when none is named, `app` for the API.
+
+PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$PROJECT_DIR"
+
+# shellcheck source-path=SCRIPTDIR source=remote.sh
+. "$PROJECT_DIR/scripts/remote.sh"
+
+usage() {
+    sed -n '4,10p' "$0" | sed 's/^# \{0,1\}//' >&2
+    exit 2
+}
+
+TARGET="${1:-}"
+[ -n "$TARGET" ] || usage
+shift
+
+SERVICE=""
+LINES=100
+FOLLOW=""
+SSH_PORT=22
+IDENTITY=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -p|--port) SSH_PORT="$2"; shift 2 ;;
+        -i|--identity) IDENTITY="$2"; shift 2 ;;
+        -n|--lines) LINES="$2"; shift 2 ;;
+        -f|--follow) FOLLOW="--follow"; shift ;;
+        -*) usage ;;
+        *) SERVICE="$1"; shift ;;
+    esac
+done
+
+REMOTE_DIRECTORY="{{ project_slug }}"
+connect "$TARGET" "$SSH_PORT" "$IDENTITY"
+[[ "$LINES" =~ ^[0-9]+$ ]] || error "$LINES is not a number of lines."
+[[ "$SERVICE" =~ ^[a-z0-9_-]*$ ]] || error "$SERVICE is not a service name."
+
+remote "cd $REMOTE_DIRECTORY && $COMPOSE logs --no-color --timestamps --tail $LINES $FOLLOW $SERVICE"

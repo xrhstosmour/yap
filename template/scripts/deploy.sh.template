@@ -24,10 +24,8 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$PROJECT_DIR"
 
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
-info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
-warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
-error() { echo -e "${RED}[ERROR]${NC} $*" >&2; exit 1; }
+# shellcheck source-path=SCRIPTDIR source=remote.sh
+. "$PROJECT_DIR/scripts/remote.sh"
 
 usage() {
     sed -n '4,9p' "$0" | sed 's/^# \{0,1\}//' >&2
@@ -52,7 +50,6 @@ while [ $# -gt 0 ]; do
 done
 
 REMOTE_DIRECTORY="{{ project_slug }}"
-COMPOSE="docker compose -f docker-compose.yml -f docker-compose.app.yml"
 
 # A domain gets a certificate, an address cannot.
 if [[ "$ADDRESS" =~ ^[0-9.]+$ || "$ADDRESS" == *:* ]]; then
@@ -62,14 +59,7 @@ elif [[ "$ADDRESS" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$ ]]; t
 else
     error "$ADDRESS is neither a lowercase domain nor an IP address."
 fi
-[[ "$TARGET" =~ ^[a-z_][a-z0-9_-]*@[A-Za-z0-9.:-]+$ ]] || error "$TARGET is not user@host."
-[[ "$SSH_PORT" =~ ^[0-9]+$ ]] || error "$SSH_PORT is not a port."
-
-SSH_OPTIONS=(-p "$SSH_PORT" -o ConnectTimeout=15)
-[ -n "$IDENTITY" ] && SSH_OPTIONS+=(-i "$IDENTITY" -o IdentitiesOnly=yes)
-# Commands for the server are built here, from values checked above.
-# shellcheck disable=SC2029
-remote() { ssh "${SSH_OPTIONS[@]}" "$TARGET" "$@"; }
+connect "$TARGET" "$SSH_PORT" "$IDENTITY"
 
 # Preflight, everything that can be checked before touching the server.
 command -v rsync >/dev/null 2>&1 || error "rsync is required."
@@ -88,13 +78,6 @@ fi
 STAGING="$(mktemp -d)"
 trap 'rm -rf "$STAGING"' EXIT
 chmod 700 "$STAGING"
-
-set_value() {
-    local key="$1" value="$2" file="$3"
-    grep -v "^${key}=" "$file" > "$file.next" || true
-    printf '%s=%s\n' "$key" "$value" >> "$file.next"
-    mv "$file.next" "$file"
-}
 
 cp "$ENVIRONMENT_FILE" "$STAGING/.env"
 chmod 600 "$STAGING/.env"
@@ -138,14 +121,20 @@ info "Copying the project to $TARGET:~/$REMOTE_DIRECTORY."
 # it only signs certificates on the machine that ran setup and
 # nothing at runtime reads it. The server key has to stay readable to the
 # broker's own user, whose ID differs from the deploy user's.
+#
+# Certificates and keys are git ignored, `setup.sh` makes them on one machine.
+# They are protected from `--delete` but still sent when present, so a deploy
+# from a checkout without them, the GitHub workflow, leaves the server's alone.
+# Without that, the broker's bind mounts would turn into directories.
 rsync -az --delete --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r \
     -e "ssh ${SSH_OPTIONS[*]}" \
     --exclude='.git/' --exclude='.venv/' --exclude='__pycache__/' \
     --exclude='.mypy_cache/' --exclude='.pytest_cache/' --exclude='.ruff_cache/' \
     --exclude='htmlcov/' --exclude='.coverage' --exclude='node_modules/' \
     --exclude='.env' --exclude='.env.*' --exclude='backups/' \
-    --exclude='deploy/backup.env' --exclude='deploy/ssh/' \
-    --exclude='acme.json' --exclude='.htpasswd' --filter='H ca_key.pem' --exclude='/docker-compose.yml' \
+    --exclude='deploy/backup.env' --exclude='deploy/ssh/' --exclude='/.releases' \
+    --exclude='acme.json' --exclude='.htpasswd' --filter='H ca_key.pem' --filter='R ca_key.pem' \
+    --filter='P *.pem' --filter='P *.key' --filter='P *.crt' --exclude='/docker-compose.yml' \
     ./ "$TARGET:$REMOTE_DIRECTORY/"
 rsync -az -e "ssh ${SSH_OPTIONS[*]}" --chmod=F644 "$STAGING/docker-compose.yml" "$TARGET:$REMOTE_DIRECTORY/docker-compose.yml"
 
@@ -189,6 +178,10 @@ fi
 rm -f settings-error.log
 
 $COMPOSE up -d --remove-orphans --wait --wait-timeout 300
+
+# Only a release that came up healthy is kept to roll back to, and its images
+# keep their tag, so the prune below leaves them.
+COMPOSE="$COMPOSE" bash scripts/releases.sh record $RELEASE
 docker image prune -f >/dev/null
 $COMPOSE ps --format 'table {{ "{{" }}.Service{{ "}}" }}\t{{ "{{" }}.Status{{ "}}" }}'
 EOF

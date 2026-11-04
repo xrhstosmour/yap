@@ -1,0 +1,64 @@
+name: Backend Deploy
+
+permissions:
+  contents: read
+
+# `main` takes nothing but merges of pull requests that passed CI, so a push
+# to it is what gets deployed, without running the checks a second time.
+on:
+  workflow_dispatch:
+
+  push:
+    branches: [main]
+{% if nested %}
+    paths: ['{{ _folder_name }}/**']
+{% endif %}
+
+# A deploy is never cut in half by the next one, it waits its turn. The group
+# is this project's, GitHub keeps one pending run a group and cancels older
+# ones, so projects in one repository must not share it.
+concurrency:
+  group: deploy-{{ _folder_name }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # A run started by hand can pick any branch, this keeps them off the server.
+    # Also limit the environment's deployment branches to `main`.
+    if: github.ref == 'refs/heads/main'
+    # Required reviewers and the secrets below are set on this environment,
+    # one a project when several share the repository.
+    environment: {% if nested %}{{ _folder_name }}-{% endif %}production
+    defaults:
+      run:
+        working-directory: {% if nested %}{{ _folder_name }}{% else %}.{% endif %}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      # Secrets reach the shell as environment variables, never pasted into
+      # the script text. The server's host key is pinned, `ssh` would
+      # otherwise stop at its first-connection question.
+      - name: Prepare SSH
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+        env:
+          DEPLOY_SSH_KEY: {% raw %}${{ secrets.DEPLOY_SSH_KEY }}{% endraw %}
+          DEPLOY_KNOWN_HOSTS: {% raw %}${{ secrets.DEPLOY_KNOWN_HOSTS }}{% endraw %}
+      - name: Write the production settings
+        run: |
+          umask 077
+          printf '%s\n' "$ENV_PRODUCTION" > .env.production
+        env:
+          ENV_PRODUCTION: {% raw %}${{ secrets.ENV_PRODUCTION }}{% endraw %}
+      # The first deploy has to be run by hand from a machine that ran
+      # `setup.sh`, it creates the dashboard login and certificates this one
+      # leaves where the server keeps them.
+      - name: Deploy
+        run: ./scripts/deploy.sh "$DEPLOY_HOST" "$DEPLOY_DOMAIN" -p "$DEPLOY_PORT" -i ~/.ssh/deploy_key
+        env:
+          DEPLOY_HOST: {% raw %}${{ secrets.DEPLOY_HOST }}{% endraw %}
+          DEPLOY_DOMAIN: {% raw %}${{ secrets.DEPLOY_DOMAIN }}{% endraw %}
+          DEPLOY_PORT: {% raw %}${{ vars.DEPLOY_PORT || 22 }}{% endraw %}
