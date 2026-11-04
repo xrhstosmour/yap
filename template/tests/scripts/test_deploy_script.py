@@ -12,7 +12,8 @@ from pathlib import Path
 
 import pytest
 
-DEPLOY = Path(__file__).resolve().parents[2] / "scripts" / "deploy.sh"
+SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
+DEPLOY = SCRIPTS / "deploy.sh"
 
 COMPLETE = "ENVIRONMENT=production\nSECRET_KEY=generated-elsewhere\n"
 
@@ -22,6 +23,7 @@ def project(tmp_path: Path) -> Path:
     """A project with the deploy script, assembled, and complete settings."""
     (tmp_path / "scripts").mkdir()
     shutil.copy2(DEPLOY, tmp_path / "scripts" / "deploy.sh")
+    shutil.copy2(SCRIPTS / "remote.sh", tmp_path / "scripts" / "remote.sh")
     (tmp_path / "containers").mkdir()
     (tmp_path / ".env.production").write_text(COMPLETE)
     return tmp_path

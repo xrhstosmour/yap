@@ -24,10 +24,8 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$PROJECT_DIR"
 
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
-info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
-warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
-error() { echo -e "${RED}[ERROR]${NC} $*" >&2; exit 1; }
+# shellcheck source-path=SCRIPTDIR source=remote.sh
+. "$PROJECT_DIR/scripts/remote.sh"
 
 usage() {
     sed -n '4,9p' "$0" | sed 's/^# \{0,1\}//' >&2
@@ -62,14 +60,7 @@ elif [[ "$ADDRESS" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$ ]]; t
 else
     error "$ADDRESS is neither a lowercase domain nor an IP address."
 fi
-[[ "$TARGET" =~ ^[a-z_][a-z0-9_-]*@[A-Za-z0-9.:-]+$ ]] || error "$TARGET is not user@host."
-[[ "$SSH_PORT" =~ ^[0-9]+$ ]] || error "$SSH_PORT is not a port."
-
-SSH_OPTIONS=(-p "$SSH_PORT" -o ConnectTimeout=15)
-[ -n "$IDENTITY" ] && SSH_OPTIONS+=(-i "$IDENTITY" -o IdentitiesOnly=yes)
-# Commands for the server are built here, from values checked above.
-# shellcheck disable=SC2029
-remote() { ssh "${SSH_OPTIONS[@]}" "$TARGET" "$@"; }
+connect "$TARGET" "$SSH_PORT" "$IDENTITY"
 
 # Preflight, everything that can be checked before touching the server.
 command -v rsync >/dev/null 2>&1 || error "rsync is required."
@@ -88,13 +79,6 @@ fi
 STAGING="$(mktemp -d)"
 trap 'rm -rf "$STAGING"' EXIT
 chmod 700 "$STAGING"
-
-set_value() {
-    local key="$1" value="$2" file="$3"
-    grep -v "^${key}=" "$file" > "$file.next" || true
-    printf '%s=%s\n' "$key" "$value" >> "$file.next"
-    mv "$file.next" "$file"
-}
 
 cp "$ENVIRONMENT_FILE" "$STAGING/.env"
 chmod 600 "$STAGING/.env"
