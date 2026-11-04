@@ -95,9 +95,10 @@ class PersonalDataService:
     ) -> list[dict[str, Any]]:
         if not values:
             return []
+        # Soft-deleted rows stay in: they are still held about the person, and
+        # a copy of "every row" that quietly leaves them out is not one. The
+        # row carries its own `deleted_at`, so the reader can tell.
         statement = select(table).where(table.c[column].in_(values))
-        if "deleted_at" in table.c:
-            statement = statement.where(table.c.deleted_at.is_(None))
         result = await self.session.execute(statement)
         return [
             {
