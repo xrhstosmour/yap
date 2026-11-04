@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import hmac
 import re
 from typing import TYPE_CHECKING
 from typing import Any
@@ -25,6 +26,7 @@ from app.core.idempotency import LOCK_HEARTBEAT_INTERVAL_SECONDS
 from app.core.idempotency import CachedResponse
 from app.core.idempotency import idempotency_service
 from app.core.logging import get_logger
+from app.core.settings import settings
 
 if TYPE_CHECKING:
     from starlette.requests import Request
@@ -33,6 +35,11 @@ logger = get_logger("idempotency")
 
 _KEY_PATTERN = re.compile(r"^[\w\-]{8,64}$")
 _MUTABLE_METHODS = frozenset({"POST", "PATCH", "PUT", "DELETE"})
+
+# An anonymous body is read whole to scope the key, so only small ones are.
+# Login and register bodies are a few hundred bytes, anything near this is not
+# one of them and simply goes without deduplication.
+_MAX_ANONYMOUS_BODY_BYTES = 64 * 1024
 
 
 class IdempotencyMiddleware(BaseHTTPMiddleware):
@@ -68,7 +75,11 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
         # anonymous clients presenting the same key (trivially guessable,
         # since the format allows something like "00000000") would each
         # replay the other's cached response, including any tokens it
-        # contains (e.g. on /auth/login, /auth/register).
+        # contains (e.g. on /auth/login, /auth/register). The address alone
+        # is not enough either: people behind one office or carrier NAT
+        # share it, so the body joins the scope, and a different person's
+        # login or register body, which carries their own credentials, never
+        # lands on someone else's cached response.
         auth = request.headers.get("Authorization")
         api_key = request.headers.get("X-API-Key")
         if auth:
@@ -77,7 +88,16 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
             user_scope = hashlib.sha256(api_key.encode()).hexdigest()
         else:
             client_host = request.client.host if request.client else "unknown"
-            user_scope = f"anon:{client_host}"
+            declared = request.headers.get("Content-Length", "0")
+            if not declared.isdigit() or int(declared) > _MAX_ANONYMOUS_BODY_BYTES:
+                return await call_next(request)
+            # Keyed, because a login body holds the password and a plain hash
+            # of it in Redis would be a guess-and-check list for anyone who
+            # can read the keys.
+            body_digest = hmac.new(
+                settings.SECRET_KEY.encode(), await request.body(), hashlib.sha256
+            ).hexdigest()
+            user_scope = f"anon:{client_host}:{body_digest}"
         scoped_key = f"{user_scope}:{request.method}:{request.url.path}:{raw_key}"
 
         cached = await idempotency_service.get(scoped_key)
