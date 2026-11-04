@@ -120,6 +120,30 @@ class TestAuthLogin:
         assert "inactive" in response.json()["detail"].lower()
 
 
+class TestLoginThrottle:
+    """A closed account answers 429 with a wait, not a password verdict."""
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_throttled_account_gets_429_with_retry_after(
+        self, client: AsyncClient
+    ) -> None:
+        """The wait the counter reports reaches the caller as `Retry-After`."""
+        with patch(
+            "app.services.auth_service.count_login_attempt",
+            AsyncMock(return_value=77),
+        ):
+            response = await client.post(
+                "/api/v1/auth/login",
+                data={
+                    "username": "someone@{{ project_slug }}.com",
+                    "password": "password123",
+                },
+            )
+
+        assert response.status_code == 429
+        assert response.headers["Retry-After"] == "77"
+
+
 class TestAuthRefresh:
     """Tests for POST /api/v1/auth/refresh."""
 

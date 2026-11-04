@@ -13,6 +13,7 @@ from fastapi import APIRouter
 from fastapi import Depends
 from fastapi import HTTPException
 from fastapi import Query
+from fastapi import Request
 from fastapi import status
 from fastapi.security import OAuth2PasswordRequestForm
 from jwt import ExpiredSignatureError
@@ -21,6 +22,7 @@ from jwt import InvalidTokenError
 from app.api.reauthentication import ProofDependency
 from app.api.reauthentication import require_reauthentication
 from app.core.logging import get_logger
+from app.core.rate_limit import RateLimitExceeded
 from app.core.rate_limit import check_auth_rate_limit
 from app.core.security import decode_token
 from app.core.security import verify_email_verification_token
@@ -66,6 +68,7 @@ from app.services.auth_service import AuthenticationError
 from app.services.auth_service import AuthService
 from app.services.auth_service import EmailAlreadyExistsError
 from app.services.auth_service import InvalidCredentialsError
+from app.services.auth_service import LoginThrottledError
 from app.services.auth_service import MinimumAgeNotConfirmedError
 from app.services.auth_service import OAuthProviderUnavailableError
 from app.services.auth_service import UserInactiveError
@@ -127,6 +130,7 @@ async def register(
     dependencies=[Depends(check_auth_rate_limit)],
 )
 async def login(
+    request: Request,
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
     session: SessionDependency,
 ) -> LoginResponse:
@@ -134,7 +138,13 @@ async def login(
     service = AuthService(session)
 
     try:
-        user = await service.authenticate(form_data.username, form_data.password)
+        user = await service.authenticate(
+            form_data.username,
+            form_data.password,
+            client_host=request.client.host if request.client else None,
+        )
+    except LoginThrottledError as e:
+        raise RateLimitExceeded(e.retry_after) from e
     except InvalidCredentialsError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

@@ -33,6 +33,7 @@ from app.services.auth_service import AuthenticationError
 from app.services.auth_service import AuthService
 from app.services.auth_service import EmailAlreadyExistsError
 from app.services.auth_service import InvalidCredentialsError
+from app.services.auth_service import LoginThrottledError
 from app.services.auth_service import MinimumAgeNotConfirmedError
 from app.services.auth_service import OAuthProviderUnavailableError
 from app.services.auth_service import UserInactiveError
@@ -170,6 +171,61 @@ class TestAuthService:
                 email="test@example.com",
                 password="wrongpassword",
             )
+
+    @pytest.mark.asyncio
+    async def test_authenticate_refuses_a_throttled_account(
+        self, session: AsyncSession
+    ) -> None:
+        """A closed account is refused before the password is looked at."""
+        auth_service = _auth_service(session)
+        await auth_service.register(
+            RegisterRequest(email="test@example.com", password="password123")
+        )
+
+        with patch(
+            "app.services.auth_service.count_login_attempt",
+            AsyncMock(return_value=30),
+        ):
+            with pytest.raises(LoginThrottledError) as raised:
+                await auth_service.authenticate(
+                    email="test@example.com", password="password123"
+                )
+
+        assert raised.value.retry_after == 30
+
+    @pytest.mark.asyncio
+    async def test_every_attempt_is_counted_and_only_success_clears(
+        self, session: AsyncSession
+    ) -> None:
+        """Attempts count before the password check, a good login clears them."""
+        auth_service = _auth_service(session)
+        await auth_service.register(
+            RegisterRequest(email="test@example.com", password="password123")
+        )
+        count = AsyncMock(return_value=0)
+        clear = AsyncMock()
+
+        with (
+            patch("app.services.auth_service.count_login_attempt", count),
+            patch("app.services.auth_service.clear_login_attempts", clear),
+        ):
+            with pytest.raises(InvalidCredentialsError):
+                await auth_service.authenticate(
+                    "test@example.com", "wrong-password", client_host="192.0.2.7"
+                )
+            with pytest.raises(InvalidCredentialsError):
+                await auth_service.authenticate(
+                    "nobody@example.com", "password123", client_host="192.0.2.7"
+                )
+            assert count.await_count == 2
+            clear.assert_not_awaited()
+
+            await auth_service.authenticate(
+                "test@example.com", "password123", client_host="192.0.2.7"
+            )
+
+        count.assert_awaited_with("test@example.com", "192.0.2.7")
+        clear.assert_awaited_once_with("test@example.com", "192.0.2.7")
 
     @pytest.mark.asyncio
     async def test_authenticate_user_not_found(self, session: AsyncSession) -> None:

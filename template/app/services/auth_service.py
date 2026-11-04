@@ -19,6 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import SYSTEM_TENANT_ID
 from app.core.encryption import crypto
 from app.core.logging import get_logger
+from app.core.rate_limit import clear_login_attempts
+from app.core.rate_limit import count_login_attempt
 from app.core.security import DUMMY_PASSWORD_HASH
 from app.core.security import TokenRateLimitError
 from app.core.security import blacklist_token
@@ -61,6 +63,19 @@ class InvalidCredentialsError(AuthenticationError):
     """Invalid email or password."""
 
     pass
+
+
+class LoginThrottledError(AuthenticationError):
+    """Too many failed logins for this account in the current window."""
+
+    def __init__(self, retry_after: int) -> None:
+        """Keep how long the caller should wait.
+
+        Args:
+            retry_after: Seconds until the account accepts attempts again
+        """
+        super().__init__("Too many failed login attempts. Try again later.")
+        self.retry_after = retry_after
 
 
 class EmailAlreadyExistsError(AuthenticationError):
@@ -309,6 +324,7 @@ class AuthService:
         email: str,
         password: str,
         tenant_id: UUID | None = None,
+        client_host: str | None = None,
     ) -> User:
         """Authenticate user with email and password.
 
@@ -316,6 +332,8 @@ class AuthService:
             email: User's email
             password: Plain text password
             tenant_id: Tenant context
+            client_host: Address the attempt comes from, for the per-account
+                attempt limit
 
         Returns:
             Authenticated User
@@ -323,7 +341,14 @@ class AuthService:
         Raises:
             InvalidCredentialsError: If credentials are invalid
             UserInactiveError: If user is deactivated
+            LoginThrottledError: If the account has had too many recent attempts
         """
+        # Counted before any password work, so a throttled guess costs nothing
+        # and parallel guesses cannot all slip in ahead of the counter.
+        retry_after = await count_login_attempt(email, client_host)
+        if retry_after:
+            raise LoginThrottledError(retry_after)
+
         # Get user by email.
         user = await self.user_repository.get_by_email(email)
 
@@ -374,6 +399,8 @@ class AuthService:
             )
             await self.session.commit()
             raise UserInactiveError("User account is inactive")
+
+        await clear_login_attempts(email, client_host)
 
         # Log successful login.
         await self.audit_repository.log_user_action_safe(
