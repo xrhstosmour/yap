@@ -215,6 +215,13 @@ def create_app() -> FastAPI:
         default_response_class=ORJSONResponse,
     )
 
+    if serve_documentation:
+        # A bare `{"detail": "Not Found"}` at the root told a first-time
+        # developer nothing about where the interactive docs are.
+        @app.get("/", include_in_schema=False)
+        async def root() -> RedirectResponse:
+            return RedirectResponse("/try")
+
     # Compression middleware, for performance.
     app.add_middleware(GZipMiddleware, minimum_size=1000)
 
