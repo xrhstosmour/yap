@@ -450,6 +450,33 @@ class TestBaseRepository:
         assert records[0].name == "record-b"
 
     @pytest.mark.anyio
+    async def test_other_tenant_cannot_get_update_or_delete(
+        self, session: AsyncSession
+    ) -> None:
+        """A record id from another tenant reads as missing and stays untouched.
+
+        `update` and `delete` fetch through `get`, so the tenant filter there is
+        the only thing between one tenant and another tenant's rows.
+        """
+        tenant_a = await self._create_tenant(session, slug="tenant-owner")
+        tenant_b = await self._create_tenant(session, slug="tenant-intruder")
+        repo: BaseRepository[TestModel] = BaseRepository(session, TestModel)
+
+        with tenant_context(tenant_a.id):
+            created = await repo.create({"name": "owned-by-a"})
+
+        with tenant_context(tenant_b.id):
+            assert await repo.get(created.id) is None
+            assert await repo.update(created.id, {"name": "taken-over"}) is None
+            assert await repo.delete(created.id, hard=True) is False
+
+        with tenant_context(tenant_a.id):
+            untouched = await repo.get(created.id)
+
+        assert untouched is not None
+        assert untouched.name == "owned-by-a"
+
+    @pytest.mark.anyio
     async def test_get_raises_without_tenant_context(
         self, session: AsyncSession
     ) -> None:
