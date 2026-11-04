@@ -23,8 +23,10 @@ from jwt import InvalidTokenError
 
 from app.core.security import DUMMY_API_KEY_HASH
 from app.core.ws_ticket import WebSocketTicket
+from app.dependencies import SECOND_FACTOR_REQUIRED
 from app.dependencies import get_api_key_auth
 from app.dependencies import get_current_superuser
+from app.dependencies import get_current_superuser_ws
 from app.dependencies import get_current_user
 from app.dependencies import get_current_user_ws
 from app.dependencies import get_optional_current_user
@@ -519,6 +521,44 @@ class TestGetCurrentSuperuser:
 
         assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
         assert exc_info.value.detail == "Not enough permissions"
+
+    @pytest.mark.asyncio
+    async def test_superuser_without_2fa_refused_outside_local(self) -> None:
+        """A password alone does not open superuser routes outside `local`."""
+        user = _make_user(role=UserRole.SUPERUSER)
+
+        with patch("app.dependencies.settings") as settings:
+            settings.ENVIRONMENT = "production"
+            with pytest.raises(HTTPException) as exc_info:
+                await get_current_superuser(current_user=user)
+
+        assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
+        assert "two-factor" in exc_info.value.detail
+
+    @pytest.mark.asyncio
+    async def test_superuser_with_2fa_passes_outside_local(self) -> None:
+        """With 2FA on, the same superuser gets through outside `local`."""
+        user = _make_user(role=UserRole.SUPERUSER)
+        user.is_2fa_enabled = True
+
+        with patch("app.dependencies.settings") as settings:
+            settings.ENVIRONMENT = "production"
+            result = await get_current_superuser(current_user=user)
+
+        assert result is user
+
+    @pytest.mark.asyncio
+    async def test_superuser_without_2fa_refused_on_websocket(self) -> None:
+        """The WebSocket gate holds the same line as the HTTP one."""
+        user = _make_user(role=UserRole.SUPERUSER)
+        websocket = AsyncMock()
+
+        with patch("app.dependencies.settings") as settings:
+            settings.ENVIRONMENT = "production"
+            with pytest.raises(WebSocketException) as exc_info:
+                await get_current_superuser_ws(websocket, user)
+
+        assert exc_info.value.reason == SECOND_FACTOR_REQUIRED
 
 
 # get_api_key_auth
