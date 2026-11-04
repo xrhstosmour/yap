@@ -89,6 +89,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Hide the raw-SQL full-text indexes, `*_fts`, from `alembic check` in `migrations/env.py`, only `*_trgm` was hidden, so the check failed in every generated project's CI
 - Mount the `RabbitMQ` CA into `app`, `celery-worker` and `celery-beat` with the long volume syntax and `create_host_path: false`, a missing certificate now fails the start instead of `Docker` creating a root-owned directory at the path
 - Keep the `RabbitMQ` CA private key, `ca_key.pem`, off the server in `scripts/deploy.sh`, never sent and removed from a server a past deploy copied it to, it only signs certificates on the machine that ran setup
 - Generate only the `RabbitMQ` certificates when `setup.sh` finds the CA missing, with `scripts/assemble.py --certificates-only`, the full run copied every service directory over local edits, and stop with an error when the CA path is a directory a compose run created
