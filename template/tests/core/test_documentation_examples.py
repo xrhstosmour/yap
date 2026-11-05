@@ -26,6 +26,27 @@ class TestDocumentationDescription:
         assert "/auth/register" in info["description"]
         assert "Authorize" in info["description"]
 
+    def test_the_docs_page_is_set_up_to_keep_the_sign_in(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Otherwise the next call is a 401 with nothing to explain it."""
+        monkeypatch.setattr(settings, "ENVIRONMENT", "local")
+
+        application = create_app()
+
+        assert application.swagger_ui_parameters["persistAuthorization"] is True
+        assert application.swagger_ui_parameters["docExpansion"] == "none"
+
+    def test_the_authorize_dialog_says_which_fields_to_leave_empty(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The dialog asks for a client ID and secret nothing here reads."""
+        monkeypatch.setattr(settings, "ENVIRONMENT", "local")
+
+        schemes = create_app().openapi()["components"]["securitySchemes"]
+
+        assert "client_secret" in schemes["OAuth2PasswordBearer"]["description"]
+
     def test_no_link_is_invented_when_none_is_configured(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

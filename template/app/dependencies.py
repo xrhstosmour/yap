@@ -47,7 +47,15 @@ if TYPE_CHECKING:
 logger = get_logger("deps")
 
 # OAuth2 scheme for JWT Bearer tokens.
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+# The description is what the docs page shows in its Authorize dialog, which
+# otherwise asks for a client ID and secret that this API never reads.
+oauth2_scheme = OAuth2PasswordBearer(
+    tokenUrl="/api/v1/auth/login",
+    description=(
+        "Sign in with your email as the username, and your password. "
+        "Leave `client_id` and `client_secret` empty, they are not used."
+    ),
+)
 
 # Type aliases for dependency injection.
 # `scope="function"` ends the session (commit + close) before the response is
