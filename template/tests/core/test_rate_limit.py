@@ -69,9 +69,14 @@ class TestRateLimitExceeded:
         assert exc.status_code == 429
 
     def test_detail_message(self) -> None:
-        """Detail should be 'Rate limit exceeded'."""
+        """The message says how long to wait, not only that it was refused."""
         exc = RateLimitExceeded(retry_after=30)
-        assert exc.detail == "Rate limit exceeded"
+        assert exc.detail == "Rate limit exceeded, try again in 30 seconds"
+
+    def test_detail_message_is_singular_for_one_second(self) -> None:
+        """One second is not "1 seconds"."""
+        exc = RateLimitExceeded(retry_after=1)
+        assert exc.detail == "Rate limit exceeded, try again in 1 second"
 
     def test_retry_after_header_is_string(self) -> None:
         """Retry-After header must be the string representation of seconds."""

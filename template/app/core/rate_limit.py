@@ -24,6 +24,21 @@ from app.core.settings import settings
 
 logger = get_logger("rate_limit")
 
+RATE_LIMITED = "Rate limit exceeded"
+
+
+def rate_limited_detail(seconds: int) -> str:
+    """Build the 429 message, shared so every refusal says the same thing.
+
+    Args:
+        seconds: Seconds until the client may try again.
+
+    Returns:
+        The message, with the unit in the singular for one second.
+    """
+    unit = "second" if seconds == 1 else "seconds"
+    return f"{RATE_LIMITED}, try again in {seconds} {unit}"
+
 
 class RateLimitExceeded(HTTPException):
     """Exception raised when rate limit is exceeded.
@@ -39,7 +54,7 @@ class RateLimitExceeded(HTTPException):
         """
         super().__init__(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Rate limit exceeded",
+            detail=rate_limited_detail(retry_after),
             headers={"Retry-After": str(retry_after)},
         )
 

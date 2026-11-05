@@ -45,6 +45,7 @@ from starlette.datastructures import Headers
 from app.core.cache import get_redis
 from app.core.logging import get_logger
 from app.core.rate_limit import RateLimiter
+from app.core.rate_limit import rate_limited_detail
 from app.core.security import ALGORITHM
 from app.core.security import is_token_blacklisted
 from app.core.settings import settings
@@ -73,8 +74,6 @@ EXEMPT_PREFIXES = ("/admin/",)
 
 #: Answers that count as probing.
 FAILURE_STATUSES = frozenset({404, 405, 422})
-
-RATE_LIMITED = "Rate limit exceeded"
 
 #: How long a Redis step may take before it is given up on, failing open.
 REDIS_TIMEOUT_SECONDS = 1
@@ -363,9 +362,10 @@ class GlobalRateLimitMiddleware:
     async def _refuse(
         scope: Scope, receive: Receive, send: Send, retry_after: int
     ) -> None:
+        wait = max(retry_after, 1)
         response = JSONResponse(
             status_code=429,
-            content={"detail": RATE_LIMITED},
-            headers={"Retry-After": str(max(retry_after, 1))},
+            content={"detail": rate_limited_detail(wait)},
+            headers={"Retry-After": str(wait)},
         )
         await response(scope, receive, send)
