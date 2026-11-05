@@ -46,3 +46,25 @@ def test_apple_login_rejects_nul_in_name() -> None:
     """A name Apple posts back is client-supplied text too."""
     with pytest.raises(ValidationError, match="NUL"):
         AppleNativeLoginRequest(identity_token="x", full_name="ab\x00cd")
+
+
+@pytest.mark.parametrize("field", ["full_name", "username"])
+def test_register_rejects_whitespace_only_text(field: str) -> None:
+    """A name of spaces passed every length rule and rendered as nothing."""
+    with pytest.raises(ValidationError, match="only whitespace"):
+        _register(**{field: "   \t "})
+
+
+@pytest.mark.parametrize("name", [" ", "\t\n", ""])
+def test_a_blank_apple_name_is_no_name_rather_than_a_refusal(name: str) -> None:
+    """Apple sends the name once, and a joined empty one must not fail sign-in."""
+    request = AppleNativeLoginRequest(
+        identity_token="x", nonce="n" * 16, full_name=name
+    )
+
+    assert request.full_name is None
+
+
+def test_empty_text_stays_valid() -> None:
+    """A client clearing a field is not refused by the whitespace rule."""
+    assert _register(full_name="").full_name == ""
