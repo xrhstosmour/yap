@@ -9,6 +9,8 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add `TERMS_OF_SERVICE_URL` and `PRIVACY_POLICY_URL`, linked from the interactive docs and the `termsOfService` field of the schema when set, and left out when empty
+- Open the interactive docs on three steps, register, press Authorize, then try the rest, and pre-fill the register body with a real example instead of `"string"` and an age flag that was refused
 - Add `LOGIN_MAX_ATTEMPTS_PER_ACCOUNT`, `LOGIN_MAX_ATTEMPTS_PER_ACCOUNT_AND_ADDRESS` and `LOGIN_ATTEMPT_WINDOW`, counting login attempts per account before the password is checked and answering 429 past the limit, where the per-IP limit alone let one password be guessed from many addresses, and a lower limit per account and address so one source cannot lock the owner out
 - Redirect `/` to `/try` in the `local` environment, where a bare 404 gave a new developer nothing to go on
 - Add `scripts/rollback.sh`, running the images of an earlier release on the server again, with `deploy.sh` keeping the last three healthy releases in `.releases` through `scripts/releases.sh`
@@ -97,6 +99,9 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Seed the initial data in `scripts/start.sh` after the migrations, where a database that `setup.sh` never seeded had no system tenant and the first registration failed with a 500
+- Name `is_minimum_age_confirmed` and the age in the registration refusal, and say how long to wait in the 429 message, where the wait was only in the `Retry-After` header
+- Put `X-Request-ID` on the 500 response, which is built outside the request ID middleware and carried nothing to find its log line by
 - Skip the anonymous idempotency deduplication for a request with no `Content-Length`, where a chunked body slipped past the size cap
 - Reject a NUL character in the register, profile and Apple sign-in text fields with a 422 instead of a 500
 - Stop `TOTP` and password proof attempts from extending their own lockout window, which let anyone with the password keep the owner's second factor locked
