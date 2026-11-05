@@ -88,8 +88,14 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
             user_scope = hashlib.sha256(api_key.encode()).hexdigest()
         else:
             client_host = request.client.host if request.client else "unknown"
-            declared = request.headers.get("Content-Length", "0")
-            if not declared.isdigit() or int(declared) > _MAX_ANONYMOUS_BODY_BYTES:
+            # A missing length (a chunked body) is as unbounded as an oversized
+            # one, so it skips deduplication rather than being read whole.
+            declared = request.headers.get("Content-Length")
+            if (
+                declared is None
+                or not declared.isdigit()
+                or int(declared) > _MAX_ANONYMOUS_BODY_BYTES
+            ):
                 return await call_next(request)
             # Keyed, because a login body holds the password and a plain hash
             # of it in Redis would be a guess-and-check list for anyone who

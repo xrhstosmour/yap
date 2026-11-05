@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Iterator
 from unittest.mock import AsyncMock
 from unittest.mock import patch
 
@@ -241,6 +242,29 @@ class TestIdempotencyMiddleware:
             "/echo",
             json={"x": "y" * (70 * 1024)},
             headers={"X-Idempotency-Key": "test-key-large"},
+        )
+
+        assert resp.is_success
+        mock_service.get.assert_not_awaited()
+
+    def test_anonymous_body_without_a_length_goes_without_deduplication(
+        self,
+        app_with_middleware: TestClient,
+        mock_service: IdempotencyService,
+    ) -> None:
+        """A chunked body has no declared length and is not read to build a key."""
+
+        def chunks() -> Iterator[bytes]:
+            yield b'{"x": '
+            yield b'"y"}'
+
+        resp = app_with_middleware.post(
+            "/echo",
+            content=chunks(),
+            headers={
+                "X-Idempotency-Key": "test-key-chunked",
+                "Content-Type": "application/json",
+            },
         )
 
         assert resp.is_success
