@@ -20,7 +20,6 @@ module = [
     "boto3.*",
     "botocore.*",
     "webauthn.*",
-    "pybreaker.*",
     "opentelemetry.*",
     "structlog.*",
     "tenacity.*",

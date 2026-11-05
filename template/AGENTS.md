@@ -65,7 +65,6 @@ background tasks, and comprehensive security features.
 - `CacheService.get_or_set()` prevents cache stampedes: callers race for a
   short-lived per-key lock on a miss, losers poll for the winner's result
   instead of recomputing in parallel.
-- Circuit breaker for external service calls (`pybreaker`).
 - Rate limiting per user and per API key (Redis sliding window).
 - A global limit in front of every route (`GlobalRateLimitMiddleware`): 600 requests a
   minute for a valid, not revoked access token, keyed by user, 300 for anyone else, keyed
