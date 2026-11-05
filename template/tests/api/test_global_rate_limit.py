@@ -501,7 +501,9 @@ class TestRefusal:
         assert response.status_code == 429
         assert response.headers["retry-after"] == "43"
         assert response.headers["access-control-allow-origin"] == ORIGIN
-        assert response.json() == {"detail": "Rate limit exceeded"}
+        assert response.json() == {
+            "detail": "Rate limit exceeded, try again in 43 seconds"
+        }
 
 
 class TestFailureBlock:

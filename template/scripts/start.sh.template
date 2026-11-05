@@ -103,6 +103,13 @@ fi
 echo "Applying migrations..."
 uv run alembic upgrade head
 
+# `setup.sh` seeds the system tenant every account belongs to, but a database
+# created since, a wiped volume or a fresh clone that only ran this script, has
+# none, and the first registration then fails with a 500 on `tenant_id`. The
+# seed only creates what is missing, so it is a no-op on a prepared database.
+echo "Seeding initial data..."
+uv run --env-file .env python app/initial_data.py
+
 echo "Starting the API on http://localhost:$PORT"
 echo "  Swagger  http://localhost:$PORT/try"
 echo "  ReDoc    http://localhost:$PORT/documentation"

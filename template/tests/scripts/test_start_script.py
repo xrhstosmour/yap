@@ -126,6 +126,20 @@ class TestStartScript:
         assert "pg_isready -q -U appuser" in recorded
         assert "uv run fastapi dev" in recorded
 
+    def test_the_initial_data_is_seeded_after_the_migrations_before_the_server(
+        self,
+    ) -> None:
+        """A database `setup.sh` never seeded has no system tenant to register into."""
+        result, recorded = _run_in_scratch(
+            "start_with_seed", "POSTGRESQL_USER=appuser\nRABBITMQ_PASSWORD=secret\n"
+        )
+
+        assert result.returncode == 0, result.stderr
+        migrate = recorded.index("uv run alembic upgrade head")
+        seed = recorded.index("uv run --env-file .env python app/initial_data.py")
+        serve = recorded.index("uv run fastapi dev")
+        assert migrate < seed < serve
+
     def test_the_broker_is_started_before_the_server(self) -> None:
         """Without it every request-path `.delay()` fails after its retries."""
         result, recorded = _run_in_scratch(

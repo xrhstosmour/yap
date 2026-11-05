@@ -184,6 +184,34 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("application_shutdown_complete")
 
 
+def _documentation_description() -> str:
+    """The text the interactive docs open with: what this is, then where to start.
+
+    Without the steps, the first screen is a long list of endpoints in no
+    particular order, and a new reader has to guess that registering comes
+    first and that the Authorize button is what signs the rest in.
+    """
+    text = (
+        "{{ description }}\n\n"
+        "**Getting started**\n\n"
+        f"1. Register with `POST {settings.API_V1_STR}/auth/register`, "
+        "the example body is ready to run once the email is a new one.\n"
+        "2. Press **Authorize** and sign in with the same email and password.\n"
+        "3. Try any other endpoint, it now sends your token.\n"
+    )
+    links = [
+        f"[{label}]({url})"
+        for label, url in (
+            ("Terms of service", settings.TERMS_OF_SERVICE_URL),
+            ("Privacy policy", settings.PRIVACY_POLICY_URL),
+        )
+        if url
+    ]
+    if links:
+        text += "\n" + ", ".join(links) + "\n"
+    return text
+
+
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application.
 
@@ -199,7 +227,8 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         title=settings.PROJECT_NAME,
-        description="{{ description }}",
+        description=_documentation_description(),
+        terms_of_service=settings.TERMS_OF_SERVICE_URL or None,
         version=settings.RELEASE,
         openapi_url=(
             f"{settings.API_V1_STR}/openapi.json" if serve_documentation else None
@@ -337,9 +366,15 @@ def create_app() -> FastAPI:
             method=request.method,
         )
 
+        # This handler runs in Starlette's outermost layer, outside the
+        # request ID middleware, so the header is added by hand. Without it
+        # the one response a user is likely to report carried nothing to
+        # find its log line by.
+        request_id = getattr(request.state, "request_id", None)
         return JSONResponse(
             status_code=500,
             content={"detail": "Internal server error"},
+            headers={"X-Request-ID": request_id} if request_id else None,
         )
 
     # Include API router.

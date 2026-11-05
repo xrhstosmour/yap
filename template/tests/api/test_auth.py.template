@@ -263,7 +263,21 @@ class TestAuthRegister:
         )
 
         assert response.status_code == 422
-        assert "15" in response.json()["detail"]
+        detail = response.json()["detail"]
+        assert "15" in detail
+        assert "is_minimum_age_confirmed" in detail
+
+    @pytest.mark.usefixtures("override_get_async_session")
+    async def test_register_with_the_documentation_example(
+        self, client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The body the docs page pre-fills registers as it stands."""
+        monkeypatch.setattr(settings, "MINIMUM_AGE", 15)
+        example = RegisterRequest.model_json_schema()["examples"][0]
+
+        response = await client.post("/api/v1/auth/register", json=example)
+
+        assert response.status_code == 201
 
     @pytest.mark.usefixtures("override_get_async_session")
     async def test_register_duplicate_email(self, client: AsyncClient, session) -> None:

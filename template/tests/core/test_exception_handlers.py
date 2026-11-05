@@ -40,6 +40,24 @@ class TestUnhandledErrors:
         assert response.json() == {"detail": "Internal server error"}
         assert "hunter2" not in response.text
 
+    def test_the_response_carries_the_request_id_of_its_log_line(
+        self, client: TestClient
+    ) -> None:
+        """A user reporting the 500 can quote something to look up."""
+        response = client.get("/boom", headers={"X-Request-ID": "report-me-123456"})
+
+        assert response.status_code == 500
+        assert response.headers["x-request-id"] == "report-me-123456"
+
+    def test_a_generated_request_id_is_on_the_response_too(
+        self, client: TestClient
+    ) -> None:
+        """Most clients send none, and still need one to quote."""
+        response = client.get("/boom")
+
+        assert response.status_code == 500
+        assert response.headers["x-request-id"]
+
 
 class TestTokenRateLimit:
     """A token requested again inside its cooldown is a 429, not a 500."""

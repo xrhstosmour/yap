@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from pydantic import ConfigDict
 from pydantic import EmailStr
 from pydantic import Field
 
@@ -45,6 +46,24 @@ class RegisterRequest(BaseSchema):
         username: Optional unique handle
     """
 
+    # What the docs page pre-fills. Placeholders like "string" ran as real
+    # values, and `is_minimum_age_confirmed: false` was refused on the first
+    # Execute click, so this is a body that registers as it stands once the
+    # email is one nobody has used. No `username`, it is unique too, so a
+    # second run with a new email would still be refused.
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "email": "alex@example.com",
+                    "password": "a-long-passphrase",
+                    "full_name": "Alex Example",
+                    "is_minimum_age_confirmed": True,
+                }
+            ]
+        }
+    )
+
     email: EmailStr = Field(description="Email address (must be unique)")
     password: PasswordString = Field(
         min_length=8,
@@ -62,7 +81,10 @@ class RegisterRequest(BaseSchema):
     )
     is_minimum_age_confirmed: bool = Field(
         default=False,
-        description="Whether the person says they are at least `MINIMUM_AGE`",
+        description=(
+            "Send true to confirm you are old enough to sign up. The minimum "
+            "age is set per project, and a refusal names it"
+        ),
     )
 
 
