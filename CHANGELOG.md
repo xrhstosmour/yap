@@ -65,6 +65,8 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Keep the superuser second factor rule in `app/core/second_factor.py`, so a project that needs the same rule elsewhere calls `lacks_required_second_factor` instead of copying the environment and `is_2fa_enabled` check
+- Remove `app/core/circuit_breaker.py` and the `pybreaker` dependency, nothing in the template used them
 - Require two-factor authentication for superuser API and `WebSocket` routes outside `local`, as `/admin` already did, so a password alone no longer opens them
 - Scope anonymous idempotency keys by a keyed digest of the request body as well as the client address, and skip deduplication for anonymous bodies over 64 KiB, so people behind one IP sharing a guessable key never replay each other's cached login tokens
 - Include soft-deleted rows in the personal data export, marked by their own `deleted_at`
@@ -95,6 +97,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Skip the anonymous idempotency deduplication for a request with no `Content-Length`, where a chunked body slipped past the size cap
 - Reject a NUL character in the register, profile and Apple sign-in text fields with a 422 instead of a 500
 - Stop `TOTP` and password proof attempts from extending their own lockout window, which let anyone with the password keep the owner's second factor locked
 - Strip control characters from the download filename header and percent-encode the device token in the `APNs` request path
