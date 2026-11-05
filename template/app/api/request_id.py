@@ -58,6 +58,11 @@ class RequestIDMiddleware:
 
         request_id_context.set(request_id)
 
+        # On the scope as well, because the handler for an unhandled error runs
+        # in Starlette's outermost layer where this context variable is no
+        # longer set, and it needs the ID to put on its 500.
+        scope.setdefault("state", {})["request_id"] = request_id
+
         # Bound alongside `merge_contextvars`, the first processor in
         # `setup_logging()`, so every log call made while handling this
         # request (directly or via `get_logger()` elsewhere) picks up the

@@ -366,9 +366,15 @@ def create_app() -> FastAPI:
             method=request.method,
         )
 
+        # This handler runs in Starlette's outermost layer, outside the
+        # request ID middleware, so the header is added by hand. Without it
+        # the one response a user is likely to report carried nothing to
+        # find its log line by.
+        request_id = getattr(request.state, "request_id", None)
         return JSONResponse(
             status_code=500,
             content={"detail": "Internal server error"},
+            headers={"X-Request-ID": request_id} if request_id else None,
         )
 
     # Include API router.
