@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from pydantic import ConfigDict
 from pydantic import EmailStr
 from pydantic import Field
 
@@ -44,6 +45,24 @@ class RegisterRequest(BaseSchema):
         full_name: Optional display name
         username: Optional unique handle
     """
+
+    # What the docs page pre-fills. Placeholders like "string" ran as real
+    # values, and `is_minimum_age_confirmed: false` was refused on the first
+    # Execute click, so this is a body that registers as it stands once the
+    # email is one nobody has used. No `username`, it is unique too, so a
+    # second run with a new email would still be refused.
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "email": "alex@example.com",
+                    "password": "a-long-passphrase",
+                    "full_name": "Alex Example",
+                    "is_minimum_age_confirmed": True,
+                }
+            ]
+        }
+    )
 
     email: EmailStr = Field(description="Email address (must be unique)")
     password: PasswordString = Field(
