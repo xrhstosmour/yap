@@ -263,7 +263,9 @@ class TestAuthRegister:
         )
 
         assert response.status_code == 422
-        assert "15" in response.json()["detail"]
+        detail = response.json()["detail"]
+        assert "15" in detail
+        assert "is_minimum_age_confirmed" in detail
 
     @pytest.mark.usefixtures("override_get_async_session")
     async def test_register_duplicate_email(self, client: AsyncClient, session) -> None:

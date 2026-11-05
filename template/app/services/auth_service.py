@@ -284,7 +284,10 @@ class AuthService:
         # Refused before anything is looked up, so a child's address is
         # never so much as compared against the table.
         if settings.MINIMUM_AGE and not data.is_minimum_age_confirmed:
-            message = f"You need to be at least {settings.MINIMUM_AGE} to sign up"
+            message = (
+                f"You need to be at least {settings.MINIMUM_AGE} years old to sign "
+                "up, send `is_minimum_age_confirmed` as true to confirm it"
+            )
             raise MinimumAgeNotConfirmedError(message)
 
         # Check if email exists.

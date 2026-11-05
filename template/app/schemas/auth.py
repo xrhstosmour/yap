@@ -62,7 +62,10 @@ class RegisterRequest(BaseSchema):
     )
     is_minimum_age_confirmed: bool = Field(
         default=False,
-        description="Whether the person says they are at least `MINIMUM_AGE`",
+        description=(
+            "Send true to confirm you are old enough to sign up. The minimum "
+            "age is set per project, and a refusal names it"
+        ),
     )
 
 
