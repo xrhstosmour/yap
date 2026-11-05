@@ -37,7 +37,7 @@ async def init() -> None:
         user_result = await session.execute(
             select(User).where(
                 User.email_hash.in_(  # type: ignore[attr-defined]
-                    crypto.hash_candidates_for_search(settings.FIRST_SUPERUSER_EMAIL)
+                    crypto.hash_candidates_for_email(settings.FIRST_SUPERUSER_EMAIL)
                 )
             )
         )

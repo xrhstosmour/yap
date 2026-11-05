@@ -77,7 +77,9 @@ def _decoy_credentials(email: str) -> list[PublicKeyCredentialDescriptor]:
     Returns:
         A single descriptor whose ID is an HMAC of the address.
     """
-    digest = crypto.hash_for_search(f"webauthn-decoy:{email}")
+    # Lowercase, as the lookup of a real account is, so that two spellings of
+    # an unknown address do not return different decoys.
+    digest = crypto.hash_for_search(f"webauthn-decoy:{email.lower()}")
     return [PublicKeyCredentialDescriptor(id=sha256(digest.encode()).digest())]
 
 

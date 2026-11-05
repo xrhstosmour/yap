@@ -792,6 +792,9 @@ class TestBeginAuthenticationHidesAccountExistence:
             first, _ = await service.begin_authentication(email="nobody@example.com")
             second, _ = await service.begin_authentication(email="nobody@example.com")
             other, _ = await service.begin_authentication(email="someone@example.com")
+            recased, _ = await service.begin_authentication(email="Nobody@Example.com")
 
         assert first["allow_credentials"] == second["allow_credentials"]
+        # A real account answers the same in any case, so decoys must too.
+        assert first["allow_credentials"] == recased["allow_credentials"]
         assert first["allow_credentials"] != other["allow_credentials"]

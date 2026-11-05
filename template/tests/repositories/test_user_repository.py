@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import literal
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.encryption import crypto
 from app.core.tenant import system_context
 from app.core.tenant import tenant_context
 from app.models.tenant import Tenant
@@ -95,6 +96,36 @@ class TestUserRepository:
 
         assert found is not None
         assert found.email == "bob@example.com"
+
+    @pytest.mark.anyio
+    async def test_get_by_email_ignores_letter_case(
+        self, session: AsyncSession
+    ) -> None:
+        """One mailbox is one account, whatever case the address is typed in."""
+        repo = UserRepository(session)
+        created = await repo.create_user(email="Cara@example.com", password_hash="h")
+
+        found = await repo.get_by_email("cara@EXAMPLE.com")
+
+        assert found is not None
+        assert found.id == created.id
+
+    @pytest.mark.anyio
+    async def test_get_by_email_takes_the_older_of_two_spellings(
+        self, session: AsyncSession
+    ) -> None:
+        """Two rows from before the case-insensitive hash are not a 500."""
+        repo = UserRepository(session)
+        older = await repo.create_user(email="dana@example.com", password_hash="h")
+        newer = await repo.create_user(email="other@example.com", password_hash="h")
+        newer.email = "Dana@example.com"
+        newer.email_hash = crypto.hash_for_search("Dana@example.com")
+        await session.flush()
+
+        found = await repo.get_by_email("Dana@example.com")
+
+        assert found is not None
+        assert found.id == older.id
 
     @pytest.mark.anyio
     async def test_get_by_username_folds_accents_and_case(
