@@ -233,6 +233,31 @@ class TestUserServiceUpdate:
         send.assert_awaited_once_with(updated)
 
     @pytest.mark.asyncio
+    async def test_changing_only_the_case_of_the_own_address_is_allowed(
+        self, session: AsyncSession
+    ) -> None:
+        """The address found is the user's own, not somebody else's."""
+        user_service = _user_service(session)
+        with system_context():
+            created = await user_service.create(
+                UserCreate(email="casey@example.com", password="password123")
+            )
+
+            with (
+                patch(
+                    "app.services.user_service.AuthService.send_verification_email",
+                    new_callable=AsyncMock,
+                ),
+                patch("app.services.user_service.purge_user_tokens", AsyncMock()),
+            ):
+                updated = await user_service.update(
+                    created.id, UserUpdate(email="Casey@example.com"), uuid7()
+                )
+
+        assert updated is not None
+        assert updated.email == "Casey@example.com"
+
+    @pytest.mark.asyncio
     async def test_admin_update_without_email_change_keeps_verification(
         self, session: AsyncSession
     ) -> None:

@@ -12,6 +12,7 @@ from uuid import UUID
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import and_
+from sqlmodel import col
 from sqlmodel import func
 from sqlmodel import select
 
@@ -60,13 +61,18 @@ class UserRepository(SearchMixin, BaseRepository[User]):
         query = select(User).where(
             and_(
                 User.email_hash.in_(  # type: ignore[arg-type,attr-defined]
-                    crypto.hash_candidates_for_search(email)
+                    crypto.hash_candidates_for_email(email)
                 ),
                 User.deleted_at.is_(None),  # type: ignore[union-attr]
             )
         )
-        result = await self.session.execute(query)
-        return result.scalar_one_or_none()
+        # An address registered twice in different cases, before emails were
+        # hashed without regard to case, matches both rows. The older one is
+        # the account, a 500 is no answer to either person's login.
+        result = await self.session.execute(
+            query.order_by(col(User.created_at)).limit(1)
+        )
+        return result.scalars().first()
 
     async def get_by_username(self, username: str) -> User | None:
         """Get a user by their handle.
@@ -118,7 +124,7 @@ class UserRepository(SearchMixin, BaseRepository[User]):
             .where(
                 and_(
                     User.email_hash.in_(  # type: ignore[arg-type,attr-defined]
-                        crypto.hash_candidates_for_search(email)
+                        crypto.hash_candidates_for_email(email)
                     ),
                     User.deleted_at.is_(None),  # type: ignore[union-attr]
                 )

@@ -208,6 +208,22 @@ class TestCryptoService:
         candidates = rotated_svc.hash_candidates_for_search("user@yap.com")
         assert stored_hash in candidates
 
+    def test_hash_for_email_ignores_letter_case(self) -> None:
+        """One mailbox, one hash, whatever the case it was typed in."""
+        svc = CryptoService(encryption_keys=[Fernet.generate_key().decode()])
+
+        assert svc.hash_for_email("Alex@Yap.com") == svc.hash_for_email("alex@yap.com")
+
+    def test_email_candidates_still_match_a_row_hashed_as_typed(self) -> None:
+        """Rows from before the case-insensitive hash stay findable."""
+        svc = CryptoService(encryption_keys=[Fernet.generate_key().decode()])
+        legacy_hash = svc.hash_for_search("Alex@Yap.com")
+
+        assert legacy_hash in svc.hash_candidates_for_email("Alex@Yap.com")
+        assert svc.hash_for_email("alex@yap.com") in svc.hash_candidates_for_email(
+            "Alex@Yap.com"
+        )
+
     #  Edge cases
 
     def test_encrypt_large_data(self) -> None:

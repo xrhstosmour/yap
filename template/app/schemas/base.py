@@ -11,6 +11,7 @@ from typing import TypeVar
 
 from pydantic import AfterValidator
 from pydantic import BaseModel
+from pydantic import BeforeValidator
 from pydantic import ConfigDict
 from pydantic import Field
 
@@ -26,6 +27,30 @@ def _without_null_character(value: str) -> str:
     """
     if "\x00" in value:
         raise ValueError("Must not contain a NUL character.")
+    return value
+
+
+def _not_only_whitespace(value: str) -> str:
+    """Reject text that is nothing but spaces, tabs or line breaks.
+
+    A name of three spaces passed every length rule and was stored as a
+    value that renders as nothing. Empty text stays valid, so a field a
+    client clears is not refused.
+    """
+    if value and not value.strip():
+        raise ValueError("Must not be only whitespace.")
+    return value
+
+
+def _blank_as_none(value: object) -> object:
+    """Read a blank string as no value, for text a provider sends on its own.
+
+    Apple sends the name once and its parts can be empty, so a client that
+    joins them sends a space. That is no name, and must not fail the sign-in
+    it arrives with.
+    """
+    if isinstance(value, str) and not value.strip():
+        return None
     return value
 
 
@@ -49,8 +74,15 @@ def _within_bcrypt_byte_limit(value: str) -> str:
     return value
 
 
-TextString = Annotated[str, AfterValidator(_without_null_character)]
-"""Free text field type that rejects NUL characters alongside `Field` rules."""
+TextString = Annotated[
+    str,
+    AfterValidator(_without_null_character),
+    AfterValidator(_not_only_whitespace),
+]
+"""Free text field type that rejects NUL characters and whitespace-only text."""
+
+ProviderText = Annotated[TextString | None, BeforeValidator(_blank_as_none)]
+"""Optional text a sign-in provider supplies, where blank means absent."""
 
 PasswordString = Annotated[str, AfterValidator(_within_bcrypt_byte_limit)]
 """Password field type enforcing bcrypt's byte ceiling alongside `Field` rules."""

@@ -181,6 +181,39 @@ class CryptoService:
             raise RuntimeError("Encryption not configured. Set CRYPTO_KEY in .env")
         return [self._hash_with_key(value, key) for key in self._keys]
 
+    def hash_for_email(self, email: str) -> str:
+        """Hash an email address without regard to its letter case.
+
+        `Alex@Example.com` and `alex@example.com` are one mailbox, and
+        hashing them apart let a second account register the same address.
+
+        Args:
+            email: Email address.
+
+        Returns:
+            The `hash_for_search` hash of the lowercase address.
+        """
+        return self.hash_for_search(email.lower())
+
+    def hash_candidates_for_email(self, email: str) -> list[str]:
+        """Hashes an email lookup must match, across keys and letter case.
+
+        Rows written before `hash_for_email` hold the hash of the address as
+        it was typed, so those are matched too, and no migration has to
+        rehash them.
+
+        Args:
+            email: Email address.
+
+        Returns:
+            Hashes of the lowercase address, then of the address as given
+            when that differs, one per configured key.
+        """
+        candidates = self.hash_candidates_for_search(email.lower())
+        if email != email.lower():
+            candidates += self.hash_candidates_for_search(email)
+        return candidates
+
     def _hash_with_key(self, value: str, key: str) -> str:
         """Compute the deterministic search hash of `value` under one key."""
         # Derive a separate HMAC key via domain separation, never reuse

@@ -276,7 +276,7 @@ def _sync_email_hash(
     """
     if value is not None:
         target.email_hash = (
-            crypto.hash_for_search(value)
+            crypto.hash_for_email(value)
             if value
             else crypto.hash_for_search(f"erased:{uuid4()}")
         )

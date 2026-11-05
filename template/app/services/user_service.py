@@ -258,7 +258,7 @@ class UserService:
         if data.email is not None and data.email != user.email:
             email_changing = True
             existing = await self.user_repository.get_by_email(data.email)
-            if existing:
+            if existing and existing.id != user.id:
                 raise UserServiceError("Email already in use")
             update_data["is_verified"] = False
 
@@ -350,7 +350,7 @@ class UserService:
         # Check email uniqueness before updating.
         if email_changing:
             existing = await self.user_repository.get_by_email(data.email)  # type: ignore[arg-type]
-            if existing:
+            if existing and existing.id != user.id:
                 raise UserServiceError("Email already in use")
 
         # Hash new password if provided.

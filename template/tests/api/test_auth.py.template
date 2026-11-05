@@ -280,6 +280,22 @@ class TestAuthRegister:
         assert response.status_code == 201
 
     @pytest.mark.usefixtures("override_get_async_session")
+    async def test_register_duplicate_email_in_another_case(
+        self, client: AsyncClient
+    ) -> None:
+        """One mailbox is one account, however its letters are cased."""
+        body = {"email": "casey@{{ project_slug }}.com", "password": "password123"}
+        first = await client.post("/api/v1/auth/register", json=body)
+
+        second = await client.post(
+            "/api/v1/auth/register",
+            json={**body, "email": "Casey@{{ project_slug }}.com"},
+        )
+
+        assert first.status_code == 201
+        assert second.status_code == 400
+
+    @pytest.mark.usefixtures("override_get_async_session")
     async def test_register_duplicate_email(self, client: AsyncClient, session) -> None:
         """Registration should fail with duplicate email."""
         auth_service = _auth_service(session)

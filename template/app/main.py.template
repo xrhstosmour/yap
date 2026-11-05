@@ -196,7 +196,8 @@ def _documentation_description() -> str:
         "**Getting started**\n\n"
         f"1. Register with `POST {settings.API_V1_STR}/auth/register`, "
         "the example body is ready to run once the email is a new one.\n"
-        "2. Press **Authorize** and sign in with the same email and password.\n"
+        "2. Press **Authorize**, sign in with the same email as the username and "
+        "the same password, and leave the client fields empty.\n"
         "3. Try any other endpoint, it now sends your token.\n"
     )
     links = [
@@ -222,7 +223,9 @@ def create_app() -> FastAPI:
     # tenant, API-key and file endpoint, so they are served only in local
     # development. Passing None to FastAPI unregisters the routes outright
     # rather than hiding them. To expose them in staging too, widen this to
-    # `settings.ENVIRONMENT != "production"`.
+    # `settings.ENVIRONMENT != "production"`, and then turn off
+    # `persistAuthorization` below, it keeps the bearer token in the
+    # browser's local storage.
     serve_documentation = settings.ENVIRONMENT == "local"
 
     app = FastAPI(
@@ -242,6 +245,13 @@ def create_app() -> FastAPI:
         # which is the slowest part of answering a list endpoint once the
         # page is a few hundred rows of nested models.
         default_response_class=ORJSONResponse,
+        # Collapsed, so the groups read as a list to pick from rather than
+        # a page to scroll past, and the sign-in is kept across a reload
+        # instead of the next call failing with a 401 and no hint why.
+        swagger_ui_parameters={
+            "docExpansion": "none",
+            "persistAuthorization": True,
+        },
     )
 
     if serve_documentation:

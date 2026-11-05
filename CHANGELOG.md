@@ -99,6 +99,9 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Hash email addresses without regard to letter case, where `Alex@Example.com` registered a second account next to `alex@example.com`, and keep matching rows written before, and rehash the rows written before with a migration, where a pair that was already two accounts keeps both, the older winning a lookup
+- Reject text that is only whitespace in `TextString` fields, where a name of spaces was stored as a value that renders as nothing, except a blank name from Apple, which is read as no name
+- Say in the Authorize dialog that the username is the email and that `client_id` and `client_secret` stay empty, keep the sign-in across a reload of the docs page, and collapse the endpoint groups
 - Seed the initial data in `scripts/start.sh` after the migrations, where a database that `setup.sh` never seeded had no system tenant and the first registration failed with a 500
 - Name `is_minimum_age_confirmed` and the age in the registration refusal, and say how long to wait in the 429 message, where the wait was only in the `Retry-After` header
 - Put `X-Request-ID` on the 500 response, which is built outside the request ID middleware and carried nothing to find its log line by
