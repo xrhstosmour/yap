@@ -22,6 +22,7 @@ from jwt import ExpiredSignatureError
 from jwt import InvalidTokenError
 
 from app.core.security import DUMMY_API_KEY_HASH
+from app.core.settings import settings
 from app.core.ws_ticket import WebSocketTicket
 from app.dependencies import SECOND_FACTOR_REQUIRED
 from app.dependencies import get_api_key_auth
@@ -523,40 +524,43 @@ class TestGetCurrentSuperuser:
         assert exc_info.value.detail == "Not enough permissions"
 
     @pytest.mark.asyncio
-    async def test_superuser_without_2fa_refused_outside_local(self) -> None:
+    async def test_superuser_without_2fa_refused_outside_local(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """A password alone does not open superuser routes outside `local`."""
         user = _make_user(role=UserRole.SUPERUSER)
+        monkeypatch.setattr(settings, "ENVIRONMENT", "production")
 
-        with patch("app.dependencies.settings") as settings:
-            settings.ENVIRONMENT = "production"
-            with pytest.raises(HTTPException) as exc_info:
-                await get_current_superuser(current_user=user)
+        with pytest.raises(HTTPException) as exc_info:
+            await get_current_superuser(current_user=user)
 
         assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
         assert "two-factor" in exc_info.value.detail
 
     @pytest.mark.asyncio
-    async def test_superuser_with_2fa_passes_outside_local(self) -> None:
+    async def test_superuser_with_2fa_passes_outside_local(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """With 2FA on, the same superuser gets through outside `local`."""
         user = _make_user(role=UserRole.SUPERUSER)
         user.is_2fa_enabled = True
+        monkeypatch.setattr(settings, "ENVIRONMENT", "production")
 
-        with patch("app.dependencies.settings") as settings:
-            settings.ENVIRONMENT = "production"
-            result = await get_current_superuser(current_user=user)
+        result = await get_current_superuser(current_user=user)
 
         assert result is user
 
     @pytest.mark.asyncio
-    async def test_superuser_without_2fa_refused_on_websocket(self) -> None:
+    async def test_superuser_without_2fa_refused_on_websocket(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """The WebSocket gate holds the same line as the HTTP one."""
         user = _make_user(role=UserRole.SUPERUSER)
         websocket = AsyncMock()
+        monkeypatch.setattr(settings, "ENVIRONMENT", "production")
 
-        with patch("app.dependencies.settings") as settings:
-            settings.ENVIRONMENT = "production"
-            with pytest.raises(WebSocketException) as exc_info:
-                await get_current_superuser_ws(websocket, user)
+        with pytest.raises(WebSocketException) as exc_info:
+            await get_current_superuser_ws(websocket, user)
 
         assert exc_info.value.reason == SECOND_FACTOR_REQUIRED
 

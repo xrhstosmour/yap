@@ -27,9 +27,9 @@ from app.core import SYSTEM_TENANT_ID
 from app.core.logging import get_logger
 from app.core.rate_limit import check_api_key_rate_limit
 from app.core.rate_limit import check_user_rate_limit
+from app.core.second_factor import lacks_required_second_factor
 from app.core.security import decode_token
 from app.core.security import is_token_blacklisted
-from app.core.settings import settings
 from app.core.tenant import set_current_tenant_id
 from app.core.tenant import system_context
 from app.core.ws_ticket import consume_ws_ticket
@@ -213,16 +213,6 @@ AuthTimeDependency = Annotated[int | None, Depends(get_auth_time)]
 SECOND_FACTOR_REQUIRED = "Turn on two-factor authentication for this account."
 
 
-def _lacks_required_second_factor(user: User) -> bool:
-    """Whether a superuser is on a password alone where that is not allowed.
-
-    `/admin` already refuses such a superuser outside `local`, and the API
-    must too: it reaches the same powers (feature flags, tenants, metrics),
-    so leaving it open made a password alone the way around the admin gate.
-    """
-    return settings.ENVIRONMENT != "local" and not user.is_2fa_enabled
-
-
 async def get_current_superuser(current_user: CurrentUser) -> User:
     """Get the current user if they are a superuser.
 
@@ -241,7 +231,7 @@ async def get_current_superuser(current_user: CurrentUser) -> User:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions",
         )
-    if _lacks_required_second_factor(current_user):
+    if lacks_required_second_factor(current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=SECOND_FACTOR_REQUIRED,
@@ -410,7 +400,7 @@ async def get_current_superuser_ws(
     """
     if current_user.role != UserRole.SUPERUSER:
         await _refuse_websocket(websocket, "Not enough permissions")
-    if _lacks_required_second_factor(current_user):
+    if lacks_required_second_factor(current_user):
         await _refuse_websocket(websocket, SECOND_FACTOR_REQUIRED)
     return current_user
 
