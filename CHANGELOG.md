@@ -99,6 +99,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Test the migration that rehashes `users.email_hash`, against rows in one case, a pair of one mailbox and a lowercase row that already holds the hash
 - Hash email addresses without regard to letter case, where `Alex@Example.com` registered a second account next to `alex@example.com`, and keep matching rows written before, and rehash the rows written before with a migration, where a pair that was already two accounts keeps both, the older winning a lookup
 - Reject text that is only whitespace in `TextString` fields, where a name of spaces was stored as a value that renders as nothing, except a blank name from Apple, which is read as no name
 - Say in the Authorize dialog that the username is the email and that `client_id` and `client_secret` stay empty, keep the sign-in across a reload of the docs page, and collapse the endpoint groups
