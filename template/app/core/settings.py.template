@@ -140,6 +140,11 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
     PROJECT_NAME: str = "{{ project_name }}"
     PRODUCT_NAME: str = ""
+    # Where the terms and the privacy policy are published. Linked from the
+    # interactive docs when set, and left out when empty: a link to a page
+    # nobody wrote is worse than none, so there is no default.
+    TERMS_OF_SERVICE_URL: str = ""
+    PRIVACY_POLICY_URL: str = ""
     ENVIRONMENT: Literal["local", "staging", "production"] = "production"
 
     # Security.
