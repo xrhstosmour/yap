@@ -169,6 +169,19 @@ def disable_rate_limit_fixture(monkeypatch: pytest.MonkeyPatch) -> Generator[Non
     monkeypatch.setattr("app.dependencies.check_user_rate_limit", _no_op)
     monkeypatch.setattr("app.dependencies.check_api_key_rate_limit", _no_op)
 
+    # Login attempt counters live in Redis for a quarter of an hour, so tests
+    # that log in with a shared email would throttle each other.
+    async def _no_retry_after(  # noqa: ANN401
+        *_args: Any,  # noqa: ANN401
+        **_kwargs: Any,  # noqa: ANN401
+    ) -> int:
+        return 0
+
+    monkeypatch.setattr(
+        "app.services.auth_service.count_login_attempt", _no_retry_after
+    )
+    monkeypatch.setattr("app.services.auth_service.clear_login_attempts", _no_op)
+
     # check_auth_rate_limit is wired via `dependencies=[Depends(check_auth_rate_limit)]`
     # on the route decorators, so FastAPI captures the callable at import time.
     # Overriding the module attribute via monkeypatch would not reach it; use

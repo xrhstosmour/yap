@@ -19,22 +19,23 @@ from app.schemas.base import BaseSchema
 from app.schemas.base import PaginatedResponse
 from app.schemas.base import PaginationParameters
 from app.schemas.base import PasswordString
+from app.schemas.base import TextString
 
 
 class UserBase(BaseSchema):
     """Base user schema with common fields."""
 
     email: EmailStr = Field(description="User email address")
-    full_name: str | None = Field(
+    full_name: TextString | None = Field(
         default=None, max_length=255, description="Display name"
     )
-    username: str | None = Field(
+    username: TextString | None = Field(
         default=None,
         min_length=3,
         max_length=32,
         description="Unique handle other people find this user by",
     )
-    bio: str | None = Field(
+    bio: TextString | None = Field(
         default=None, max_length=500, description="Short self-description"
     )
     avatar_file_id: UUID | None = Field(
@@ -60,7 +61,7 @@ class UserUpdate(BaseSchema):
     """Schema for updating a user."""
 
     email: EmailStr | None = Field(default=None, description="Email address")
-    full_name: str | None = Field(
+    full_name: TextString | None = Field(
         default=None, max_length=255, description="Display name"
     )
     is_active: bool | None = Field(default=None, description="Active status")
@@ -70,16 +71,16 @@ class UserUpdate(BaseSchema):
 class UserUpdateMe(BaseSchema):
     """Schema for users updating their own profile."""
 
-    full_name: str | None = Field(
+    full_name: TextString | None = Field(
         default=None, max_length=255, description="Display name"
     )
-    username: str | None = Field(
+    username: TextString | None = Field(
         default=None,
         min_length=3,
         max_length=32,
         description="Unique handle other people find you by",
     )
-    bio: str | None = Field(
+    bio: TextString | None = Field(
         default=None, max_length=500, description="Short self-description"
     )
     avatar_file_id: UUID | None = Field(

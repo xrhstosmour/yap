@@ -106,7 +106,11 @@ async def sign_in(
     No forgery token: there is no session to forge yet.
     """
     try:
-        user = await AuthService(session).authenticate(email, password)
+        user = await AuthService(session).authenticate(
+            email,
+            password,
+            client_host=request.client.host if request.client else None,
+        )
         if not is_platform_admin(user):
             raise PermissionError
     except (AuthenticationError, PermissionError):

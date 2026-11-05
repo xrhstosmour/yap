@@ -10,6 +10,8 @@ from __future__ import annotations
 from collections.abc import Generator
 from typing import Any
 from typing import Literal
+from unittest.mock import AsyncMock
+from unittest.mock import patch
 
 import pytest
 from httpx import ASGITransport
@@ -99,6 +101,25 @@ class TestSigningIn:
 
         assert client.cookies.get(SESSION_COOKIE)
         assert client.cookies.get(CSRF_COOKIE)
+
+    @pytest.mark.anyio
+    async def test_a_throttled_account_gets_the_same_refusal(
+        self, client: AsyncClient, session
+    ) -> None:
+        """A closed account does not tell the form apart from a wrong password."""
+        await _account(session, "admin-throttled@example.com", "admin-throttled")
+
+        with patch(
+            "app.services.auth_service.count_login_attempt",
+            AsyncMock(return_value=60),
+        ):
+            response = await client.post(
+                "/admin/login",
+                data={"email": "admin-throttled@example.com", "password": PASSWORD},
+            )
+
+        assert response.status_code == 401
+        assert not client.cookies.get(SESSION_COOKIE)
 
     @pytest.mark.anyio
     async def test_a_tenant_superuser_is_refused(

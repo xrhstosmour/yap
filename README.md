@@ -21,8 +21,8 @@ copier copy --trust --vcs-ref main gh:xrhstosmour/yap path/to/store/project
 copier copy --trust /path/to/yap path/to/store/project
 ```
 
-Generation does more than copy files. `scripts/setup.sh` runs as its last
-step: it writes `.env` with generated secrets, starts the Docker services,
+Generation does more than copy files. `scripts/setup.sh` runs near the end,
+before the template version is recorded: it writes `.env` with generated secrets, starts the Docker services,
 applies the migrations and seeds the first superuser. It needs Docker
 running, and stops with a link to install it when it is missing.
 

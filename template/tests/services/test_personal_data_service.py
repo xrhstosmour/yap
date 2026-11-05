@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import UTC
+from datetime import datetime
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.consent_record import ConsentRecord
@@ -55,6 +58,26 @@ class TestCollect:
         assert [row["kind"] for row in records["consent_records"]] == ["terms"]
         assert [row["platform"] for row in records["device_tokens"]] == ["ios"]
         assert "token" not in records["device_tokens"][0]
+
+    async def test_soft_deleted_rows_are_included_and_marked(
+        self, session: AsyncSession
+    ) -> None:
+        """A row kept after a soft delete is still held, so it is still exported."""
+        user = await _user(session, "deleted-row-export@example.com")
+        session.add(
+            ConsentRecord(
+                user_id=user.id,
+                kind="terms",
+                is_granted=True,
+                deleted_at=datetime.now(UTC),
+            )
+        )
+        await session.commit()
+
+        records = (await PersonalDataService(session).collect(user.id))["records"]
+
+        assert [row["kind"] for row in records["consent_records"]] == ["terms"]
+        assert records["consent_records"][0]["deleted_at"] is not None
 
     async def test_another_persons_rows_stay_out(self, session: AsyncSession) -> None:
         """Rows are matched on the account, never on the table as a whole."""

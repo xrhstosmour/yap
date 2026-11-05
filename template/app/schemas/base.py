@@ -17,6 +17,18 @@ from pydantic import Field
 from app.core.security import MAX_PASSWORD_BYTES
 
 
+def _without_null_character(value: str) -> str:
+    """Reject text PostgreSQL and bcrypt cannot store or hash.
+
+    A NUL character is valid JSON but PostgreSQL refuses it in a text
+    column and bcrypt refuses it in a password, both raised from deep in
+    the stack as a 500. Caught here it is a 422 naming the real constraint.
+    """
+    if "\x00" in value:
+        raise ValueError("Must not contain a NUL character.")
+    return value
+
+
 def _within_bcrypt_byte_limit(value: str) -> str:
     """Reject passwords bcrypt cannot hash.
 
@@ -27,6 +39,7 @@ def _within_bcrypt_byte_limit(value: str) -> str:
     here it is a 422 naming the real constraint, rather than a 500 raised
     from inside the hashing call.
     """
+    _without_null_character(value)
     if len(value.encode()) > MAX_PASSWORD_BYTES:
         raise ValueError(
             f"Password must be at most {MAX_PASSWORD_BYTES} bytes when "
@@ -35,6 +48,9 @@ def _within_bcrypt_byte_limit(value: str) -> str:
         )
     return value
 
+
+TextString = Annotated[str, AfterValidator(_without_null_character)]
+"""Free text field type that rejects NUL characters alongside `Field` rules."""
 
 PasswordString = Annotated[str, AfterValidator(_within_bcrypt_byte_limit)]
 """Password field type enforcing bcrypt's byte ceiling alongside `Field` rules."""

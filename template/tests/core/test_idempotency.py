@@ -11,6 +11,7 @@ available) or skip.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from unittest.mock import AsyncMock
 from unittest.mock import patch
@@ -186,7 +187,64 @@ class TestIdempotencyMiddleware:
         called_key = mock_service.get.await_args.args[0]
 
         assert called_key != "anon:POST:/echo:test-key-anon"
-        assert called_key == "anon:testclient:POST:/echo:test-key-anon"
+        assert called_key.startswith("anon:testclient:")
+        assert called_key.endswith(":POST:/echo:test-key-anon")
+
+    def test_anonymous_requests_with_different_bodies_do_not_share_a_scope(
+        self,
+        app_with_middleware: TestClient,
+        mock_service: IdempotencyService,
+    ) -> None:
+        """Two people behind one address with the same key never share a response.
+
+        A login body carries the caller's own credentials, so it tells them
+        apart where the address and a guessable key cannot.
+        """
+        for body in ({"email": "a@example.com"}, {"email": "b@example.com"}):
+            app_with_middleware.post(
+                "/echo",
+                json=body,
+                headers={"X-Idempotency-Key": "00000000"},
+            )
+
+        first, second = (call.args[0] for call in mock_service.get.await_args_list)
+
+        assert first != second
+
+    def test_anonymous_scope_does_not_hold_a_plain_hash_of_the_body(
+        self,
+        app_with_middleware: TestClient,
+        mock_service: IdempotencyService,
+    ) -> None:
+        """A login body holds the password, so its digest must be keyed."""
+        body = b'{"email": "a@example.com", "password": "hunter2hunter2"}'
+
+        app_with_middleware.post(
+            "/echo",
+            content=body,
+            headers={
+                "X-Idempotency-Key": "test-key-keyed",
+                "Content-Type": "application/json",
+            },
+        )
+
+        called_key = mock_service.get.await_args.args[0]
+        assert hashlib.sha256(body).hexdigest() not in called_key
+
+    def test_large_anonymous_body_goes_without_deduplication(
+        self,
+        app_with_middleware: TestClient,
+        mock_service: IdempotencyService,
+    ) -> None:
+        """A body over the cap is not read into memory to build a scope key."""
+        resp = app_with_middleware.post(
+            "/echo",
+            json={"x": "y" * (70 * 1024)},
+            headers={"X-Idempotency-Key": "test-key-large"},
+        )
+
+        assert resp.is_success
+        mock_service.get.assert_not_awaited()
 
     def test_api_key_request_not_scoped_as_anonymous(
         self,
@@ -275,13 +333,11 @@ class TestIdempotencyLockHeartbeat:
 
         assert resp.status_code == 200
         assert mock_service.extend_lock.await_count >= 1
-        mock_service.extend_lock.assert_awaited_with(
-            "anon:testclient:POST:/slow:test-key-heartbeat", "test-token"
-        )
+        locked_key = mock_service.try_lock.await_args.args[0]
+        assert locked_key.endswith(":POST:/slow:test-key-heartbeat")
+        mock_service.extend_lock.assert_awaited_with(locked_key, "test-token")
         # The heartbeat task must not outlive the request.
-        mock_service.release_lock.assert_awaited_once_with(
-            "anon:testclient:POST:/slow:test-key-heartbeat", "test-token"
-        )
+        mock_service.release_lock.assert_awaited_once_with(locked_key, "test-token")
 
 
 class TestClientErrorsAreNotCached:

@@ -7,6 +7,7 @@ distributed instances.
 
 from __future__ import annotations
 
+import hashlib
 import secrets
 import time
 
@@ -160,6 +161,40 @@ auth_rate_limiter = RateLimiter(
 )
 
 
+_FIXED_WINDOW_SCRIPT = """
+local count = redis.call("INCR", KEYS[1])
+local ttl = redis.call("TTL", KEYS[1])
+if count == 1 or ttl < 0 then
+    redis.call("EXPIRE", KEYS[1], ARGV[1])
+    ttl = tonumber(ARGV[1])
+end
+return {count, ttl}
+"""
+
+
+async def fixed_window_count(key: str, window: int) -> tuple[int, int]:
+    """Count one event in a fixed window that the events cannot extend.
+
+    The window starts at the first event and ends `window` seconds later.
+    Refreshing the TTL on every event, over-limit ones included, would let
+    anyone who keeps trying hold a lockout open for as long as they like.
+    Counting and expiring run in one script, so a counter whose TTL was lost
+    or never set gets one again instead of staying closed for good.
+
+    Args:
+        key: Redis key of the counter
+        window: Window length in seconds
+
+    Returns:
+        Tuple of (count including this event, seconds until the window ends)
+    """
+    redis_client = await get_redis()
+    count, ttl = await redis_client.eval(  # type: ignore[misc]
+        _FIXED_WINDOW_SCRIPT, 1, key, str(window)
+    )
+    return int(count), int(ttl)
+
+
 async def check_user_rate_limit(user_id: str) -> None:
     """Check if user has exceeded their rate limit.
 
@@ -223,3 +258,61 @@ async def check_auth_rate_limit(request: Request) -> None:
             retry_after=retry_after,
         )
         raise RateLimitExceeded(retry_after)
+
+
+def _login_attempt_keys(email: str, client_host: str | None) -> tuple[str, str]:
+    """Keys of the account-wide and the account-from-this-address counters.
+
+    Hashed, so no address sits in Redis.
+    """
+    account = hashlib.sha256(email.strip().lower().encode()).hexdigest()
+    address = hashlib.sha256((client_host or "unknown").encode()).hexdigest()
+    return f"login_attempts:{account}", f"login_attempts:{account}:{address}"
+
+
+async def count_login_attempt(email: str, client_host: str | None) -> int:
+    """Count a login attempt before its password is checked, 0 when allowed.
+
+    The per-IP limiter in `check_auth_rate_limit` cannot see one password
+    being guessed from many addresses, so attempts are also counted per
+    account. The attempt is counted before bcrypt runs, not after it fails,
+    or parallel guesses all read an empty counter and get through together.
+
+    Two counters, because a lock on the account alone is a way to lock out
+    its owner: anyone who knows an email could send enough bad passwords
+    from one address to close the account to everybody. The account-and-
+    address counter closes the door on a single source early. The account-
+    wide one is higher, so reaching it takes several sources, and that is
+    the many-address guessing it exists to stop. A locked-out owner has
+    password reset and the magic link.
+
+    Fails open on a Redis error, like the other limiters here.
+
+    Returns:
+        Seconds the caller must wait, 0 when the attempt may go on
+    """
+    account_key, address_key = _login_attempt_keys(email, client_host)
+    try:
+        account_count, account_ttl = await fixed_window_count(
+            account_key, settings.LOGIN_ATTEMPT_WINDOW
+        )
+        address_count, address_ttl = await fixed_window_count(
+            address_key, settings.LOGIN_ATTEMPT_WINDOW
+        )
+    except (RedisConnectionError, RedisTimeoutError, RedisError, RuntimeError):
+        logger.warning("login_attempt_count_unavailable", exc_info=True)
+        return 0
+    if account_count > settings.LOGIN_MAX_ATTEMPTS_PER_ACCOUNT:
+        return max(1, account_ttl)
+    if address_count > settings.LOGIN_MAX_ATTEMPTS_PER_ACCOUNT_AND_ADDRESS:
+        return max(1, address_ttl)
+    return 0
+
+
+async def clear_login_attempts(email: str, client_host: str | None) -> None:
+    """Forget an account's attempts after a successful login."""
+    try:
+        redis = await get_redis()
+        await redis.delete(*_login_attempt_keys(email, client_host))
+    except (RedisConnectionError, RedisTimeoutError, RedisError, RuntimeError):
+        logger.warning("login_attempt_clear_unavailable", exc_info=True)

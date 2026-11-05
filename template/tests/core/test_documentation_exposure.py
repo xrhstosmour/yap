@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from fastapi.testclient import TestClient
 
 from app.main import create_app
 
@@ -43,3 +44,25 @@ class TestDocumentationExposure:
         for path in DOCUMENTATION_PATHS:
             assert path not in paths
         assert not any(path.endswith("/openapi.json") for path in paths)
+
+
+class TestRootPointer:
+    """The root points a new developer at the docs, only where the docs exist."""
+
+    def test_local_root_redirects_to_the_docs(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`/` is registered locally and sends the caller to `/try`."""
+        monkeypatch.setattr("app.main.settings.ENVIRONMENT", "local")
+        client = TestClient(create_app())
+
+        response = client.get("/", follow_redirects=False)
+
+        assert response.status_code == 307
+        assert response.headers["location"] == "/try"
+
+    def test_deployed_root_stays_unregistered(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A deployed app does not answer `/` at all."""
+        assert "/" not in _paths("production", monkeypatch)

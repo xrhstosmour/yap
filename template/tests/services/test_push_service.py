@@ -131,6 +131,30 @@ class TestApple:
     """Tests for the APNs path."""
 
     @pytest.mark.asyncio
+    async def test_token_cannot_change_the_request_path(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        notification: PushNotification,
+    ) -> None:
+        """A token with `/` or `?` stays one path segment on Apple's host."""
+        _configure_apple(monkeypatch)
+        seen: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request)
+            return httpx.Response(200)
+
+        _patch_client(monkeypatch, handler)
+
+        await PushService().send(
+            [("../../x?y=1", DevicePlatform.IOS)],
+            notification,
+        )
+
+        assert seen[0].url.raw_path == b"/3/device/..%2F..%2Fx%3Fy%3D1"
+        assert seen[0].url.host == "api.push.apple.com"
+
+    @pytest.mark.asyncio
     async def test_posts_one_request_per_device_to_the_live_host(
         self,
         monkeypatch: pytest.MonkeyPatch,

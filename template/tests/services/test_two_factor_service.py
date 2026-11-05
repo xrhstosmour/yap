@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
 from unittest.mock import patch
 from uuid import UUID
+from uuid import uuid4
 
 import pyotp
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.cache import close_redis
+from app.core.cache import get_redis
+from app.core.cache import init_redis
 from app.core.encryption import decrypt
 from app.core.encryption import encrypt
 from app.core.security import generate_password_hash
@@ -28,6 +33,7 @@ from app.services.two_factor_service import TwoFactorAuthService
 from app.services.two_factor_service import TwoFactorError
 from app.services.two_factor_service import TwoFactorNotEnabledError
 from app.services.two_factor_service import TwoFactorRateLimitError
+from app.services.two_factor_service import _count_attempt
 
 
 def make_user(
@@ -781,21 +787,15 @@ class TestRenewRecoveryCodes:
         assert redis.values == {}
 
 
-class _CounterRedis:
-    """INCR, EXPIRE and DELETE on a dict, to see which counter moved."""
+class _Counter:
+    """Stands in for `fixed_window_count`, to see which counter moved."""
 
     def __init__(self) -> None:
         self.counts: dict[str, int] = {}
 
-    async def incr(self, key: str) -> int:
+    async def __call__(self, key: str, window: int) -> tuple[int, int]:
         self.counts[key] = self.counts.get(key, 0) + 1
-        return self.counts[key]
-
-    async def expire(self, key: str, ttl: int) -> None:
-        del key, ttl
-
-    async def delete(self, key: str) -> None:
-        self.counts.pop(key, None)
+        return self.counts[key], window
 
 
 class TestPasswordProofAttempts:
@@ -808,15 +808,57 @@ class TestPasswordProofAttempts:
         """The password proof locks out without touching `totp_attempts`."""
         user = make_user()
         user.hashed_password = generate_password_hash("correct-password")
-        redis = _CounterRedis()
+        counter = _Counter()
 
-        with patch(
-            "app.services.two_factor_service.get_redis", AsyncMock(return_value=redis)
-        ):
+        with patch("app.services.two_factor_service.fixed_window_count", counter):
             for _ in range(settings.TOTP_MAX_ATTEMPTS):
                 with pytest.raises(InvalidProofPasswordError):
                     await service.verify_proof_password(user, "guess")
             with pytest.raises(ProofPasswordRateLimitError):
                 await service.verify_proof_password(user, "guess")
 
-        assert list(redis.counts) == [f"password_proof_attempts:{user.id}"]
+        assert list(counter.counts) == [f"password_proof_attempts:{user.id}"]
+
+
+class TestAttemptWindow:
+    """An attempt never extends the window it is counted in."""
+
+    @pytest.fixture(autouse=True)
+    async def _redis(self) -> AsyncIterator[None]:
+        """The counter is a Lua script, so only a real Redis runs it."""
+        await init_redis()
+        yield
+        await close_redis()
+
+    @pytest.mark.asyncio
+    async def test_window_ends_at_the_first_attempt_plus_the_ttl(self) -> None:
+        """Later attempts count but leave the expiry where the first put it."""
+        key = f"totp_attempts:window-test-{uuid4()}"
+        redis = await get_redis()
+        try:
+            assert await _count_attempt(key) == 1
+            first_ttl = await redis.ttl(key)
+            assert await _count_attempt(key) == 2
+            assert await _count_attempt(key) == 3
+
+            assert (
+                0 < await redis.ttl(key) <= first_ttl <= settings.TOTP_RATE_LIMIT_WINDOW
+            )
+        finally:
+            await redis.delete(key)
+
+    @pytest.mark.asyncio
+    async def test_a_counter_that_lost_its_ttl_gets_one_back(self) -> None:
+        """A key without an expiry would lock the account for good."""
+        key = f"totp_attempts:window-test-{uuid4()}"
+        redis = await get_redis()
+        try:
+            await _count_attempt(key)
+            await redis.persist(key)
+            assert await redis.ttl(key) == -1
+
+            await _count_attempt(key)
+
+            assert 0 < await redis.ttl(key) <= settings.TOTP_RATE_LIMIT_WINDOW
+        finally:
+            await redis.delete(key)

@@ -9,6 +9,8 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add `LOGIN_MAX_ATTEMPTS_PER_ACCOUNT`, `LOGIN_MAX_ATTEMPTS_PER_ACCOUNT_AND_ADDRESS` and `LOGIN_ATTEMPT_WINDOW`, counting login attempts per account before the password is checked and answering 429 past the limit, where the per-IP limit alone let one password be guessed from many addresses, and a lower limit per account and address so one source cannot lock the owner out
+- Redirect `/` to `/try` in the `local` environment, where a bare 404 gave a new developer nothing to go on
 - Add `scripts/rollback.sh`, running the images of an earlier release on the server again, with `deploy.sh` keeping the last three healthy releases in `.releases` through `scripts/releases.sh`
 - Add `scripts/logs.sh`, reading the logs of the stack on the server, one service or all, optionally following
 - Add `scripts/env.sh`, listing the names of the server's settings, reading one, or setting one from standard input and bringing the stack up again, through `scripts/environment.sh`
@@ -63,6 +65,10 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Require two-factor authentication for superuser API and `WebSocket` routes outside `local`, as `/admin` already did, so a password alone no longer opens them
+- Scope anonymous idempotency keys by a keyed digest of the request body as well as the client address, and skip deduplication for anonymous bodies over 64 KiB, so people behind one IP sharing a guessable key never replay each other's cached login tokens
+- Include soft-deleted rows in the personal data export, marked by their own `deleted_at`
+- Keep the application code in the image root-owned, as the `Dockerfile` comment already said, and depend on `bcrypt` directly instead of the unused `pwdlib`
 - Run `GlitchTip` 6 as one all-in-one container of about 200 MiB instead of a web and worker pair of about 1.2 GiB, and add `EMAIL_URL` and `GLITCHTIP_DOMAIN`, which it requires, an existing `GlitchTip` 4 database must first be migrated by a `5.x` image and `PostgreSQL` restarted for `max_locks_per_transaction`
 - Rename `GlitchTip`'s `REDIS_URL` to `VALKEY_URL`, the name `GlitchTip` 6 documents, `setup.sh` adds it to an existing `.env` with the current Redis password, and the old `REDIS_URL` line is no longer read and can be removed
 - Send a verification email when a user changes their email address, and reset `is_verified` for self and admin updates
@@ -89,6 +95,10 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Reject a NUL character in the register, profile and Apple sign-in text fields with a 422 instead of a 500
+- Stop `TOTP` and password proof attempts from extending their own lockout window, which let anyone with the password keep the owner's second factor locked
+- Strip control characters from the download filename header and percent-encode the device token in the `APNs` request path
+- Warn when `setup.sh` cannot install the dev dependencies, and correct the docs that disagreed with it and with the pre-commit hooks
 - Hide the raw-SQL full-text indexes, `*_fts`, from `alembic check` in `migrations/env.py`, only `*_trgm` was hidden, so the check failed in every generated project's CI
 - Mount the `RabbitMQ` CA into `app`, `celery-worker` and `celery-beat` with the long volume syntax and `create_host_path: false`, a missing certificate now fails the start instead of `Docker` creating a root-owned directory at the path
 - Keep the `RabbitMQ` CA private key, `ca_key.pem`, off the server in `scripts/deploy.sh`, never sent and removed from a server a past deploy copied it to, it only signs certificates on the machine that ran setup

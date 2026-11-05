@@ -5,6 +5,7 @@ Tests cover:
 - RateLimitExceeded exception (HTTP 429)
 - RateLimiter.check_rate_limit() with mocked Redis (allowed / denied paths)
 - check_user_rate_limit() and check_api_key_rate_limit() wrappers
+- per-account login attempt counting
 """
 
 from __future__ import annotations
@@ -400,3 +401,77 @@ class TestRateLimiterFailsOpen:
         assert allowed is False
         assert remaining == 0
         assert retry_after > 0
+
+
+# Login attempts per account
+
+
+class _WindowCounter:
+    """Stands in for `fixed_window_count`: counts per key, a window of 42."""
+
+    def __init__(self) -> None:
+        self.counts: dict[str, int] = {}
+
+    async def __call__(self, key: str, window: int) -> tuple[int, int]:
+        del window
+        self.counts[key] = self.counts.get(key, 0) + 1
+        return self.counts[key], 42
+
+
+def _patch_counter(counter: _WindowCounter) -> object:
+    return patch("app.core.rate_limit.fixed_window_count", counter)
+
+
+async def test_many_addresses_close_the_account_past_the_account_limit() -> None:
+    """Guessing from a new address each time still meets the account limit."""
+    limit = _rl_mod.settings.LOGIN_MAX_ATTEMPTS_PER_ACCOUNT
+    with _patch_counter(_WindowCounter()):
+        for number in range(limit):
+            host = f"203.0.113.{number}"
+            assert await _rl_mod.count_login_attempt("a@example.com", host) == 0
+
+        assert await _rl_mod.count_login_attempt("a@example.com", "198.51.100.1") == 42
+
+
+async def test_one_address_cannot_lock_the_account_for_everyone() -> None:
+    """One source closes only its own door, the owner on another address gets in."""
+    limit = _rl_mod.settings.LOGIN_MAX_ATTEMPTS_PER_ACCOUNT_AND_ADDRESS
+    with _patch_counter(_WindowCounter()):
+        for _ in range(limit):
+            assert await _rl_mod.count_login_attempt("a@example.com", "192.0.2.1") == 0
+
+        assert await _rl_mod.count_login_attempt("a@example.com", "192.0.2.1") == 42
+        assert await _rl_mod.count_login_attempt("a@example.com", "192.0.2.2") == 0
+
+
+async def test_attempts_are_per_account_and_case_insensitive() -> None:
+    """Another account is untouched, the same address in other case is the same."""
+    assert _rl_mod._login_attempt_keys("A@Example.com", "h") == (
+        _rl_mod._login_attempt_keys("a@example.com", "h")
+    )
+    assert (
+        _rl_mod._login_attempt_keys("a@example.com", "h")[0]
+        != (_rl_mod._login_attempt_keys("b@example.com", "h")[0])
+    )
+
+
+async def test_success_clears_both_counters() -> None:
+    """A good login forgets the account's attempts, both counters."""
+    redis = AsyncMock()
+    with patch("app.core.rate_limit.get_redis", AsyncMock(return_value=redis)):
+        await _rl_mod.clear_login_attempts("a@example.com", "192.0.2.1")
+
+    redis.delete.assert_awaited_once_with(
+        *_rl_mod._login_attempt_keys("a@example.com", "192.0.2.1")
+    )
+
+
+async def test_attempt_counter_fails_open_without_redis() -> None:
+    """A Redis outage leaves login possible, as the other limiters do."""
+    down = RedisConnectionError("down")
+    with (
+        patch("app.core.rate_limit.fixed_window_count", AsyncMock(side_effect=down)),
+        patch("app.core.rate_limit.get_redis", AsyncMock(side_effect=down)),
+    ):
+        assert await _rl_mod.count_login_attempt("a@example.com", "h") == 0
+        await _rl_mod.clear_login_attempts("a@example.com", "h")

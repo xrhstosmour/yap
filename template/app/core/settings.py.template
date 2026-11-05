@@ -110,6 +110,12 @@ class Settings(BaseSettings):
         RATE_LIMIT_PER_MINUTE_API_KEY: Rate limit per API key
         RATE_LIMIT_PER_MINUTE_AUTH: Rate limit per client IP on unauthenticated
             auth endpoints (login, register, forgot-password, magic-link)
+        LOGIN_MAX_ATTEMPTS_PER_ACCOUNT: Logins one email may attempt per window,
+            from all addresses together, before further attempts get a 429
+        LOGIN_MAX_ATTEMPTS_PER_ACCOUNT_AND_ADDRESS: The same limit for one
+            email from one address, lower, so a single source cannot lock the
+            account for everyone else
+        LOGIN_ATTEMPT_WINDOW: Seconds those windows last
         RATE_LIMIT_GLOBAL_ENABLED: Turn the limit in front of every route on or off
         RATE_LIMIT_GLOBAL_ANONYMOUS_PER_MINUTE: Allowance per client IP
         RATE_LIMIT_GLOBAL_AUTHENTICATED_PER_MINUTE: Allowance per signed-in user
@@ -308,6 +314,9 @@ class Settings(BaseSettings):
     RATE_LIMIT_PER_MINUTE: int = 60
     RATE_LIMIT_PER_MINUTE_API_KEY: int = 300
     RATE_LIMIT_PER_MINUTE_AUTH: int = 10
+    LOGIN_MAX_ATTEMPTS_PER_ACCOUNT: int = 30
+    LOGIN_MAX_ATTEMPTS_PER_ACCOUNT_AND_ADDRESS: int = 10
+    LOGIN_ATTEMPT_WINDOW: int = 900
 
     # Global abuse limits, in front of every route, see
     # `app.api.global_rate_limit`. A valid access token is counted by user,

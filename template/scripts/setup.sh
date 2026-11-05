@@ -293,7 +293,7 @@ if command -v uv >/dev/null 2>&1; then
     info "Installing dependencies..."
     unset VIRTUAL_ENV
     uv sync
-    uv sync --extra dev 2>/dev/null || true
+    uv sync --extra dev || warn "Could not install the dev dependencies, pytest, ruff and mypy will be missing"
 else
     warn "uv not available. Install it first, then run: uv sync"
 fi
@@ -308,10 +308,11 @@ if [ -f .pre-commit-config.yaml ] && command -v uv >/dev/null 2>&1; then
     fi
 fi
 
-# In synchronize mode, only a valid .env is needed.
-# Skip services, migrations, and seeding so template updates never require Docker or Database.
+# In synchronize mode, stop after the steps above (`.env`, certificates,
+# dependencies, hooks). Skip services, migrations, and seeding so template
+# updates never require Docker or Database.
 if [ "${YAP_SYNC:-0}" = "1" ]; then
-    info "Ensuring '.env', skipping services, migrations, and seeding..."
+    info "Skipping services, migrations, and seeding..."
     exit 0
 fi
 

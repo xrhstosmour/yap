@@ -14,6 +14,7 @@ from pydantic import Field
 from app.core.security import MAX_PASSWORD_BYTES
 from app.schemas.base import BaseSchema
 from app.schemas.base import PasswordString
+from app.schemas.base import TextString
 
 
 class LoginRequest(BaseSchema):
@@ -50,10 +51,10 @@ class RegisterRequest(BaseSchema):
         max_length=MAX_PASSWORD_BYTES,
         description="Password (min 8 characters)",
     )
-    full_name: str | None = Field(
+    full_name: TextString | None = Field(
         default=None, max_length=255, description="Display name"
     )
-    username: str | None = Field(
+    username: TextString | None = Field(
         default=None,
         min_length=3,
         max_length=32,
@@ -217,7 +218,7 @@ class AppleCallbackRequest(BaseSchema):
     redirect_uri: str = Field(
         description="Redirect URI used in the authorization request"
     )
-    full_name: str | None = Field(
+    full_name: TextString | None = Field(
         default=None,
         max_length=255,
         description="Name Apple posted on the first authorization",
@@ -245,7 +246,7 @@ class AppleNativeLoginRequest(BaseSchema):
         max_length=255,
         description="Raw nonce whose SHA-256 was sent to Apple",
     )
-    full_name: str | None = Field(
+    full_name: TextString | None = Field(
         default=None,
         max_length=255,
         description="Name Apple returned on the first authorization",

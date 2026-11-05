@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import io
+import re
 import warnings
 from typing import Any
 from urllib.parse import quote
@@ -197,7 +198,11 @@ def _attachment_disposition(filename: str | None) -> str:
     """
     if not filename:
         return "attachment"
-    safe_ascii = filename.encode("ascii", "ignore").decode().replace('"', "")
+    # Control characters go too: a CR or LF in a header value is a second
+    # header, and not every storage gateway refuses it.
+    safe_ascii = re.sub(
+        r'[\x00-\x1f\x7f"]', "", filename.encode("ascii", "ignore").decode()
+    )
     encoded = quote(filename, safe="")
     return f"attachment; filename=\"{safe_ascii}\"; filename*=UTF-8''{encoded}"
 

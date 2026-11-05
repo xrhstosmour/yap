@@ -21,12 +21,12 @@ RUN apk add --no-cache libpq ca-certificates tzdata curl \
     && mkdir -p /var/lib/celery \
     && chown appuser:appuser /var/lib/celery
 
-COPY --from=builder --chown=appuser:appuser /app/.venv /app/.venv
-COPY --chown=appuser:appuser pyproject.toml uv.lock alembic.ini ./
-COPY --chown=appuser:appuser app/ ./app/
-COPY --chown=appuser:appuser scripts/ ./scripts/
-COPY --chown=appuser:appuser templates/ ./templates/
-COPY --chown=appuser:appuser migrations/ ./migrations/
+COPY --from=builder /app/.venv /app/.venv
+COPY pyproject.toml uv.lock alembic.ini ./
+COPY app/ ./app/
+COPY scripts/ ./scripts/
+COPY templates/ ./templates/
+COPY migrations/ ./migrations/
 
 # The commit this image is built from, reported by `/health` and attached to
 # every Sentry event. Build with `--build-arg RELEASE=$(git rev-parse --short HEAD)`.

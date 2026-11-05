@@ -24,6 +24,7 @@ from app.core.cache import get_redis
 from app.core.encryption import decrypt
 from app.core.encryption import encrypt
 from app.core.logging import get_logger
+from app.core.rate_limit import fixed_window_count
 from app.core.security import build_totp_provisioning_uri
 from app.core.security import generate_password_hash
 from app.core.security import generate_recovery_codes
@@ -102,6 +103,18 @@ class ProofPasswordRateLimitError(TwoFactorRateLimitError):
     """Too many wrong passwords offered as fresh proof."""
 
     pass
+
+
+async def _count_attempt(key: str) -> int:
+    """Count one attempt in the `TOTP_RATE_LIMIT_WINDOW` second window.
+
+    The window starts at the first attempt and attempts cannot extend it.
+    Refreshing the TTL on every attempt, over-limit ones included, let anyone
+    who knew an account's password keep that account's own second factor
+    locked for as long as they kept trying.
+    """
+    count, _ = await fixed_window_count(key, settings.TOTP_RATE_LIMIT_WINDOW)
+    return count
 
 
 class TwoFactorAuthService:
@@ -641,10 +654,7 @@ class TwoFactorAuthService:
         Raises:
             ProofPasswordRateLimitError: If the limit is exceeded.
         """
-        redis = await get_redis()
-        key = f"password_proof_attempts:{user_id}"
-        count = await redis.incr(key)
-        await redis.expire(key, settings.TOTP_RATE_LIMIT_WINDOW)
+        count = await _count_attempt(f"password_proof_attempts:{user_id}")
         if count > settings.TOTP_MAX_ATTEMPTS:
             logger.warning("password_proof_rate_limit_exceeded", user_id=str(user_id))
             raise ProofPasswordRateLimitError(
@@ -688,12 +698,7 @@ class TwoFactorAuthService:
         Raises:
             TwoFactorRateLimitError: If the limit is exceeded.
         """
-        redis = await get_redis()
-        key = f"totp_attempts:{user_id}"
-        count = await redis.incr(key)
-        # Always refresh TTL to avoid race condition between INCR and EXPIRE.
-        # Calling EXPIRE unconditionally is idempotent and safe.
-        await redis.expire(key, settings.TOTP_RATE_LIMIT_WINDOW)
+        count = await _count_attempt(f"totp_attempts:{user_id}")
         if count > settings.TOTP_MAX_ATTEMPTS:
             logger.warning("totp_rate_limit_exceeded", user_id=str(user_id))
             raise TwoFactorRateLimitError(
