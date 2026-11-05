@@ -12,10 +12,6 @@ from app.core.cache import RedisDependency
 from app.core.cache import get_cache
 from app.core.cache import get_redis
 from app.core.cache import init_redis
-from app.core.circuit_breaker import CircuitBreakerError
-from app.core.circuit_breaker import CircuitBreakerService
-from app.core.circuit_breaker import CircuitState
-from app.core.circuit_breaker import circuit_breaker
 from app.core.email import send_batch_emails
 from app.core.email import send_email
 from app.core.encryption import CryptoService
@@ -76,10 +72,6 @@ __all__ = [
     "init_redis",
     "AsyncRedisClient",
     "RedisDependency",
-    "CircuitBreakerError",
-    "CircuitBreakerService",
-    "CircuitState",
-    "circuit_breaker",
     "feature_enabled",
     "feature_disabled",
     "refresh_cache",

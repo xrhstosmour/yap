@@ -59,7 +59,6 @@
 ### Reliability
 
 - **Idempotency**: `X-Idempotency-Key` header support on mutating endpoints, safe retries without duplicate side effects
-- **Circuit Breaker**: Protect external service calls from cascading failures
 - **Token Invalidation**: `token_version` claim on all JWTs, password reset, 2FA change, and account deletion immediately block all sessions
 - **Resilient Container Startup**: Automated retries on transient Docker Hub/network failures
 
