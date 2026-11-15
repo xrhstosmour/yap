@@ -203,6 +203,7 @@ and this project adheres to [semantic versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Update `dnspython` to 2.9.2 in `uv.lock`, clearing a high excessive memory and CPU use finding (GHSA-vvf4-9x63-8xvv)
 - Neutralize an unverified account when a Google or Apple sign in links to it instead of linking it, and bind email verification tokens to the address
 - Remove a user's passkeys on password reset
 - Pin that an email change through `update_profile` needs `current_password`
